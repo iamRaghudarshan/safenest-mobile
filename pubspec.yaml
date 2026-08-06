@@ -1,0 +1,46 @@
+name: safenest
+description: SafeNest for phones — your own records, on your own machine.
+publish_to: "none"
+version: 0.1.0+1
+
+environment:
+  sdk: ^3.12.2
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # --- talking to the customer's own server ---
+  http: ^1.2.2
+  # The token is a credential and must not sit in plain SharedPreferences, which
+  # is a world-readable XML file on a rooted Android. This uses the Keychain on
+  # iOS and EncryptedSharedPreferences on Android.
+  flutter_secure_storage: ^9.2.2
+  shared_preferences: ^2.3.2      # non-secret settings only
+
+  # --- the whole reason this app exists ---
+  # Real photo-library access: the thing a web page is structurally forbidden.
+  # No picker, no hundred-photo ceiling, and it can tell what has already been
+  # backed up so a second run costs a comparison rather than 20,000 uploads.
+  photo_manager: ^3.6.1
+  photo_manager_image_provider: ^2.1.4
+
+  # --- gallery, Google Photos shaped ---
+  photo_view: ^0.15.0             # pinch-zoom in the lightbox
+
+  # --- documents, Drive shaped ---
+  file_picker: ^8.1.4
+  open_filex: ^4.5.0
+  path_provider: ^2.1.5
+
+  provider: ^6.1.2
+  intl: ^0.19.0
+  cupertino_icons: ^1.0.8
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
