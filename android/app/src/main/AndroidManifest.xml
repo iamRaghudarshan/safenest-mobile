@@ -1,8 +1,29 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Talking to the owner's own computer. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- Reading the photo library. Android 13 split the old blanket storage
+         permission into per-type ones, so both are declared: READ_MEDIA_IMAGES
+         for 13 and later, and READ_EXTERNAL_STORAGE capped at 12 for older
+         phones. Declaring only one leaves the other half of the market unable
+         to back anything up, which is the whole feature. -->
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" />
+
+    <!-- Notably NOT requested: WRITE_EXTERNAL_STORAGE, location, contacts or
+         anything else. The app reads photos and sends them to one address. -->
+
+    <!-- networkSecurityConfig permits plain http to a home address only, never to
+         the internet. A computer at 192.168.1.5 has no certificate and cannot get
+         one; the app itself refuses http for any public address, in
+         Session.normaliseAddress. -->
     <application
-        android:label="safenest"
+        android:label="SafeNest"
         android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher">
+        android:icon="@mipmap/ic_launcher"
+        android:networkSecurityConfig="@xml/network_security_config">
         <activity
             android:name=".MainActivity"
             android:exported="true"

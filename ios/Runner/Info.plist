@@ -4,10 +4,44 @@
 <dict>
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
+
+	<!-- WHY THE APP NEEDS THE PHOTO LIBRARY, in the owner's words.
+
+	     iOS shows this sentence verbatim in the permission box, and it is the
+	     only explanation most people will ever read. "SafeNest needs access to
+	     your photos" says nothing; saying where the photos go — and that they go
+	     nowhere else — is the whole product.
+
+	     Without this key the app does not merely lack permission: it is killed
+	     the instant it asks. -->
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>So SafeNest can back up your photos to your own computer. They are copied straight to the machine you signed in to, and nowhere else.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>So SafeNest can save a photo back to this phone when you ask it to.</string>
+
+	<!-- Reaching your own computer on your own Wi-Fi. iOS 14 and later refuse to
+	     touch a local address until this is granted, and the refusal looks
+	     exactly like the computer being switched off — which is the wrong thing
+	     to go and check. -->
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>So this phone can reach the computer running SafeNest when they are on the same Wi-Fi, without going out to the internet at all.</string>
+
+	<!-- App Transport Security refuses plain http, which is right for the
+	     internet and wrong for a home network: a computer at 192.168.1.5 has no
+	     certificate and cannot get one. NSAllowsLocalNetworking permits http for
+	     private addresses ONLY. NSAllowsArbitraryLoads is deliberately NOT set —
+	     over the internet a sign-in must stay encrypted, and the app enforces the
+	     same rule itself in Session.normaliseAddress. -->
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
+
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>Safenest</string>
+	<string>SafeNest</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>

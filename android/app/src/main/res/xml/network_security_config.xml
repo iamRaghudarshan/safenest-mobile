@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Plain http is allowed to a home network address and nowhere else.
+
+  Android blocks cleartext by default, which is right for the internet and wrong
+  for a private network: the computer running SafeNest sits at something like
+  192.168.1.5 and has no certificate, cannot get one, and does not need one — the
+  traffic never leaves the house.
+
+  The lazy fix is cleartextTrafficPermitted="true" on the base config, which turns
+  it off everywhere and would let a sign-in cross the internet in the clear. These
+  are the private ranges only. Anything public still has to be https, and the app
+  enforces the same rule itself in Session.normaliseAddress rather than relying on
+  this file alone.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false" />
+
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">localhost</domain>
+        <domain includeSubdomains="false">10.0.2.2</domain>   <!-- the emulator's host -->
+        <domain includeSubdomains="true">local</domain>       <!-- .local, mDNS -->
+    </domain-config>
+
+    <!-- Literal private ranges. Android cannot express a CIDR block here, so the
+         common home-router prefixes are listed; 192.168.x.y covers almost every
+         household and 10.x is the usual alternative. -->
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">192.168.0.0</domain>
+        <domain includeSubdomains="true">192.168.1.0</domain>
+    </domain-config>
+</network-security-config>
