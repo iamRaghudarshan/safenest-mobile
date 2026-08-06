@@ -1,0 +1,162 @@
+# Ship an update without touching either machine.
+#
+# THE POINT
+# "Next time I should be able to send an app update directly, no transfer of the
+# code." This is that. Push a version bump; GitHub builds both halves and hands
+# them to Apple and to your own server. Nothing is copied to the Mac, nothing is
+# copied off it, and the Mac does not have to be switched on.
+#
+# It follows the same trigger as the desktop app's build-mac.yml, deliberately:
+# a bump to VERSION is the only moment a release is definitely wanted, and
+# relying on remembering to press a button is how the desktop product once
+# shipped a Windows half on the new version and a Mac half silently on the old.
+#
+# WHAT EACH HALF NEEDS
+#
+#   iOS  — an Apple Developer account (~$99/yr). There is no way round it: iOS
+#          refuses to install an app that Apple has not signed, and it refuses
+#          to let an app update itself. TestFlight is the delivery route, and
+#          customers get the update the way they get any other.
+#
+#   Android — nothing. The APK is attached to the release and can be downloaded
+#          straight from your own SafeNest, which fits the product better: the
+#          customer's records never involve a third party, so neither should the
+#          app that reads them.
+#
+# THE SECRETS, and why they are what they are
+# Only the iOS job needs any. They are Apple's, not ours, and none of them can
+# read a customer's records — this repository holds no licence signing key, no
+# vault key and no database credential, and nothing here should ever change that.
+#
+#   APPLE_ID                 the Apple ID that owns the developer account
+#   APPLE_APP_PASSWORD       an app-specific password from appleid.apple.com
+#   APPLE_TEAM_ID            from developer.apple.com -> Membership
+#   IOS_CERT_P12_BASE64      the distribution certificate, base64
+#   IOS_CERT_PASSWORD        its password
+#   IOS_PROFILE_BASE64       the provisioning profile, base64
+name: Build and release the phone app
+
+on:
+  push:
+    branches: [main]
+    paths: ["VERSION"]
+  workflow_dispatch:
+
+jobs:
+  android:
+    name: Android
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - run: flutter pub get
+      # Analysis gates the release rather than merely reporting on it. A build
+      # that ships with a known error is worse than one that never ships.
+      - run: flutter analyze
+      - run: flutter test
+
+      - name: Build the APK
+        run: flutter build apk --release --build-name=$(cat VERSION) --build-number=${{ github.run_number }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: safenest-android
+          path: build/app/outputs/flutter-apk/app-release.apk
+
+  ios:
+    name: iOS
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - run: flutter pub get
+      - run: flutter analyze
+      - run: flutter test
+
+      # Skipped rather than failed when the Apple secrets are absent, so the
+      # Android half still ships for someone who has not bought the account yet.
+      # A workflow that goes red for a thing you have decided not to do teaches
+      # people to ignore it going red.
+      - name: Is there an Apple account configured?
+        id: apple
+        run: echo "ready=${{ secrets.IOS_CERT_P12_BASE64 != '' }}" >> $GITHUB_OUTPUT
+
+      - name: Install the signing certificate
+        if: steps.apple.outputs.ready == 'true'
+        env:
+          CERT: ${{ secrets.IOS_CERT_P12_BASE64 }}
+          CERT_PASSWORD: ${{ secrets.IOS_CERT_PASSWORD }}
+          PROFILE: ${{ secrets.IOS_PROFILE_BASE64 }}
+        run: |
+          set -euo pipefail
+          echo "$CERT" | base64 --decode > /tmp/cert.p12
+          echo "$PROFILE" | base64 --decode > /tmp/profile.mobileprovision
+          # A throwaway keychain for this run. Importing into the login keychain
+          # of a shared runner would be leaving a certificate on someone else's
+          # machine.
+          security create-keychain -p runner build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p runner build.keychain
+          security import /tmp/cert.p12 -k build.keychain -P "$CERT_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k runner build.keychain
+          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
+          cp /tmp/profile.mobileprovision ~/Library/MobileDevice/Provisioning\ Profiles/
+          rm -f /tmp/cert.p12 /tmp/profile.mobileprovision
+
+      - name: Build the app
+        if: steps.apple.outputs.ready == 'true'
+        run: |
+          flutter build ipa --release \
+            --build-name=$(cat VERSION) \
+            --build-number=${{ github.run_number }} \
+            --export-options-plist=ios/ExportOptions.plist
+
+      - name: Send it to TestFlight
+        if: steps.apple.outputs.ready == 'true'
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
+          xcrun altool --upload-app -f build/ios/ipa/*.ipa -t ios \
+            -u "$APPLE_ID" -p "$APPLE_APP_PASSWORD"
+
+      - name: Say plainly that iOS was skipped
+        if: steps.apple.outputs.ready != 'true'
+        run: |
+          echo "::warning::No Apple Developer account is configured, so the iOS"
+          echo "::warning::half was not built. Android shipped. Add the IOS_*"
+          echo "::warning::and APPLE_* secrets to enable it."
+
+  publish:
+    name: Attach to a release
+    needs: [android]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: safenest-android
+          path: dist
+      - name: Tag and publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          V=$(cat VERSION)
+          gh release create "v$V" dist/app-release.apk \
+            --title "SafeNest for phones $V" \
+            --notes "Install on Android by downloading the APK. iOS arrives through TestFlight." \
+            || gh release upload "v$V" dist/app-release.apk --clobber
