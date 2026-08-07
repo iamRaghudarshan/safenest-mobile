@@ -103,21 +103,58 @@ jobs:
           set -euo pipefail
           echo "$CERT" | base64 --decode > /tmp/cert.p12
           echo "$PROFILE" | base64 --decode > /tmp/profile.mobileprovision
+
           # A throwaway keychain for this run. Importing into the login keychain
-          # of a shared runner would be leaving a certificate on someone else's
-          # machine.
+          # of a shared runner would leave a certificate on someone else's machine.
           security create-keychain -p runner build.keychain
-          security default-keychain -s build.keychain
           security unlock-keychain -p runner build.keychain
-          security import /tmp/cert.p12 -k build.keychain -P "$CERT_PASSWORD" -T /usr/bin/codesign
+
+          # THE SEARCH LIST IS THE PART THAT MATTERS, and leaving it out is what
+          # failed the first build. `default-keychain` alone is not enough:
+          # codesign looks through the SEARCH list, so a keychain that is default
+          # but unlisted holds a certificate nobody can find. The error says "no
+          # valid code signing certificates were found" and points you at Xcode
+          # signing settings — nowhere near the actual cause.
+          security list-keychains -d user -s build.keychain $(security list-keychains -d user | tr -d '"')
+
+          security default-keychain -s build.keychain
+
+          # Do not auto-lock. The default is a few minutes; an archive can take
+          # longer than that, and a keychain that locks halfway through fails
+          # with the same misleading "no certificates" message.
+          security set-keychain-settings -lut 21600 build.keychain
+
+          security import /tmp/cert.p12 -k build.keychain -P "$CERT_PASSWORD" \
+            -T /usr/bin/codesign -T /usr/bin/security
+          # Without this, codesign prompts for permission to use the key — and a
+          # runner has nobody to answer, so it hangs until the job times out.
           security set-key-partition-list -S apple-tool:,apple: -s -k runner build.keychain
+
+          # Named by UUID, which is how Xcode indexes them. A profile copied under
+          # its download name is often simply not seen.
+          UUID=$(security cms -D -i /tmp/profile.mobileprovision \
+                 | plutil -extract UUID raw -o - -)
           mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
-          cp /tmp/profile.mobileprovision ~/Library/MobileDevice/Provisioning\ Profiles/
+          cp /tmp/profile.mobileprovision \
+             ~/Library/MobileDevice/Provisioning\ Profiles/$UUID.mobileprovision
+          echo "installed profile $UUID"
+
+          # Proof it is actually visible, printed BEFORE the build. When this is
+          # empty the build fails minutes later blaming Xcode settings, and this
+          # line is the difference between diagnosing it and guessing.
+          security find-identity -v -p codesigning build.keychain
+
           rm -f /tmp/cert.p12 /tmp/profile.mobileprovision
 
       - name: Build the app
         if: steps.apple.outputs.ready == 'true'
+        env:
+          # Told explicitly rather than discovered. Without it Xcode tries to
+          # work the team out from a signed-in account, and a runner has none —
+          # which is the same failure as the keychain one and reads identically.
+          DEVELOPMENT_TEAM: ${{ secrets.APPLE_TEAM_ID }}
         run: |
+          set -euo pipefail
           flutter build ipa --release \
             --build-name=$(cat VERSION) \
             --build-number=${{ github.run_number }} \
