@@ -14,8 +14,12 @@ import '../modules.dart';
 import '../session.dart';
 
 class ModuleListScreen extends StatefulWidget {
-  const ModuleListScreen({super.key, required this.spec});
+  const ModuleListScreen({super.key, required this.spec, this.embedded = false});
   final ModuleSpec spec;
+
+  /// True when this IS a tab rather than a screen pushed on top of one — a tab
+  /// with a back arrow is a tab that looks broken.
+  final bool embedded;
 
   @override
   State<ModuleListScreen> createState() => _ModuleListScreenState();
@@ -102,7 +106,7 @@ class _ModuleListScreenState extends State<ModuleListScreen> {
   Widget build(BuildContext context) {
     final s = widget.spec;
     return Scaffold(
-      appBar: AppBar(title: Text(s.label)),
+      appBar: AppBar(title: Text(s.label), automaticallyImplyLeading: !widget.embedded),
       floatingActionButton: FloatingActionButton(
         onPressed: _add,
         child: const Icon(Icons.add),
