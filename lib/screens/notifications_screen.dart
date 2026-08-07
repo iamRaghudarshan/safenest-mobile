@@ -3,6 +3,12 @@
 /// Reads /api/notifications/inbox and marks things read. Push itself is not set
 /// up here: that needs a VAPID key exchange and a per-device subscription, and
 /// wiring half of it would leave a switch that looks like it works.
+///
+/// This was a ListTile list divided by hairlines, which is a desktop table —
+/// the same thing the record screens were pulled away from. It is cards now,
+/// with the kind of message carrying its own colour, because the bell is where
+/// a timed reminder arrives and "your card bill is due" and "a message from
+/// whoever supplied this" should not look identical.
 library;
 
 import 'package:flutter/material.dart';
@@ -11,9 +17,17 @@ import 'package:provider/provider.dart';
 import '../api.dart';
 import '../session.dart';
 import '../theme.dart';
+import '../widgets/brand_button.dart';
+import '../widgets/pill.dart';
+import '../widgets/skeleton.dart';
 
 class NotificationsScreen extends StatefulWidget {
-  const NotificationsScreen({super.key});
+  const NotificationsScreen({super.key, this.initialRows});
+
+  /// For tests, so this screen can be laid out without a server — the same
+  /// device the Dashboard and the record lists use.
+  final List<Map<String, dynamic>>? initialRows;
+
   @override
   State<NotificationsScreen> createState() => _NotificationsScreenState();
 }
@@ -26,6 +40,11 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   @override
   void initState() {
     super.initState();
+    if (widget.initialRows != null) {
+      _rows = widget.initialRows!;
+      _loading = false;
+      return;
+    }
     _load();
   }
 
@@ -57,8 +76,55 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     }
   }
 
+  /// What kind of message this is, in the colour that module already owns.
+  /// `kind` is set by push.notify() on the server — 'reminder' for a timed
+  /// reminder, 'digest' for the daily summary, 'broadcast' for a message from
+  /// the publisher, 'system' for everything the app says about itself.
+  ({Color colour, IconData icon, String label}) _kind(String kind) {
+    switch (kind) {
+      case 'reminder':
+        return (
+          colour: kModuleColours['reminders']!,
+          icon: Icons.notifications_active_outlined,
+          label: 'Reminder'
+        );
+      case 'digest':
+        return (
+          colour: kBrand,
+          icon: Icons.wb_sunny_outlined,
+          label: 'Daily summary'
+        );
+      case 'broadcast':
+        return (colour: kWarn, icon: Icons.campaign_outlined, label: 'Message');
+      case 'export':
+        return (
+          colour: kOk,
+          icon: Icons.download_outlined,
+          label: 'Export'
+        );
+      default:
+        return (colour: kBrand, icon: Icons.info_outline, label: 'SafeNest');
+    }
+  }
+
+  /// "2h ago", not "2026-08-07T18:30:00". The raw column was going straight to
+  /// the screen, which is a timestamp for a database rather than for a person.
+  String _when(dynamic raw) {
+    final t = DateTime.tryParse('${raw ?? ''}');
+    if (t == null) return '';
+    final d = DateTime.now().difference(t);
+    if (d.inMinutes < 1) return 'Just now';
+    if (d.inMinutes < 60) return '${d.inMinutes}m ago';
+    if (d.inHours < 24) return '${d.inHours}h ago';
+    if (d.inDays == 1) return 'Yesterday';
+    if (d.inDays < 7) return '${d.inDays}d ago';
+    return '${t.day.toString().padLeft(2, '0')}-'
+        '${t.month.toString().padLeft(2, '0')}-${t.year}';
+  }
+
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     final unread = _rows.where((r) => (r['is_read'] ?? 0) == 0).length;
 
     return Scaffold(
@@ -70,65 +136,201 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         ],
       ),
       body: _loading
-          ? const Center(child: CircularProgressIndicator())
+          ? const SkeletonList()
           : _error != null
-              ? Center(
-                  child: Padding(
-                    padding: const EdgeInsets.all(32),
-                    child: Column(mainAxisSize: MainAxisSize.min, children: [
-                      Text(_error!, textAlign: TextAlign.center),
-                      const SizedBox(height: 16),
-                      FilledButton.tonal(
-                          onPressed: _load, child: const Text('Try again')),
-                    ]),
-                  ),
-                )
+              ? _Failed(message: _error!, onRetry: _load)
               : _rows.isEmpty
-                  ? const Center(
-                      child: Padding(
-                        padding: EdgeInsets.all(36),
-                        child: Column(mainAxisSize: MainAxisSize.min, children: [
-                          Icon(Icons.notifications_none, size: 44),
-                          SizedBox(height: 12),
-                          Text('Nothing here'),
-                          SizedBox(height: 6),
-                          Text(
-                            'Reminders that come due, and messages from whoever '
-                            'supplied SafeNest, appear here.',
-                            textAlign: TextAlign.center,
-                            style: TextStyle(fontSize: 12),
-                          ),
-                        ]),
-                      ),
-                    )
+                  ? const _NothingYet()
                   : RefreshIndicator(
                       onRefresh: _load,
-                      child: ListView.separated(
+                      child: ListView.builder(
+                        padding: const EdgeInsets.fromLTRB(14, 4, 14, 24),
                         itemCount: _rows.length,
-                        separatorBuilder: (_, i) => const Divider(height: 1),
                         itemBuilder: (ctx, i) {
                           final n = _rows[i];
                           final read = (n['is_read'] ?? 0) == 1;
-                          return ListTile(
-                            leading: Icon(
-                              read
-                                  ? Icons.notifications_none
-                                  : Icons.notifications_active,
-                              color: read
-                                  ? Theme.of(ctx).colorScheme.outline
-                                  : kBrand,
+                          final k = _kind('${n['kind'] ?? ''}');
+                          final when = _when(n['created_at']);
+
+                          return Padding(
+                            padding: const EdgeInsets.only(bottom: 10),
+                            child: BrandCard(
+                              padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+                              child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Row(children: [
+                                      Container(
+                                        width: 42,
+                                        height: 42,
+                                        decoration: BoxDecoration(
+                                          // An already-read message steps back
+                                          // rather than disappearing: the colour
+                                          // is what says "this is new", so a read
+                                          // one keeps the shape and loses the
+                                          // shout.
+                                          color: read
+                                              ? k.colour.withValues(alpha: 0.16)
+                                              : k.colour,
+                                          borderRadius: BorderRadius.circular(13),
+                                          boxShadow: read
+                                              ? null
+                                              : [
+                                                  BoxShadow(
+                                                    color: k.colour
+                                                        .withValues(alpha: 0.32),
+                                                    blurRadius: 10,
+                                                    offset: const Offset(0, 4),
+                                                  ),
+                                                ],
+                                        ),
+                                        child: Icon(k.icon,
+                                            size: 20,
+                                            color: read ? k.colour : Colors.white),
+                                      ),
+                                      const SizedBox(width: 12),
+                                      Expanded(
+                                        child: Column(
+                                            mainAxisSize: MainAxisSize.min,
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
+                                            children: [
+                                              Text('${n['title'] ?? ''}',
+                                                  maxLines: 2,
+                                                  overflow: TextOverflow.ellipsis,
+                                                  style: TextStyle(
+                                                    fontSize: 14.5,
+                                                    fontWeight: read
+                                                        ? FontWeight.w600
+                                                        : FontWeight.w800,
+                                                  )),
+                                              if ('${n['body'] ?? ''}'
+                                                  .isNotEmpty) ...[
+                                                const SizedBox(height: 3),
+                                                Text('${n['body']}',
+                                                    maxLines: 3,
+                                                    overflow:
+                                                        TextOverflow.ellipsis,
+                                                    style: theme
+                                                        .textTheme.bodySmall),
+                                              ],
+                                            ]),
+                                      ),
+                                    ]),
+                                    const SizedBox(height: 10),
+                                    Padding(
+                                      padding: const EdgeInsets.only(left: 54),
+                                      child: Wrap(spacing: 6, runSpacing: 6, children: [
+                                        Pill(k.label, colour: k.colour),
+                                        if (!read)
+                                          const Pill('New', tone: PillTone.danger),
+                                        if (when.isNotEmpty)
+                                          Pill(when,
+                                              tone: PillTone.muted,
+                                              icon: Icons.schedule),
+                                      ]),
+                                    ),
+                                  ]),
                             ),
-                            title: Text('${n['title'] ?? ''}',
-                                style: TextStyle(
-                                    fontWeight:
-                                        read ? FontWeight.w400 : FontWeight.w700)),
-                            subtitle: Text('${n['body'] ?? ''}'),
-                            trailing: Text('${n['created_at'] ?? ''}',
-                                style: Theme.of(ctx).textTheme.labelSmall),
                           );
                         },
                       ),
                     ),
     );
   }
+}
+
+class _NothingYet extends StatelessWidget {
+  const _NothingYet();
+
+  @override
+  Widget build(BuildContext context) => ListView(children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(22, 40, 22, 20),
+          child: Column(children: [
+            Container(
+              width: 66,
+              height: 66,
+              decoration: BoxDecoration(
+                color: kBrand,
+                borderRadius: BorderRadius.circular(22),
+                boxShadow: [
+                  BoxShadow(
+                    color: kBrand.withValues(alpha: 0.38),
+                    blurRadius: 28,
+                    offset: const Offset(0, 12),
+                  ),
+                ],
+              ),
+              child: const Icon(Icons.notifications_none,
+                  size: 30, color: Colors.white),
+            ),
+            const SizedBox(height: 16),
+            const Text('All caught up',
+                style: TextStyle(
+                    fontSize: 19,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: -0.38)),
+            const SizedBox(height: 8),
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 300),
+              child: Text(
+                  'Reminders that come due, and messages from whoever supplied '
+                  'SafeNest, arrive here.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                      fontSize: 13.5,
+                      height: 1.55,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant)),
+            ),
+          ]),
+        )
+      ]);
+}
+
+class _Failed extends StatelessWidget {
+  const _Failed({required this.message, required this.onRetry});
+  final String message;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) => ListView(children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(22, 40, 22, 20),
+          child: Column(children: [
+            Container(
+              width: 66,
+              height: 66,
+              decoration: BoxDecoration(
+                color: kWarn.withValues(alpha: 0.18),
+                borderRadius: BorderRadius.circular(22),
+              ),
+              child: const Center(
+                  child: Text('📡', style: TextStyle(fontSize: 30))),
+            ),
+            const SizedBox(height: 16),
+            const Text('Can’t load right now',
+                style: TextStyle(
+                    fontSize: 19,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: -0.38)),
+            const SizedBox(height: 8),
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 300),
+              child: Text(message,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                      fontSize: 13.5,
+                      height: 1.55,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant)),
+            ),
+            const SizedBox(height: 20),
+            ConstrainedBox(
+              constraints: const BoxConstraints(minWidth: 190),
+              child: BrandButton(label: 'Try again', onPressed: onRetry),
+            ),
+          ]),
+        )
+      ]);
 }

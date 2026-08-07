@@ -25,6 +25,10 @@ import 'package:provider/provider.dart';
 
 import '../api.dart';
 import '../session.dart';
+import '../theme.dart';
+import '../widgets/brand_button.dart';
+import '../widgets/pill.dart';
+import '../widgets/skeleton.dart';
 
 class VaultScreen extends StatefulWidget {
   const VaultScreen({super.key});
@@ -122,54 +126,87 @@ class _VaultScreenState extends State<VaultScreen> {
           ),
           Expanded(
             child: _loading
-                ? const Center(child: CircularProgressIndicator())
+                ? const SkeletonList()
                 : _error != null
-                    ? Center(
-                        child: Padding(
-                          padding: const EdgeInsets.all(32),
-                          child: Column(mainAxisSize: MainAxisSize.min, children: [
-                            Text(_error!, textAlign: TextAlign.center),
-                            const SizedBox(height: 16),
-                            FilledButton.tonal(
-                                onPressed: _load, child: const Text('Try again')),
-                          ]),
-                        ),
-                      )
+                    ? _VaultProblem(message: _error!, onRetry: _load)
                     : shown.isEmpty
-                        ? const Center(
-                            child: Padding(
-                              padding: EdgeInsets.all(36),
-                              child: Column(mainAxisSize: MainAxisSize.min, children: [
-                                Icon(Icons.lock_outline, size: 44),
-                                SizedBox(height: 14),
-                                Text('Nothing in the vault yet'),
-                                SizedBox(height: 8),
-                                Text(
-                                  'Entries are encrypted on your computer. This '
-                                  'app shows them one at a time and keeps none.',
-                                  textAlign: TextAlign.center,
-                                  style: TextStyle(fontSize: 12),
-                                ),
-                              ]),
-                            ),
-                          )
+                        ? _VaultEmpty(filtered: _filter.isNotEmpty)
                         : RefreshIndicator(
                             onRefresh: _load,
-                            child: ListView.separated(
+                            child: ListView.builder(
+                              padding:
+                                  const EdgeInsets.fromLTRB(14, 4, 14, 24),
                               itemCount: shown.length,
-                              separatorBuilder: (_, i) => const Divider(height: 1),
                               itemBuilder: (ctx, i) {
                                 final v = shown[i];
-                                return ListTile(
-                                  leading: const CircleAvatar(
-                                      child: Icon(Icons.key_outlined, size: 18)),
-                                  title: Text('${v['title'] ?? 'Entry'}'),
-                                  subtitle: '${v['username'] ?? ''}'.isEmpty
-                                      ? null
-                                      : Text('${v['username']}'),
-                                  trailing: TextButton(
-                                    onPressed: () => _reveal(v),
-                                    child: const Text('Reveal'),
+                                final cat = '${v['category'] ?? ''}';
+                                return Padding(
+                                  padding: const EdgeInsets.only(bottom: 10),
+                                  child: BrandCard(
+                                    padding: const EdgeInsets.fromLTRB(
+                                        14, 12, 10, 12),
+                                    child: Row(children: [
+                                      Container(
+                                        width: 44,
+                                        height: 44,
+                                        decoration: BoxDecoration(
+                                          color: kModuleColours['vault'],
+                                          borderRadius:
+                                              BorderRadius.circular(13),
+                                          boxShadow: [
+                                            BoxShadow(
+                                              color: kModuleColours['vault']!
+                                                  .withValues(alpha: 0.32),
+                                              blurRadius: 10,
+                                              offset: const Offset(0, 4),
+                                            ),
+                                          ],
+                                        ),
+                                        child: const Icon(Icons.key_outlined,
+                                            size: 22, color: Colors.white),
+                                      ),
+                                      const SizedBox(width: 12),
+                                      Expanded(
+                                        child: Column(
+                                            mainAxisSize: MainAxisSize.min,
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
+                                            children: [
+                                              Text('${v['title'] ?? 'Entry'}',
+                                                  maxLines: 1,
+                                                  overflow:
+                                                      TextOverflow.ellipsis,
+                                                  style: const TextStyle(
+                                                      fontSize: 15,
+                                                      fontWeight:
+                                                          FontWeight.w700)),
+                                              if ('${v['username'] ?? ''}'
+                                                  .isNotEmpty) ...[
+                                                const SizedBox(height: 2),
+                                                Text('${v['username']}',
+                                                    maxLines: 1,
+                                                    overflow:
+                                                        TextOverflow.ellipsis,
+                                                    style: Theme.of(ctx)
+                                                        .textTheme
+                                                        .bodySmall),
+                                              ],
+                                              if (cat.isNotEmpty) ...[
+                                                const SizedBox(height: 7),
+                                                Pill(cat,
+                                                    colour: kModuleColours[
+                                                        'vault']),
+                                              ],
+                                            ]),
+                                      ),
+                                      // Still a button, still one entry at a
+                                      // time, still nothing kept. The colour
+                                      // changed; what it does did not.
+                                      TextButton(
+                                        onPressed: () => _reveal(v),
+                                        child: const Text('Reveal'),
+                                      ),
+                                    ]),
                                   ),
                                 );
                               },
@@ -276,4 +313,119 @@ class _RevealSheetState extends State<_RevealSheet> {
       ),
     );
   }
+}
+
+/// The vault's empty state, which has a job the other modules' do not: say what
+/// this app does with a secret. "Nothing here yet" is fine for expenses; for the
+/// place someone keeps their passwords, the reassurance IS the content.
+class _VaultEmpty extends StatelessWidget {
+  const _VaultEmpty({required this.filtered});
+  final bool filtered;
+
+  @override
+  Widget build(BuildContext context) => ListView(children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(22, 40, 22, 20),
+          child: Column(children: [
+            Container(
+              width: 66,
+              height: 66,
+              decoration: BoxDecoration(
+                color: kModuleColours['vault'],
+                borderRadius: BorderRadius.circular(22),
+                boxShadow: [
+                  BoxShadow(
+                    color: kModuleColours['vault']!.withValues(alpha: 0.38),
+                    blurRadius: 28,
+                    offset: const Offset(0, 12),
+                  ),
+                ],
+              ),
+              child: const Icon(Icons.lock_outline, size: 30, color: Colors.white),
+            ),
+            const SizedBox(height: 16),
+            Text(filtered ? 'Nothing matches' : 'Nothing in the vault yet',
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                    fontSize: 19,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: -0.38)),
+            const SizedBox(height: 8),
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 300),
+              child: Text(
+                  filtered
+                      ? 'Try a different search'
+                      : 'Entries are encrypted on your own computer. This app '
+                          'shows them one at a time and keeps none.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                      fontSize: 13.5,
+                      height: 1.55,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant)),
+            ),
+          ]),
+        )
+      ]);
+}
+
+/// A vault that will not load is the most alarming version of this screen, so
+/// it says plainly that nothing has been lost and nothing has been exposed.
+class _VaultProblem extends StatelessWidget {
+  const _VaultProblem({required this.message, required this.onRetry});
+  final String message;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) => ListView(children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(22, 40, 22, 20),
+          child: Column(children: [
+            Container(
+              width: 66,
+              height: 66,
+              decoration: BoxDecoration(
+                color: kWarn.withValues(alpha: 0.18),
+                borderRadius: BorderRadius.circular(22),
+              ),
+              child: const Center(
+                  child: Text('📡', style: TextStyle(fontSize: 30))),
+            ),
+            const SizedBox(height: 16),
+            const Text('Can’t open the vault right now',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                    fontSize: 19,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: -0.38)),
+            const SizedBox(height: 8),
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 300),
+              child: Text(message,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                      fontSize: 13.5,
+                      height: 1.55,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant)),
+            ),
+            const SizedBox(height: 10),
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 300),
+              child: Text(
+                  'Your entries are safe and still encrypted on your computer. '
+                  'Nothing was sent anywhere.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                      fontSize: 12.5,
+                      height: 1.5,
+                      color: Theme.of(context).colorScheme.outline)),
+            ),
+            const SizedBox(height: 20),
+            ConstrainedBox(
+              constraints: const BoxConstraints(minWidth: 190),
+              child: BrandButton(label: 'Try again', onPressed: onRetry),
+            ),
+          ]),
+        )
+      ]);
 }

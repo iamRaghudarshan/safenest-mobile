@@ -25,6 +25,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
 
 import 'package:safenest/screens/dashboard_screen.dart';
+import 'package:safenest/screens/notifications_screen.dart';
 import 'package:safenest/session.dart';
 import 'package:safenest/theme.dart';
 import 'package:safenest/widgets/brand_button.dart';
@@ -144,6 +145,74 @@ void main() {
     final top = tester.getTopLeft(greeting.first).dy;
     expect(top, greaterThanOrEqualTo(59.0),
         reason: 'Home content is drawn under the status bar / notch');
+  });
+
+  testWidgets('The notification inbox fits, read and unread, on an iPhone SE',
+      (tester) async {
+    tester.view.physicalSize = const Size(375, 667);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+
+    // Long bodies are the realistic case — a daily digest lists everything due,
+    // and that is the message most likely to burst a row.
+    await tester.pumpWidget(_wrap(NotificationsScreen(
+      initialRows: [
+        {
+          'id': 1,
+          'kind': 'reminder',
+          'title': 'Take the tablets',
+          'body': 'Due now — 6:30 pm',
+          'is_read': 0,
+          'created_at': DateTime.now()
+              .subtract(const Duration(minutes: 20))
+              .toIso8601String(),
+        },
+        {
+          'id': 2,
+          'kind': 'digest',
+          'title': '3 overdue · 2 due today',
+          'body': 'HDFC Regalia credit card bill ••4242, Home loan instalment, '
+              'Renew car insurance before it lapses, Pay the electricity bill',
+          'is_read': 1,
+          'created_at': DateTime.now()
+              .subtract(const Duration(days: 2))
+              .toIso8601String(),
+        },
+        {
+          'id': 3,
+          'kind': 'broadcast',
+          'title': 'SafeNest 3.2 is available',
+          'body': 'Reminders can now be set for a particular time of day.',
+          'is_read': 0,
+          'created_at': DateTime.now()
+              .subtract(const Duration(hours: 5))
+              .toIso8601String(),
+        },
+      ],
+    )));
+    await tester.pump();
+
+    expect(tester.takeException(), isNull, reason: 'the inbox overflowed');
+    // Unread is said in words, not only in weight — a bold title is invisible
+    // to anyone who cannot compare it with the one below it.
+    expect(find.text('New'), findsNWidgets(2));
+    expect(find.text('Reminder'), findsOneWidget);
+    // A timestamp a person can read, not the raw column.
+    expect(find.text('20m ago'), findsOneWidget);
+    expect(find.text('Yesterday'), findsNothing);
+    expect(find.text('2d ago'), findsOneWidget);
+  });
+
+  testWidgets('An empty inbox says so warmly rather than looking broken',
+      (tester) async {
+    tester.view.physicalSize = const Size(375, 667);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+
+    await tester.pumpWidget(_wrap(const NotificationsScreen(initialRows: [])));
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+    expect(find.text('All caught up'), findsOneWidget);
   });
 
   testWidgets('The segmented control fits five labels on the narrowest phone',
