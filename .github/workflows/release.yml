@@ -41,10 +41,22 @@ on:
     branches: [main]
     paths: ["VERSION"]
   workflow_dispatch:
+    inputs:
+      android:
+        description: "Also build Android (off by default — it costs minutes and has never yet succeeded)"
+        type: boolean
+        default: false
 
 jobs:
   android:
     name: Android
+    # OFF unless asked for. It has failed on every run so far, and every one of
+    # those still consumed the account's Actions minutes — which is part of why
+    # they ran out mid-afternoon and the iOS builds stopped with them. A job that
+    # cannot succeed should not be spending the budget the working one needs.
+    #
+    # Turn it back on with the workflow_dispatch input once it is actually fixed.
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.android }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -81,6 +93,9 @@ jobs:
           channel: stable
           cache: true
 
+      # analyze and test BEFORE anything expensive. On macOS a minute bills as
+      # ten, so failing fast on a compile error costs a tenth of failing slowly
+      # after an archive.
       - run: flutter pub get
       - run: flutter analyze
       - run: flutter test
@@ -179,6 +194,8 @@ jobs:
   publish:
     name: Attach to a release
     needs: [android]
+    # Only when Android actually ran and produced something to attach.
+    if: ${{ needs.android.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
