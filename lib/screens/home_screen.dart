@@ -15,7 +15,7 @@ import 'package:provider/provider.dart';
 
 import '../session.dart';
 import '../theme.dart';
-import 'gallery_screen.dart';
+import 'photos_home.dart';
 import 'backup_screen.dart';
 import 'records_screen.dart';
 
@@ -33,7 +33,7 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     final pages = [
-      const GalleryScreen(),
+      const PhotosHome(),
       const _NotYet(
         icon: Icons.folder_outlined,
         title: 'Documents',

@@ -59,12 +59,20 @@ class DayGroup {
 }
 
 class GalleryScreen extends StatefulWidget {
-  const GalleryScreen({super.key});
+  const GalleryScreen({super.key, this.embedded = false});
+
+  /// Inside PhotosHome's tab view the section already has an AppBar and tabs, so
+  /// the grid must not draw a second one on top of them.
+  final bool embedded;
   @override
   State<GalleryScreen> createState() => _GalleryScreenState();
 }
 
-class _GalleryScreenState extends State<GalleryScreen> {
+class _GalleryScreenState extends State<GalleryScreen>
+    with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
+
   static const _page = 150;
 
   final _scroll = ScrollController();
@@ -174,6 +182,7 @@ class _GalleryScreenState extends State<GalleryScreen> {
 
   @override
   Widget build(BuildContext context) {
+    super.build(context);   // required by AutomaticKeepAliveClientMixin
     final groups = _grouped;
     return Scaffold(
       body: RefreshIndicator(
@@ -181,16 +190,10 @@ class _GalleryScreenState extends State<GalleryScreen> {
         child: CustomScrollView(
           controller: _scroll,
           slivers: [
-            SliverAppBar.large(
-              title: const Text('Photos'),
-              actions: [
-                IconButton(
-                  icon: const Icon(Icons.cloud_upload_outlined),
-                  tooltip: 'Back up this phone',
-                  onPressed: () => Navigator.of(context).pushNamed('/backup'),
-                ),
-              ],
-            ),
+            if (!widget.embedded)
+              SliverAppBar.large(
+                title: const Text('Photos'),
+              ),
             SliverToBoxAdapter(
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(14, 0, 14, 4),
