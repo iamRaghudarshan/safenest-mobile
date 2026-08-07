@@ -19,6 +19,25 @@
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>So SafeNest can save a photo back to this phone when you ask it to.</string>
 
+	<!-- REQUIRED EVEN THOUGH THIS APP DOES NOT OPEN THE CAMERA ITSELF.
+	     Apple rejected build 4 with ITMS-90683 for the want of this key: the file
+	     picker used by Documents references camera APIs, and Apple requires a
+	     purpose string for any API the binary can reach, not merely the ones it
+	     calls. The rejection arrives by email after "upload succeeded", so the
+	     build simply never appears in TestFlight and nothing on screen says why.
+
+	     Written as a real reason rather than filler, because iOS shows this
+	     sentence verbatim if the picker is ever used to take a photo. -->
+	<key>NSCameraUsageDescription</key>
+	<string>So you can photograph a bill or a document and file it straight into SafeNest on your own computer.</string>
+
+	<!-- The same rule, same library. It offers video capture, so the microphone
+	     API is reachable and the string is required — again regardless of whether
+	     this app ever asks for it. Better to declare it honestly now than to be
+	     rejected a second time for the other half of the same picker. -->
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Only if you record a video while adding a document. SafeNest never listens otherwise.</string>
+
 	<!-- Reaching your own computer on your own Wi-Fi. iOS 14 and later refuse to
 	     touch a local address until this is granted, and the refusal looks
 	     exactly like the computer being switched off — which is the wrong thing

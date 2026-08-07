@@ -2,10 +2,13 @@
 ///
 /// WHAT A PHONE IS ACTUALLY BETTER AT
 /// Photographing a bill and having it filed. The computer is better for reading
-/// and organising; the phone is where the piece of paper is. So the camera is
-/// the primary action here, not an afterthought behind a menu — and the server
-/// reads the text off it (OCR) without being asked, which is what makes a
-/// photographed receipt findable later instead of merely stored.
+/// and organising; the phone is where the piece of paper is. The server reads
+/// the text off whatever arrives (OCR) without being asked, which is what makes
+/// a photographed receipt findable later rather than merely stored.
+///
+/// Adding goes through the system file picker, which offers the camera among its
+/// choices. A dedicated "photograph a document" button — straight to the camera,
+/// no menu — is not built yet and would be the obvious next thing here.
 ///
 /// GRID OR LIST, like Drive, because the two answer different questions: a grid
 /// to recognise a document by its shape, a list to compare dates and sizes.
