@@ -36,10 +36,18 @@
 #   IOS_PROFILE_BASE64       the provisioning profile, base64
 name: Build and release the phone app
 
+# MANUAL ONLY. Nothing here builds by itself.
+#
+# It used to run on any push that touched VERSION, which meant a version bump
+# — something done as part of writing code, not as a decision to ship — sent a
+# build to Apple and put it in front of testers. That is the wrong default for
+# this repo: a release should be a thing somebody chooses, and the owner asked
+# for exactly that after four builds went out in an afternoon without being
+# asked for.
+#
+# To release: Actions → "Build and release the phone app" → Run workflow. The
+# version comes from the VERSION file as before.
 on:
-  push:
-    branches: [main]
-    paths: ["VERSION"]
   workflow_dispatch:
     inputs:
       android:

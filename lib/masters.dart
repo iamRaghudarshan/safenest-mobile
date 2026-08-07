@@ -63,38 +63,76 @@ class MasterItem {
   }
 }
 
-/// The four types the server defines, with the field each one edits. Mirrors
-/// `masters.py::MASTER_TYPES` — a type this does not know about is simply not
-/// offered rather than guessed at.
+/// A LIST, as opposed to a value in one.
+///
+/// This used to be a `const` table of four, mirroring a dict on the server. Both
+/// are now rows: a person can add lists of their own — insurers, landlords,
+/// payment methods — so a fixed client-side list would show four of however many
+/// they have, and the new ones would be invisible on the phone.
 class MasterType {
-  const MasterType(this.type, this.label, this.field, this.icon, this.blurb);
+  const MasterType({
+    required this.id,
+    required this.type,
+    required this.label,
+    this.field = 'emoji',
+    this.icon,
+    this.isBuiltin = false,
+    this.count = 0,
+  });
+
+  final int id;
+
+  /// The identity. Never editable, for a custom list as much as a built-in:
+  /// every value points at its list through this, and the app's own forms name
+  /// `expense_category` and `bank` in code.
   final String type;
   final String label;
 
-  /// 'emoji' or 'color' — which extra the type carries. Banks have a brand
-  /// colour; categories have a glyph. Offering both for both would invite
-  /// setting one the server will drop.
+  /// 'emoji' or 'color' — which extra this list's values carry. Banks have a
+  /// brand colour; categories have a glyph. Offering both would invite setting
+  /// one the server drops.
   final String field;
-  final IconData icon;
-  final String blurb;
-}
 
-const kMasterTypes = <MasterType>[
-  MasterType('expense_category', 'Expense categories', 'emoji',
-      Icons.receipt_long_outlined, 'What you file a transaction under'),
-  MasterType('bank', 'Banks', 'color', Icons.account_balance_outlined,
-      'Card issuers and lenders, with their colours'),
-  MasterType('document_category', 'Document categories', 'emoji',
-      Icons.folder_outlined, 'How scanned paperwork is filed'),
-  MasterType('vault_category', 'Vault categories', 'emoji', Icons.lock_outline,
-      'How saved passwords are grouped'),
-];
+  /// The emoji shown for the list itself, if its owner picked one.
+  final String? icon;
 
-MasterType? masterTypeOf(String type) {
-  for (final t in kMasterTypes) {
-    if (t.type == type) return t;
-  }
-  return null;
+  /// One of the four the product itself reads. Renameable, not removable.
+  final bool isBuiltin;
+  final int count;
+
+  static MasterType fromJson(Map<String, dynamic> j) => MasterType(
+        id: (j['id'] as num).toInt(),
+        type: '${j['type'] ?? ''}',
+        label: '${j['label'] ?? ''}',
+        field: '${j['field'] ?? 'emoji'}',
+        icon: '${j['icon'] ?? ''}'.isEmpty ? null : '${j['icon']}',
+        isBuiltin: (j['is_builtin'] ?? 0) == 1,
+        count: (j['count'] as num?)?.toInt() ?? 0,
+      );
+
+  bool get usesEmoji => field != 'color';
+
+  /// A glyph for the four the product ships with, so they look like the module
+  /// they belong to rather than all sharing one generic tag. A list somebody
+  /// added gets the generic one unless they chose an emoji for it.
+  IconData get fallbackIcon => switch (type) {
+        'expense_category' => Icons.receipt_long_outlined,
+        'bank' => Icons.account_balance_outlined,
+        'document_category' => Icons.folder_outlined,
+        'vault_category' => Icons.lock_outline,
+        _ => Icons.label_outline,
+      };
+
+  /// Said only for the built-ins, because only for those does the app know what
+  /// the list is FOR. Making something up for a list called "Landlords" would
+  /// be the app explaining the person's own data back to them, wrongly.
+  String get blurb => switch (type) {
+        'expense_category' => 'What you file a transaction under',
+        'bank' => 'Card issuers and lenders, with their colours',
+        'document_category' => 'How scanned paperwork is filed',
+        'vault_category' => 'How saved passwords are grouped',
+        _ => count == 1 ? '1 entry' : '$count entries',
+      };
 }
 
 /// One in-memory copy per type for the life of the app run.
@@ -132,6 +170,20 @@ class MasterCache {
     ];
     _cache[key] = items;
     return items;
+  }
+
+  /// Every list this person has — the four built-ins plus any of their own.
+  ///
+  /// Not cached. It is read when the manage screen opens and after every change
+  /// to it, and a stale one here would show a list somebody just deleted or hide
+  /// one they just made — which on the screen whose whole job is editing them is
+  /// the one place a cache cannot pay for itself.
+  Future<List<MasterType>> lists() async {
+    final d = await apiOf().get('/api/masters/types');
+    final raw = d is Map ? (d['types'] as List? ?? const []) : const [];
+    return [
+      for (final e in raw) MasterType.fromJson(Map<String, dynamic>.from(e as Map))
+    ];
   }
 
   /// After any edit. Both variants of a type go, because activeOnly=true is a

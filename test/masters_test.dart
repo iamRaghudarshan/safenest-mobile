@@ -75,19 +75,43 @@ void main() {
   });
 
   test('the four types match the server, and each carries exactly one extra', () {
-    // masters.py::MASTER_TYPES — a type invented here would render a picker for
-    // a list the API returns 404 for.
-    expect(kMasterTypes.map((t) => t.type).toList(), [
-      'expense_category',
-      'bank',
-      'document_category',
-      'vault_category',
-    ]);
-    expect(masterTypeOf('bank')!.field, 'color');
-    expect(masterTypeOf('expense_category')!.field, 'emoji');
-    expect(masterTypeOf('vault_category')!.field, 'emoji');
-    expect(masterTypeOf('document_category')!.field, 'emoji');
-    expect(masterTypeOf('not_a_type'), isNull);
+    // The client used to carry a `const` table of four mirroring a dict on the
+    // server. Lists are user-definable now, so a fixed table here would show
+    // four of however many somebody has and hide every one they added. What is
+    // left to pin is that a row round-trips correctly.
+    final t = MasterType.fromJson(const {
+      'id': 3,
+      'type': 'expense_category',
+      'label': 'Expense categories',
+      'field': 'emoji',
+      'icon': null,
+      'is_builtin': 1,
+      'sort_order': 2,
+      'count': 9,
+    });
+    expect(t.isBuiltin, isTrue);
+    expect(t.count, 9);
+    expect(t.icon, isNull);
+    expect(t.usesEmoji, isTrue);
+    expect(t.fallbackIcon, Icons.receipt_long_outlined);
+
+    const bank = MasterType(
+        id: 2, type: 'bank', label: 'Banks', field: 'color', isBuiltin: true);
+    expect(bank.usesEmoji, isFalse, reason: 'banks carry a colour, not a glyph');
+    expect(bank.blurb, contains('colours'));
+  });
+
+  test('a list somebody added describes itself by size, not by guesswork', () {
+    // The app knows what `expense_category` is FOR. It knows nothing about a
+    // list called "Landlords", and inventing a description would be the app
+    // explaining a person's own data back to them, wrongly.
+    const one = MasterType(id: 9, type: 'landlords', label: 'Landlords', count: 1);
+    const many = MasterType(id: 9, type: 'landlords', label: 'Landlords', count: 4);
+    expect(one.blurb, '1 entry');
+    expect(many.blurb, '4 entries');
+    expect(many.fallbackIcon, Icons.label_outline);
+    expect(many.usesEmoji, isTrue, reason: 'emoji is the default for a new list');
+    expect(many.isBuiltin, isFalse);
   });
 
   testWidgets('the picker saves the LABEL, exactly as the master carries it',
@@ -235,15 +259,38 @@ void main() {
       create: (_) => Session(),
       child: MaterialApp(
         theme: buildTheme(const Brand(), Brightness.light),
-        home: const MastersScreen(),
+        home: const MastersScreen(initialLists: [
+          MasterType(
+              id: 1,
+              type: 'expense_category',
+              label: 'Expense categories',
+              isBuiltin: true,
+              count: 9),
+          MasterType(
+              id: 2,
+              type: 'bank',
+              label: 'Banks',
+              field: 'color',
+              isBuiltin: true,
+              count: 9),
+          MasterType(id: 7, type: 'insurers', label: 'Insurers', count: 3),
+        ]),
       ),
     ));
     await tester.pump();
 
     expect(tester.takeException(), isNull);
-    for (final t in kMasterTypes) {
-      expect(find.text(t.label), findsOneWidget);
-    }
+    expect(find.text('Expense categories'), findsOneWidget);
+    // A list somebody added shows up beside the built-ins, which is the whole
+    // point of the change — a fixed table would never have listed it.
+    expect(find.text('Insurers'), findsOneWidget);
+    expect(find.text('3 entries'), findsOneWidget);
+
+    // EVERY list can be renamed, built-in included. Only a custom one can be
+    // deleted, and the built-ins say why rather than showing a dead button.
+    expect(find.byIcon(Icons.edit_outlined), findsNWidgets(3));
+    expect(find.byIcon(Icons.delete_outline), findsOneWidget);
+    expect(find.byIcon(Icons.lock_outline), findsNWidgets(2));
   });
 
   testWidgets('a hidden entry stays visible on the manage screen',
@@ -257,7 +304,11 @@ void main() {
       child: MaterialApp(
         theme: buildTheme(const Brand(), Brightness.light),
         home: MasterListScreen(
-          type: masterTypeOf('expense_category')!,
+          type: const MasterType(
+              id: 1,
+              type: 'expense_category',
+              label: 'Expense categories',
+              isBuiltin: true),
           initialItems: const [
             MasterItem(id: 1, key: 'food', label: 'Food & Dining', emoji: '🍔'),
             MasterItem(

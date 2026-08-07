@@ -28,74 +28,434 @@ import '../widgets/brand_button.dart';
 import '../widgets/pill.dart';
 import '../widgets/skeleton.dart';
 
-class MastersScreen extends StatelessWidget {
-  const MastersScreen({super.key});
+class MastersScreen extends StatefulWidget {
+  const MastersScreen({super.key, this.initialLists});
+
+  /// For tests — lay the screen out without a server.
+  final List<MasterType>? initialLists;
+
+  @override
+  State<MastersScreen> createState() => _MastersScreenState();
+}
+
+class _MastersScreenState extends State<MastersScreen> {
+  List<MasterType> _lists = [];
+  bool _loading = true;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.initialLists != null) {
+      _lists = widget.initialLists!;
+      _loading = false;
+      return;
+    }
+    _load();
+  }
+
+  Future<void> _load() async {
+    setState(() => _loading = true);
+    try {
+      final l = await context.read<Session>().masters.lists();
+      if (!mounted) return;
+      setState(() {
+        _lists = l;
+        _loading = false;
+        _error = null;
+      });
+    } on ApiError catch (e) {
+      if (mounted) {
+        setState(() {
+          _error = e.message;
+          _loading = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _newList() async {
+    final result = await showModalBottomSheet<Map<String, dynamic>>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (_) => const _ListSheet(),
+    );
+    if (result == null || !mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await context.read<Session>().api.post('/api/masters/types', result);
+      await _load();
+    } on ApiError catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text(e.message)));
+    }
+  }
+
+  Future<void> _renameList(MasterType t) async {
+    final result = await showModalBottomSheet<Map<String, dynamic>>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (_) => _ListSheet(existing: t),
+    );
+    if (result == null || !mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await context.read<Session>().api.put('/api/masters/types/${t.id}', result);
+      await _load();
+    } on ApiError catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text(e.message)));
+    }
+  }
+
+  Future<void> _deleteList(MasterType t) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Delete “${t.label}”?'),
+        content: Text(t.count == 0
+            ? 'The list is empty, so nothing goes with it.'
+            : 'Everything in it goes too — ${t.count} '
+                '${t.count == 1 ? "entry" : "entries"}. Records already filed '
+                'under those names keep them.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Keep')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Delete')),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    // Taken before the await, not after. Reaching for the context once the
+    // request has come back is reading a widget that may no longer be mounted.
+    final session = context.read<Session>();
+    try {
+      await session.api.delete('/api/masters/types/${t.id}');
+      session.masters.forget(t.type);
+      await _load();
+    } on ApiError catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text(e.message)));
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+
     return Scaffold(
       appBar: AppBar(title: const Text('Manage lists')),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(14, 6, 14, 28),
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(4, 2, 4, 14),
+      floatingActionButton: _GradientFab(
+        label: 'Add a list',
+        onTap: _newList,
+      ),
+      body: _loading
+          ? const SkeletonList()
+          : _error != null
+              ? _Problem(message: _error!, onRetry: _load)
+              : RefreshIndicator(
+                  onRefresh: _load,
+                  child: ListView(
+                    padding: const EdgeInsets.fromLTRB(14, 6, 14, 96),
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(4, 2, 4, 14),
+                        child: Text(
+                            'The categories and banks the forms offer you. '
+                            'Rename any of them, add lists of your own, or hide '
+                            'the entries you never use.',
+                            style: TextStyle(
+                                fontSize: 13.5,
+                                height: 1.5,
+                                color: theme.colorScheme.onSurfaceVariant)),
+                      ),
+                      for (final t in _lists)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 10),
+                          child: BrandCard(
+                            onTap: () => Navigator.of(context)
+                                .push(MaterialPageRoute(
+                                    builder: (_) => MasterListScreen(type: t)))
+                                .then((_) => _load()),
+                            padding: const EdgeInsets.fromLTRB(14, 14, 6, 14),
+                            child: Row(children: [
+                              Container(
+                                width: 44,
+                                height: 44,
+                                decoration: BoxDecoration(
+                                  color: kModuleColours['expenses'],
+                                  borderRadius: BorderRadius.circular(13),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: kModuleColours['expenses']!
+                                          .withValues(alpha: 0.32),
+                                      blurRadius: 10,
+                                      offset: const Offset(0, 4),
+                                    ),
+                                  ],
+                                ),
+                                child: Center(
+                                  child: t.icon != null
+                                      ? Text(t.icon!,
+                                          style: const TextStyle(fontSize: 20))
+                                      : Icon(t.fallbackIcon,
+                                          size: 22, color: Colors.white),
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Text(t.label,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: const TextStyle(
+                                              fontSize: 15,
+                                              fontWeight: FontWeight.w700)),
+                                      const SizedBox(height: 2),
+                                      Text(t.blurb,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: theme.textTheme.bodySmall),
+                                    ]),
+                              ),
+                              // Rename is offered for a BUILT-IN too. The type
+                              // stays fixed because code names it; the label is
+                              // the person's to choose, and calling their bank
+                              // list "Lenders" costs the product nothing.
+                              IconButton(
+                                tooltip: 'Rename',
+                                visualDensity: VisualDensity.compact,
+                                icon: Icon(Icons.edit_outlined,
+                                    size: 19, color: theme.colorScheme.outline),
+                                onPressed: () => _renameList(t),
+                              ),
+                              if (!t.isBuiltin)
+                                IconButton(
+                                  tooltip: 'Delete this list',
+                                  visualDensity: VisualDensity.compact,
+                                  icon: const Icon(Icons.delete_outline,
+                                      size: 19, color: kDanger),
+                                  onPressed: () => _deleteList(t),
+                                )
+                              else
+                                // Not a disabled button. A greyed control invites
+                                // pressing it and explains nothing; the padlock
+                                // says the list is part of the app.
+                                Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 10),
+                                  child: Tooltip(
+                                    message: 'Built in — it can be renamed but '
+                                        'not removed',
+                                    child: Icon(Icons.lock_outline,
+                                        size: 17,
+                                        color: theme.colorScheme.outline
+                                            .withValues(alpha: 0.7)),
+                                  ),
+                                ),
+                            ]),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+    );
+  }
+}
+
+/// Add or rename a LIST — not a value in one.
+class _ListSheet extends StatefulWidget {
+  const _ListSheet({this.existing});
+  final MasterType? existing;
+
+  @override
+  State<_ListSheet> createState() => _ListSheetState();
+}
+
+class _ListSheetState extends State<_ListSheet> {
+  late final _label = TextEditingController(text: widget.existing?.label ?? '');
+  late String? _icon = widget.existing?.icon;
+  late String _field = widget.existing?.field ?? 'emoji';
+  String? _error;
+
+  static const _icons = [
+    '🏷️', '🏦', '🛡️', '🏠', '🚗', '💼', '🧾', '💳', '🩺', '🎓',
+    '🍽️', '✈️', '🔧', '📦', '👤', '🐾',
+  ];
+
+  @override
+  void dispose() {
+    _label.dispose();
+    super.dispose();
+  }
+
+  void _save() {
+    final label = _label.text.trim();
+    if (label.isEmpty) {
+      setState(() => _error = 'Give the list a name');
+      return;
+    }
+    Navigator.pop(context, <String, dynamic>{
+      'label': label,
+      'icon': _icon ?? '',
+      // Only ever sent for a new or custom list. The server ignores it on a
+      // built-in anyway; not sending it keeps the two halves saying the same
+      // thing rather than relying on the far end to refuse.
+      if (widget.existing == null || !widget.existing!.isBuiltin) 'field': _field,
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final editing = widget.existing != null;
+    final builtin = widget.existing?.isBuiltin ?? false;
+    final theme = Theme.of(context);
+
+    return Padding(
+      padding: EdgeInsets.fromLTRB(
+          20, 0, 20, MediaQuery.of(context).viewInsets.bottom + 24),
+      child: SingleChildScrollView(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Align(
+            alignment: Alignment.centerLeft,
+            child: Text(editing ? 'Rename this list' : 'Add a list',
+                style: theme.textTheme.titleMedium),
+          ),
+          const SizedBox(height: 6),
+          Align(
+            alignment: Alignment.centerLeft,
             child: Text(
-                'The categories and banks the forms offer you. Rename them, add '
-                'your own, or hide the ones you never use.',
+                editing
+                    ? 'Only the name changes. Everything in the list stays '
+                        'where it is.'
+                    : 'A list of your own — insurers, landlords, payment '
+                        'methods, whatever you keep track of.',
+                style: theme.textTheme.bodySmall),
+          ),
+          const SizedBox(height: 14),
+          TextField(
+            controller: _label,
+            autofocus: true,
+            textCapitalization: TextCapitalization.words,
+            decoration: const InputDecoration(labelText: 'Name of the list'),
+          ),
+          const SizedBox(height: 16),
+          if (!builtin) ...[
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Text('What its entries carry',
+                  style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: theme.colorScheme.onSurfaceVariant)),
+            ),
+            const SizedBox(height: 8),
+            Segmented(
+              labels: const ['A symbol', 'A colour'],
+              index: _field == 'color' ? 1 : 0,
+              onChanged: (i) => setState(() => _field = i == 1 ? 'color' : 'emoji'),
+            ),
+            const SizedBox(height: 14),
+          ],
+          Align(
+            alignment: Alignment.centerLeft,
+            child: Text('Icon for the list itself',
                 style: TextStyle(
-                    fontSize: 13.5,
-                    height: 1.5,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
                     color: theme.colorScheme.onSurfaceVariant)),
           ),
-          for (final t in kMasterTypes) ...[
-            Padding(
-              padding: const EdgeInsets.only(bottom: 10),
-              child: BrandCard(
-                onTap: () => Navigator.of(context).push(MaterialPageRoute(
-                    builder: (_) => MasterListScreen(type: t))),
-                padding: const EdgeInsets.fromLTRB(14, 14, 12, 14),
-                child: Row(children: [
-                  Container(
-                    width: 44,
-                    height: 44,
-                    decoration: BoxDecoration(
-                      color: kModuleColours['expenses'],
-                      borderRadius: BorderRadius.circular(13),
-                      boxShadow: [
-                        BoxShadow(
-                          color: kModuleColours['expenses']!
-                              .withValues(alpha: 0.32),
-                          blurRadius: 10,
-                          offset: const Offset(0, 4),
-                        ),
-                      ],
-                    ),
-                    child: Icon(t.icon, size: 22, color: Colors.white),
+          const SizedBox(height: 10),
+          Wrap(spacing: 8, runSpacing: 8, children: [
+            for (final e in _icons)
+              GestureDetector(
+                onTap: () => setState(() => _icon = _icon == e ? null : e),
+                child: Container(
+                  width: 42,
+                  height: 42,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: _icon == e
+                        ? kBrand.withValues(alpha: 0.16)
+                        : theme.scaffoldBackgroundColor,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                        color: _icon == e
+                            ? kBrand
+                            : theme.colorScheme.outlineVariant,
+                        width: 1.5),
                   ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(t.label,
-                              style: const TextStyle(
-                                  fontSize: 15, fontWeight: FontWeight.w700)),
-                          const SizedBox(height: 2),
-                          Text(t.blurb, style: theme.textTheme.bodySmall),
-                        ]),
-                  ),
-                  Icon(Icons.chevron_right, color: theme.colorScheme.outline),
-                ]),
+                  child: Text(e, style: const TextStyle(fontSize: 19)),
+                ),
               ),
+          ]),
+          if (_error != null) ...[
+            const SizedBox(height: 12),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Text(_error!,
+                  style: TextStyle(color: theme.colorScheme.error)),
             ),
           ],
-        ],
+          const SizedBox(height: 18),
+          BrandButton(
+              label: editing ? 'Save changes' : 'Create the list',
+              block: true,
+              onPressed: _save),
+        ]),
       ),
     );
   }
+}
+
+/// The `.fab` gradient, used by both screens here.
+class _GradientFab extends StatelessWidget {
+  const _GradientFab({required this.label, required this.onTap});
+  final String label;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => Container(
+        width: 58,
+        height: 58,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(20),
+          gradient: const LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [kBrand, kBrand2],
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: kBrand.withValues(alpha: 0.44),
+              blurRadius: 28,
+              offset: const Offset(0, 12),
+            ),
+          ],
+        ),
+        child: Material(
+          color: Colors.transparent,
+          child: Semantics(
+            button: true,
+            label: label,
+            child: Tooltip(
+              message: label,
+              child: InkWell(
+                borderRadius: BorderRadius.circular(20),
+                onTap: onTap,
+                child: const Icon(Icons.add, size: 30, color: Colors.white),
+              ),
+            ),
+          ),
+        ),
+      );
 }
 
 class MasterListScreen extends StatefulWidget {
@@ -114,7 +474,7 @@ class _MasterListScreenState extends State<MasterListScreen> {
   bool _loading = true;
   String? _error;
 
-  bool get _usesEmoji => widget.type.field == 'emoji';
+  bool get _usesEmoji => widget.type.usesEmoji;
 
   @override
   void initState() {
@@ -223,36 +583,9 @@ class _MasterListScreenState extends State<MasterListScreen> {
 
     return Scaffold(
       appBar: AppBar(title: Text(widget.type.label)),
-      floatingActionButton: Container(
-        width: 58,
-        height: 58,
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(20),
-          gradient: const LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [kBrand, kBrand2],
-          ),
-          boxShadow: [
-            BoxShadow(
-              color: kBrand.withValues(alpha: 0.44),
-              blurRadius: 28,
-              offset: const Offset(0, 12),
-            ),
-          ],
-        ),
-        child: Material(
-          color: Colors.transparent,
-          child: Semantics(
-            button: true,
-            label: 'Add to ${widget.type.label}',
-            child: InkWell(
-              borderRadius: BorderRadius.circular(20),
-              onTap: () => _edit(),
-              child: const Icon(Icons.add, size: 30, color: Colors.white),
-            ),
-          ),
-        ),
+      floatingActionButton: _GradientFab(
+        label: 'Add to ${widget.type.label}',
+        onTap: () => _edit(),
       ),
       body: _loading
           ? const SkeletonList()
@@ -368,7 +701,7 @@ class _MasterSheetState extends State<_MasterSheet> {
   late String? _colour = widget.existing?.color;
   String? _error;
 
-  bool get _usesEmoji => widget.type.field == 'emoji';
+  bool get _usesEmoji => widget.type.usesEmoji;
 
   /// A small set rather than a full picker. An emoji keyboard exists on the
   /// phone, but it is three taps away and these are the glyphs the server
