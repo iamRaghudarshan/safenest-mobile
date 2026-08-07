@@ -19,16 +19,40 @@ library;
 
 import 'package:flutter/material.dart';
 
-enum FieldKind { text, number, money, date, note, choice, toggle }
+enum FieldKind { text, number, money, date, time, note, choice, toggle }
 
 class ModuleField {
   const ModuleField(this.key, this.label, this.kind,
-      {this.choices = const [], this.required = false});
+      {this.choices = const [], this.required = false, this.hint});
   final String key;
   final String label;
   final FieldKind kind;
+
+  /// EVERY value here must be one the column will accept.
+  ///
+  /// This is not a style note. Four of these lists were written from memory and
+  /// all four were wrong against the real schema — to-dos offered priority
+  /// "normal" where the column is enum('low','medium','high'), status "open"
+  /// where it is enum('pending','done'), insurance "half-yearly" where it is
+  /// half_yearly, and cards offered active/closed for a column that has no such
+  /// value. Each one saved fine in the form and was refused by MySQL, which the
+  /// phone showed as a bare failure with nothing to do about it. Read the enum
+  /// before adding to one of these.
   final List<String> choices;
   final bool required;
+
+  /// Shown under the field. For the ones where the app knows something the
+  /// person does not — that a time is what turns a note into an alarm.
+  final String? hint;
+}
+
+/// 'half_yearly' -> 'Half yearly'. The stored value is what the column wants;
+/// this is only what it is called on screen, so no parallel list of labels can
+/// drift out of step with the list of values above it.
+String prettyChoice(String v) {
+  if (v.isEmpty) return v;
+  final words = v.replaceAll('_', ' ').replaceAll('-', ' ');
+  return words[0].toUpperCase() + words.substring(1);
 }
 
 class ModuleSpec {
@@ -92,10 +116,23 @@ const kModules = <ModuleSpec>[
     blurb: 'Things with a date attached',
     fields: [
       ModuleField('title', 'What', FieldKind.text, required: true),
-      ModuleField('due_date', 'When', FieldKind.date, required: true),
+      ModuleField('due_date', 'What day', FieldKind.date, required: true),
+      // The field this whole change is about. Optional, and it has to stay
+      // optional: a reminder with no time arrives with the daily summary, which
+      // is how every reminder in this app worked until now. Filling it in is
+      // what asks to be told at a particular hour instead.
+      ModuleField('due_time', 'What time', FieldKind.time,
+          hint: 'Leave empty to hear about it with the daily summary'),
       ModuleField('recurrence', 'Repeats', FieldKind.choice,
           choices: ['none', 'daily', 'weekly', 'monthly', 'yearly']),
+      // Which module it belongs to. The web app groups the list by this and the
+      // phone did not offer it at all, so everything added here landed in
+      // "General" and could not be moved out of it from the phone.
+      ModuleField('module_ref', 'Belongs to', FieldKind.choice, choices: [
+        'general', 'loans', 'cards', 'insurance', 'investments', 'expenses', 'todo'
+      ]),
       ModuleField('notify_push', 'Notify me', FieldKind.toggle),
+      ModuleField('notify_email', 'Email me too', FieldKind.toggle),
     ],
   ),
   ModuleSpec(
@@ -109,11 +146,17 @@ const kModules = <ModuleSpec>[
     blurb: 'The list',
     fields: [
       ModuleField('title', 'What', FieldKind.text, required: true),
+      // 'medium', not 'normal' — enum('low','medium','high').
       ModuleField('priority', 'Priority', FieldKind.choice,
-          choices: ['low', 'normal', 'high']),
+          choices: ['low', 'medium', 'high']),
       ModuleField('due_date', 'By when', FieldKind.date),
+      // No 'yearly'. Unlike reminders, this column stops at monthly, and
+      // offering a fifth value would be a save that fails at the database.
+      ModuleField('recurrence', 'Repeats', FieldKind.choice,
+          choices: ['none', 'daily', 'weekly', 'monthly']),
+      // 'pending', not 'open' — enum('pending','done').
       ModuleField('status', 'Status', FieldKind.choice,
-          choices: ['open', 'done']),
+          choices: ['pending', 'done']),
     ],
   ),
   ModuleSpec(
@@ -123,18 +166,22 @@ const kModules = <ModuleSpec>[
     colour: Color(0xFFEC4899),
     titleField: 'bank',
     subtitleField: 'last4',
-    amountField: 'statement_amount',
-    dateField: 'due_date',
+    // Not statement_amount: nothing in the product ever writes that column, so
+    // it is blank on every card and made the row look like it had failed to load.
+    amountField: 'credit_limit',
+    dateField: 'next_due_fmt',
     blurb: 'Credit cards and what is due',
+    // Exactly cards.py's FIELDS, and no more. `statement_amount` and `status`
+    // were both offered here and neither is accepted by the endpoint — they were
+    // dropped on the floor, so typing a statement amount appeared to work and
+    // then the value was simply gone.
     fields: [
       ModuleField('bank', 'Bank', FieldKind.text, required: true),
       ModuleField('last4', 'Last 4 digits', FieldKind.text),
       ModuleField('credit_limit', 'Limit', FieldKind.money),
-      ModuleField('billing_day', 'Billing day', FieldKind.number),
+      ModuleField('billing_day', 'Billing day', FieldKind.number,
+          hint: 'Day of the month the bill is generated'),
       ModuleField('due_date', 'Due date', FieldKind.date),
-      ModuleField('statement_amount', 'This statement', FieldKind.money),
-      ModuleField('status', 'Status', FieldKind.choice,
-          choices: ['active', 'closed']),
     ],
   ),
   ModuleSpec(
@@ -155,9 +202,13 @@ const kModules = <ModuleSpec>[
       ModuleField('emi', 'Instalment', FieldKind.money),
       ModuleField('tenure_months', 'Months', FieldKind.number),
       ModuleField('outstanding', 'Outstanding', FieldKind.money),
+      // Both accepted by loans.py and both simply left out here, so a loan added
+      // from the phone lost its start date and any note the person wrote about it.
+      ModuleField('start_date', 'Started', FieldKind.date),
       ModuleField('next_due_date', 'Next due', FieldKind.date),
       ModuleField('status', 'Status', FieldKind.choice,
           choices: ['active', 'closed']),
+      ModuleField('notes', 'Notes', FieldKind.note),
     ],
   ),
   ModuleSpec(
@@ -176,8 +227,10 @@ const kModules = <ModuleSpec>[
       ModuleField('policy_no', 'Policy number', FieldKind.text),
       ModuleField('premium', 'Premium', FieldKind.money),
       ModuleField('sum_assured', 'Sum assured', FieldKind.money),
+      // half_yearly with an underscore. The hyphen version is not a value this
+      // column has, and prettyChoice() is what makes it read properly on screen.
       ModuleField('frequency', 'Paid', FieldKind.choice,
-          choices: ['monthly', 'quarterly', 'half-yearly', 'yearly']),
+          choices: ['monthly', 'quarterly', 'half_yearly', 'yearly']),
       ModuleField('renewal_date', 'Renews', FieldKind.date),
     ],
   ),

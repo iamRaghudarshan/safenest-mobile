@@ -24,12 +24,19 @@ import '../theme.dart';
 import '../widgets/brand_button.dart';
 
 class ModuleListScreen extends StatefulWidget {
-  const ModuleListScreen({super.key, required this.spec, this.embedded = false});
+  const ModuleListScreen(
+      {super.key, required this.spec, this.embedded = false, this.initialRows});
   final ModuleSpec spec;
 
   /// True when this IS a tab rather than a screen pushed on top of one — a tab
   /// with a back arrow is a tab that looks broken.
   final bool embedded;
+
+  /// Rows to start from instead of fetching, so a test can lay the screen and
+  /// its sheet out without a server. Same device the Dashboard uses; the forms
+  /// grew from four fields to seven and nothing here could be laid out to check
+  /// whether they still fit a small phone.
+  final List<Map<String, dynamic>>? initialRows;
 
   @override
   State<ModuleListScreen> createState() => _ModuleListScreenState();
@@ -45,9 +52,27 @@ class _ModuleListScreenState extends State<ModuleListScreen> {
   bool get _payable =>
       widget.spec.key == 'cards' || widget.spec.key == 'loans';
 
+  /// Reminders and to-dos can be ticked off, and could not be from this app at
+  /// all. Both have had a /toggle endpoint since the beginning; nothing here
+  /// called it, so the only way to finish something was to delete it — which
+  /// also threw away the record that it had ever been done.
+  bool get _tickable =>
+      widget.spec.key == 'reminders' || widget.spec.key == 'todos';
+
+  /// Done, for whichever of the two it is. Reminders carry is_done (0/1) and
+  /// to-dos carry status ('pending'/'done'); they are not the same field and
+  /// there is no third thing to fall back on.
+  bool _isDone(Map<String, dynamic> r) =>
+      r['is_done'] == 1 || r['is_done'] == true || r['status'] == 'done';
+
   @override
   void initState() {
     super.initState();
+    if (widget.initialRows != null) {
+      _rows = widget.initialRows!;
+      _loading = false;
+      return;
+    }
     _load();
   }
 
@@ -72,14 +97,32 @@ class _ModuleListScreenState extends State<ModuleListScreen> {
   }
 
   List<Map<String, dynamic>> get _shown {
-    if (_filter.isEmpty) return _rows;
-    final q = _filter.toLowerCase();
-    return _rows.where((r) {
-      // Searches every field rather than just the title: looking for "HDFC"
-      // should find a card whose bank it is, even though the row is titled by
-      // something else.
-      return r.values.any((v) => '$v'.toLowerCase().contains(q));
-    }).toList();
+    var out = _rows;
+    if (_filter.isNotEmpty) {
+      final q = _filter.toLowerCase();
+      out = _rows.where((r) {
+        // Searches every field rather than just the title: looking for "HDFC"
+        // should find a card whose bank it is, even though the row is titled by
+        // something else.
+        return r.values.any((v) => '$v'.toLowerCase().contains(q));
+      }).toList();
+    }
+    if (!_tickable) return out;
+
+    // Finished things sink, and what is late rises. The server returns reminders
+    // in is_done then due_date order and to-dos in status then due_date order,
+    // which is close — but a list you have been ticking through redraws with the
+    // done ones still sitting where they were until the next reload, and the
+    // item you just completed staying at the top reads as the tap not working.
+    final sorted = [...out];
+    sorted.sort((a, b) {
+      final da = _isDone(a), db = _isDone(b);
+      if (da != db) return da ? 1 : -1;
+      final ka = a['days'] is num ? (a['days'] as num).toInt() : 1 << 30;
+      final kb = b['days'] is num ? (b['days'] as num).toInt() : 1 << 30;
+      return ka.compareTo(kb);
+    });
+    return sorted;
   }
 
   String _money(dynamic v) {
@@ -106,6 +149,19 @@ class _ModuleListScreenState extends State<ModuleListScreen> {
           .read<Session>()
           .api
           .post('/api/${widget.spec.key}/${row['id']}/${paid ? 'pay' : 'unpay'}', {});
+      _load();
+    } on ApiError catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text(e.message)));
+    }
+  }
+
+  Future<void> _toggle(Map<String, dynamic> row) async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await context
+          .read<Session>()
+          .api
+          .post('/api/${widget.spec.key}/${row['id']}/toggle', {});
       _load();
     } on ApiError catch (e) {
       messenger.showSnackBar(SnackBar(content: Text(e.message)));
@@ -169,8 +225,29 @@ class _ModuleListScreenState extends State<ModuleListScreen> {
                                     '${r[s.subtitleField] ?? ''}'.isNotEmpty)
                                   '${r[s.subtitleField]}',
                                 if (date.isNotEmpty) date,
+                                // An hour is the thing you scan a reminder list
+                                // for, so it goes on the line rather than being
+                                // reachable only by opening the record.
+                                if ('${r['time_fmt'] ?? ''}'.isNotEmpty)
+                                  '${r['time_fmt']}',
+                                if ('${r['recurrence'] ?? 'none'}' != 'none' &&
+                                    '${r['recurrence'] ?? ''}'.isNotEmpty)
+                                  prettyChoice('${r['recurrence']}'),
                               ].join(' · ');
-                              final paid = r['is_paid'] == 1 || r['paid'] == true;
+                              // paid_this_month is what the endpoint actually
+                              // returns. is_paid and paid are not fields of
+                              // anything, so this tick was stuck on "unpaid" for
+                              // every card and every loan however often it was
+                              // pressed.
+                              final paid = r['paid_this_month'] == true;
+                              final done = _isDone(r);
+                              // days is negative once something is late. The web
+                              // app colours these; the phone showed a late
+                              // reminder exactly like one due next month.
+                              final days = r['days'] is num
+                                  ? (r['days'] as num).toInt()
+                                  : null;
+                              final late = !done && days != null && days < 0;
 
                               return Padding(
                                 padding: const EdgeInsets.only(bottom: 10),
@@ -185,11 +262,31 @@ class _ModuleListScreenState extends State<ModuleListScreen> {
                                       width: 4,
                                       height: 38,
                                       decoration: BoxDecoration(
-                                        color: s.colour,
+                                        // Late turns the bar red. It is the one
+                                        // thing worth spotting without reading.
+                                        color: late ? kDanger : s.colour,
                                         borderRadius: BorderRadius.circular(2),
                                       ),
                                     ),
                                     const SizedBox(width: 12),
+                                    if (_tickable)
+                                      // The tick is the primary action on these
+                                      // two modules, so it sits first and at
+                                      // full touch size rather than being an
+                                      // afterthought at the end of the row.
+                                      IconButton(
+                                        tooltip: done ? 'Not done yet' : 'Done',
+                                        visualDensity: VisualDensity.compact,
+                                        icon: Icon(
+                                          done
+                                              ? Icons.check_circle
+                                              : Icons.radio_button_unchecked,
+                                          color: done
+                                              ? kOk
+                                              : theme.colorScheme.outline,
+                                        ),
+                                        onPressed: () => _toggle(r),
+                                      ),
                                     Expanded(
                                       child: Column(
                                         mainAxisSize: MainAxisSize.min,
@@ -199,13 +296,26 @@ class _ModuleListScreenState extends State<ModuleListScreen> {
                                           Text('${r[s.titleField] ?? '—'}',
                                               maxLines: 1,
                                               overflow: TextOverflow.ellipsis,
-                                              style: theme.textTheme.titleSmall),
+                                              style: theme.textTheme.titleSmall
+                                                  ?.copyWith(
+                                                decoration: done
+                                                    ? TextDecoration.lineThrough
+                                                    : null,
+                                                color: done
+                                                    ? theme.colorScheme
+                                                        .onSurfaceVariant
+                                                    : null,
+                                              )),
                                           if (sub.isNotEmpty) ...[
                                             const SizedBox(height: 2),
                                             Text(sub,
                                                 maxLines: 1,
                                                 overflow: TextOverflow.ellipsis,
-                                                style: theme.textTheme.bodySmall),
+                                                style: theme.textTheme.bodySmall
+                                                    ?.copyWith(
+                                                        color: late
+                                                            ? kDanger
+                                                            : null)),
                                           ],
                                         ],
                                       ),
@@ -275,6 +385,10 @@ class _RecordSheetState extends State<_RecordSheet> {
         case FieldKind.date:
           _values[f.key] = current?.toString() ??
               (f.required ? DateFormat('yyyy-MM-dd').format(DateTime.now()) : null);
+        case FieldKind.time:
+          // Never defaulted, even on a required-looking field. A time nobody
+          // chose is an alarm nobody asked for, and it would go off.
+          _values[f.key] = (current == null || '$current'.isEmpty) ? null : '$current';
         default:
           _controllers[f.key] =
               TextEditingController(text: current == null ? '' : '$current');
@@ -298,6 +412,11 @@ class _RecordSheetState extends State<_RecordSheet> {
         case FieldKind.choice:
         case FieldKind.date:
           if (_values[f.key] != null) body[f.key] = _values[f.key];
+        case FieldKind.time:
+          // Sent even when empty, unlike every other field. The server only
+          // clears a time when the key is PRESENT and blank — omitting it means
+          // "leave it as it was", so a cleared alarm would quietly come back.
+          body[f.key] = _values[f.key] ?? '';
         case FieldKind.toggle:
           body[f.key] = (_values[f.key] == true) ? 1 : 0;
         default:
@@ -404,14 +523,27 @@ class _RecordSheetState extends State<_RecordSheet> {
     );
   }
 
+  /// "18:30" -> "6:30 pm", matching how the server words it in a notification.
+  String _readTime(String hhmm) {
+    final p = hhmm.split(':');
+    final h = int.tryParse(p.isNotEmpty ? p[0] : '') ?? 0;
+    final m = int.tryParse(p.length > 1 ? p[1] : '') ?? 0;
+    final h12 = h % 12 == 0 ? 12 : h % 12;
+    return '$h12:${m.toString().padLeft(2, '0')} ${h < 12 ? 'am' : 'pm'}';
+  }
+
   Widget _field(ModuleField f) {
     switch (f.kind) {
       case FieldKind.choice:
         return DropdownButtonFormField<String>(
           initialValue: _values[f.key] as String?,
-          decoration: InputDecoration(labelText: f.label),
+          decoration: InputDecoration(labelText: f.label, helperText: f.hint),
           items: [
-            for (final c in f.choices) DropdownMenuItem(value: c, child: Text(c))
+            // The VALUE stays exactly what the column accepts; only the label is
+            // tidied. Showing 'half_yearly' raw was the giveaway that these were
+            // database strings leaking onto the screen.
+            for (final c in f.choices)
+              DropdownMenuItem(value: c, child: Text(prettyChoice(c)))
           ],
           onChanged: (v) => setState(() => _values[f.key] = v),
         );
@@ -419,8 +551,50 @@ class _RecordSheetState extends State<_RecordSheet> {
         return SwitchListTile(
           contentPadding: EdgeInsets.zero,
           title: Text(f.label),
+          subtitle: f.hint == null ? null : Text(f.hint!),
           value: _values[f.key] == true,
           onChanged: (v) => setState(() => _values[f.key] = v),
+        );
+      case FieldKind.time:
+        final tv = _values[f.key] as String?;
+        return ListTile(
+          contentPadding: const EdgeInsets.symmetric(horizontal: 14),
+          shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(13),
+              side: BorderSide(color: Theme.of(context).dividerColor)),
+          title: Text(f.label, style: const TextStyle(fontSize: 14)),
+          subtitle: Text(tv == null ? (f.hint ?? 'Not set') : _readTime(tv)),
+          // A set time can be taken back off. Without this the only way to undo
+          // one is to delete the reminder and write it again — and an alarm you
+          // cannot cancel is worse than one you never set.
+          trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+            if (tv != null)
+              IconButton(
+                tooltip: 'Clear the time',
+                icon: const Icon(Icons.close, size: 18),
+                onPressed: () => setState(() => _values[f.key] = null),
+              ),
+            const Icon(Icons.schedule, size: 18),
+          ]),
+          onTap: () async {
+            final parts = (tv ?? '').split(':');
+            final picked = await showTimePicker(
+              context: context,
+              initialTime: parts.length >= 2
+                  ? TimeOfDay(
+                      hour: int.tryParse(parts[0]) ?? 9,
+                      minute: int.tryParse(parts[1]) ?? 0)
+                  : const TimeOfDay(hour: 9, minute: 0),
+            );
+            if (picked != null) {
+              // Sent as 24-hour "HH:MM" whatever the phone's clock is set to —
+              // the server stores that form and the picker's own am/pm is only
+              // how this device happens to show it.
+              setState(() => _values[f.key] =
+                  '${picked.hour.toString().padLeft(2, '0')}:'
+                  '${picked.minute.toString().padLeft(2, '0')}');
+            }
+          },
         );
       case FieldKind.date:
         final v = _values[f.key] as String?;
@@ -454,6 +628,7 @@ class _RecordSheetState extends State<_RecordSheet> {
           maxLines: f.kind == FieldKind.note ? 3 : 1,
           decoration: InputDecoration(
             labelText: f.label,
+            helperText: f.hint,
             prefixText: f.kind == FieldKind.money ? '₹ ' : null,
           ),
         );
