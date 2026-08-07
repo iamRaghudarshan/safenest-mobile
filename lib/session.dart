@@ -119,6 +119,21 @@ class Session extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Re-read the signed-in user. Called after editing a profile so the name on
+  /// screen matches what was just saved, rather than waiting for a restart.
+  Future<void> refreshUser() async {
+    try {
+      final me = await api.get('/api/auth/me');
+      _user = (me is Map && me['user'] is Map)
+          ? Map<String, dynamic>.from(me['user'] as Map)
+          : (me is Map ? Map<String, dynamic>.from(me) : null);
+      notifyListeners();
+    } on ApiError {
+      // Not worth surfacing: the save already succeeded, and the name will be
+      // right at the next launch regardless.
+    }
+  }
+
   Future<void> signOut() async {
     _token = null;
     _user = null;

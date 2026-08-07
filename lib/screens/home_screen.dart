@@ -51,8 +51,15 @@ const _tabs = <_Tab>[
 ];
 
 class HomeScreen extends StatefulWidget {
-  const HomeScreen({super.key, required this.brand});
+  const HomeScreen({
+    super.key,
+    required this.brand,
+    this.themeMode = ThemeMode.system,
+    this.onThemeChanged,
+  });
   final Brand brand;
+  final ThemeMode themeMode;
+  final ValueChanged<ThemeMode>? onThemeChanged;
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -142,7 +149,11 @@ class _HomeScreenState extends State<HomeScreen> {
       case 'gallery':
         return const PhotosHome();
       case 'profile':
-        return ProfileScreen(brand: widget.brand);
+        return ProfileScreen(
+          brand: widget.brand,
+          themeMode: widget.themeMode,
+          onThemeChanged: widget.onThemeChanged,
+        );
       default:
         return const SizedBox.shrink();
     }

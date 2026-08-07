@@ -75,6 +75,12 @@ class Api {
         body: body == null ? null : jsonEncode(body),
       ));
 
+  Future<dynamic> put(String path, [Object? body]) => _send(() => http.put(
+        _url(path),
+        headers: _headers(),
+        body: body == null ? null : jsonEncode(body),
+      ));
+
   Future<dynamic> delete(String path) =>
       _send(() => http.delete(_url(path), headers: _headers(json: false)));
 

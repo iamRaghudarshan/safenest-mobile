@@ -1,27 +1,69 @@
-/// Profile — grouped settings rows, the way the web app's Profile screen reads.
+/// Profile — the settings the web app has, minus the ones that belong to a
+/// computer rather than to a person.
 ///
-/// It was a bare ListView with three tiles and no shape to it. The web app
-/// groups its rows under headings with a footer explaining each group, which is
-/// what makes a long settings screen navigable rather than a wall.
+/// WHAT IS HERE, and it mirrors screens/Profile.tsx group for group:
+///   Account       edit your name, change your password
+///   Appearance    light, dark or follow the phone
+///   Photos        find duplicates, find similar
+///   My data       notifications, activity log
+///   Your licence  read-only, from the copy you signed in to
+///   App           version, and what this app is keeping on the phone
 ///
-/// What is deliberately NOT here: the administration half — branding, web
-/// address, licences, household, services. Those configure the machine, they are
-/// done once, and they are done at the machine. Putting them on a phone would
-/// mean maintaining two copies of the most consequential screens in the product
-/// so that somebody could re-brand their app on a bus.
+/// WHAT IS NOT, and deliberately: user management, licence ISSUING, app name and
+/// icon, web address, household, services, storage and "this computer". Those
+/// configure the machine, are done once, and are done at the machine. Building
+/// them twice is how the two halves drift, and the more consequential half is
+/// always the one nobody is looking at.
 library;
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../api.dart';
 import '../session.dart';
 import '../theme.dart';
+import '../widgets/brand_button.dart';
 import '../widgets/brand_logo.dart';
+import 'activity_screen.dart';
 import 'backup_screen.dart';
+import 'notifications_screen.dart';
 
-class ProfileScreen extends StatelessWidget {
-  const ProfileScreen({super.key, required this.brand});
+class ProfileScreen extends StatefulWidget {
+  const ProfileScreen({
+    super.key,
+    required this.brand,
+    this.themeMode = ThemeMode.system,
+    this.onThemeChanged,
+  });
+
   final Brand brand;
+  final ThemeMode themeMode;
+  final ValueChanged<ThemeMode>? onThemeChanged;
+
+  @override
+  State<ProfileScreen> createState() => _ProfileScreenState();
+}
+
+class _ProfileScreenState extends State<ProfileScreen> {
+  Map<String, dynamic>? _licence;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadLicence();
+  }
+
+  Future<void> _loadLicence() async {
+    try {
+      final d = await context.read<Session>().api.get('/api/licence/status');
+      if (d is Map && mounted) {
+        setState(() => _licence = Map<String, dynamic>.from(d));
+      }
+    } catch (_) {
+      // The publisher's own installation is not licensed, so this 404s there.
+      // Absent is a perfectly good answer; the group simply does not appear.
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -45,8 +87,7 @@ class ProfileScreen extends StatelessWidget {
               if (user?['role'] != null) ...[
                 const SizedBox(height: 6),
                 Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
                   decoration: BoxDecoration(
                     color: kBrand.withValues(alpha: 0.12),
                     borderRadius: BorderRadius.circular(999),
@@ -61,12 +102,53 @@ class ProfileScreen extends StatelessWidget {
             ]),
           ),
 
-          _Group(
-            title: 'Your photos',
-            footer: 'Takes everything on this phone and copies it to your own '
+          SettingsGroup(title: 'Account', children: [
+            SettingsRow(
+              icon: Icons.edit_outlined,
+              tint: kBrand,
+              label: 'Edit profile',
+              onTap: () => _editName(context, '${user?['name'] ?? ''}'),
+            ),
+            SettingsRow(
+              icon: Icons.lock_outline,
+              tint: kModuleColours['vault']!,
+              label: 'Change password',
+              onTap: () => _changePassword(context),
+            ),
+          ]),
+
+          SettingsGroup(
+            title: 'Appearance',
+            footer: 'Follow the phone and it changes with your system setting at '
+                'sunset, the same as everything else.',
+            children: [
+              for (final m in ThemeMode.values)
+                SettingsRow(
+                  icon: m == ThemeMode.light
+                      ? Icons.light_mode_outlined
+                      : m == ThemeMode.dark
+                          ? Icons.dark_mode_outlined
+                          : Icons.brightness_auto_outlined,
+                  tint: kModuleColours['reminders']!,
+                  label: m == ThemeMode.system
+                      ? 'Follow the phone'
+                      : m == ThemeMode.light
+                          ? 'Light'
+                          : 'Dark',
+                  trailing: widget.themeMode == m
+                      ? const Icon(Icons.check, size: 18, color: kBrand)
+                      : null,
+                  onTap: () => widget.onThemeChanged?.call(m),
+                ),
+            ],
+          ),
+
+          SettingsGroup(
+            title: 'Photos',
+            footer: 'Backing up copies everything on this phone to your own '
                 'computer. Photos already there are skipped.',
             children: [
-              _Row(
+              SettingsRow(
                 icon: Icons.backup_outlined,
                 tint: kModuleColours['gallery']!,
                 label: 'Back up this phone',
@@ -76,60 +158,201 @@ class ProfileScreen extends StatelessWidget {
             ],
           ),
 
-          _Group(
-            title: 'Reaching this app',
-            footer: 'Everything you see is read from this computer and saved '
-                'back to it. Nothing is kept on the phone but your sign-in.',
+          SettingsGroup(title: 'My data', children: [
+            SettingsRow(
+              icon: Icons.notifications_outlined,
+              tint: kModuleColours['reminders']!,
+              label: 'Notifications',
+              onTap: () => Navigator.of(context).push(MaterialPageRoute(
+                  builder: (_) => const NotificationsScreen())),
+            ),
+            SettingsRow(
+              icon: Icons.receipt_long_outlined,
+              tint: kModuleColours['insurance']!,
+              label: 'Activity log',
+              onTap: () => Navigator.of(context)
+                  .push(MaterialPageRoute(builder: (_) => const ActivityScreen())),
+            ),
+          ]),
+
+          if (_licence != null && _licence!['state'] != null)
+            SettingsGroup(
+              title: 'Your licence',
+              footer: 'Issued for the copy on your computer. It covers this app '
+                  'too — there is no separate licence for the phone.',
+              children: [
+                SettingsRow(
+                  icon: Icons.card_membership_outlined,
+                  tint: _licenceTint(),
+                  label: '${_licence!['name'] ?? 'Licensed copy'}',
+                  value: '${_licence!['state'] ?? ''}',
+                ),
+                if (_licence!['expires_on'] != null)
+                  SettingsRow(
+                    icon: Icons.event_outlined,
+                    tint: theme.colorScheme.outline,
+                    label: 'Valid until',
+                    value: '${_licence!['expires_on']}',
+                  ),
+                if (_licence!['key_id'] != null)
+                  SettingsRow(
+                    icon: Icons.tag,
+                    tint: theme.colorScheme.outline,
+                    label: 'Licence number',
+                    value: '${_licence!['key_id']}',
+                  ),
+              ],
+            ),
+
+          SettingsGroup(
+            title: 'This app',
+            footer: 'Everything you see is read from ${widget.brand.name} on your '
+                'computer and saved back to it. This app keeps only your sign-in '
+                'and a list of which photos it has already sent.',
             children: [
-              _Row(
+              SettingsRow(
                 icon: Icons.dns_outlined,
                 tint: kModuleColours['insurance']!,
                 label: 'Your SafeNest',
                 value: session.baseUrl ?? '—',
               ),
-            ],
-          ),
-
-          _Group(
-            title: 'Settings that live on the computer',
-            footer: 'App name and icon, web address, licences and household are '
-                'set in ${brand.name} on the computer itself. They are done once, '
-                'and doing them there keeps one copy of each rather than two.',
-            children: const [],
-          ),
-
-          _Group(
-            title: '',
-            children: [
-              _Row(
-                icon: Icons.logout,
-                tint: kDanger,
-                label: 'Sign out',
-                danger: true,
-                onTap: () => session.signOut(),
+              const SettingsRow(
+                icon: Icons.info_outline,
+                tint: Color(0xFF9A9DB5),
+                label: 'Version',
+                value: '0.4.0',
               ),
             ],
           ),
 
-          Padding(
-            padding: const EdgeInsets.fromLTRB(24, 18, 24, 0),
-            child: Text(
-              '${brand.name} keeps your records on your own computer. '
-              'This app holds nothing of its own beyond your sign-in.',
-              textAlign: TextAlign.center,
-              style: theme.textTheme.bodySmall,
+          SettingsGroup(title: '', children: [
+            SettingsRow(
+              icon: Icons.logout,
+              tint: kDanger,
+              label: 'Sign out',
+              danger: true,
+              onTap: () => session.signOut(),
             ),
-          ),
+          ]),
         ],
       ),
     );
   }
+
+  Color _licenceTint() {
+    switch ('${_licence?['state'] ?? ''}'.toUpperCase()) {
+      case 'OK':
+        return kOk;
+      case 'EXPIRING':
+      case 'GRACE':
+        return kWarn;
+      default:
+        return kDanger;
+    }
+  }
+
+  Future<void> _editName(BuildContext context, String current) async {
+    final controller = TextEditingController(text: current);
+    final session = context.read<Session>();
+    final messenger = ScaffoldMessenger.of(context);
+
+    final save = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (ctx) => Padding(
+        padding: EdgeInsets.fromLTRB(
+            22, 0, 22, MediaQuery.of(ctx).viewInsets.bottom + 24),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Text('Edit profile', style: Theme.of(ctx).textTheme.titleMedium),
+          const SizedBox(height: 16),
+          TextField(
+            controller: controller,
+            autofocus: true,
+            decoration: const InputDecoration(labelText: 'Your name'),
+          ),
+          const SizedBox(height: 18),
+          BrandButton(label: 'Save', onPressed: () => Navigator.pop(ctx, true)),
+        ]),
+      ),
+    );
+    if (save != true) return;
+    try {
+      await session.api.put('/api/auth/profile', {'name': controller.text.trim()});
+      await session.refreshUser();
+      messenger.showSnackBar(const SnackBar(content: Text('Saved')));
+    } on ApiError catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text(e.message)));
+    }
+  }
+
+  Future<void> _changePassword(BuildContext context) async {
+    final cur = TextEditingController();
+    final next = TextEditingController();
+    final session = context.read<Session>();
+    final messenger = ScaffoldMessenger.of(context);
+
+    final go = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (ctx) => Padding(
+        padding: EdgeInsets.fromLTRB(
+            22, 0, 22, MediaQuery.of(ctx).viewInsets.bottom + 24),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Text('Change password', style: Theme.of(ctx).textTheme.titleMedium),
+          const SizedBox(height: 6),
+          Text(
+            'Changing it signs out every other device, including the computer. '
+            'That is deliberate — it is what makes a change worth making.',
+            textAlign: TextAlign.center,
+            style: Theme.of(ctx).textTheme.bodySmall,
+          ),
+          const SizedBox(height: 16),
+          TextField(
+            controller: cur,
+            obscureText: true,
+            decoration: const InputDecoration(labelText: 'Current password'),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: next,
+            obscureText: true,
+            decoration: const InputDecoration(labelText: 'New password'),
+          ),
+          const SizedBox(height: 18),
+          BrandButton(label: 'Change it', onPressed: () => Navigator.pop(ctx, true)),
+        ]),
+      ),
+    );
+    if (go != true) return;
+    try {
+      await session.api.post('/api/auth/change-password', {
+        'current_password': cur.text,
+        'new_password': next.text,
+      });
+      messenger.showSnackBar(const SnackBar(
+          content: Text('Password changed — sign in again with the new one')));
+      // token_version was just bumped on the server, so this session is dead.
+      // Signing out here is honest; leaving it would mean every later call
+      // failing with 401 and no explanation.
+      await session.signOut();
+    } on ApiError catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text(e.message)));
+    }
+  }
 }
 
 /// The web app's SettingsGroup — a titled card of rows with an explaining
-/// footer underneath.
-class _Group extends StatelessWidget {
-  const _Group({required this.title, required this.children, this.footer});
+/// footer. The footer is what makes a long settings screen readable, so it is
+/// part of the component rather than an afterthought.
+class SettingsGroup extends StatelessWidget {
+  const SettingsGroup({
+    super.key,
+    required this.title,
+    required this.children,
+    this.footer,
+  });
   final String title;
   final List<Widget> children;
   final String? footer;
@@ -143,14 +366,13 @@ class _Group extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          if (title.isNotEmpty) ...[
+          if (title.isNotEmpty)
             Padding(
               padding: const EdgeInsets.fromLTRB(4, 0, 4, 8),
               child: Text(title,
                   style: theme.textTheme.titleSmall
                       ?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
             ),
-          ],
           if (children.isNotEmpty)
             DecoratedBox(
               decoration: BoxDecoration(
@@ -171,13 +393,15 @@ class _Group extends StatelessWidget {
   }
 }
 
-/// The web app's SettingsRow — a tinted glyph, a label, an optional value.
-class _Row extends StatelessWidget {
-  const _Row({
+/// The web app's SettingsRow — tinted glyph, label, optional value, 52px tall.
+class SettingsRow extends StatelessWidget {
+  const SettingsRow({
+    super.key,
     required this.icon,
     required this.tint,
     required this.label,
     this.value,
+    this.trailing,
     this.onTap,
     this.danger = false,
   });
@@ -185,6 +409,7 @@ class _Row extends StatelessWidget {
   final Color tint;
   final String label;
   final String? value;
+  final Widget? trailing;
   final VoidCallback? onTap;
   final bool danger;
 
@@ -193,7 +418,6 @@ class _Row extends StatelessWidget {
     final theme = Theme.of(context);
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(kRadius),
       child: Container(
         constraints: const BoxConstraints(minHeight: 52),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
@@ -222,7 +446,8 @@ class _Row extends StatelessWidget {
                   textAlign: TextAlign.right,
                   style: theme.textTheme.bodySmall),
             ),
-          if (onTap != null && !danger) ...[
+          if (trailing != null) ...[const SizedBox(width: 6), trailing!],
+          if (onTap != null && trailing == null && !danger) ...[
             const SizedBox(width: 4),
             Icon(Icons.chevron_right, size: 18, color: theme.colorScheme.outline),
           ],

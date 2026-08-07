@@ -16,6 +16,7 @@ library;
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'api.dart';
 import 'session.dart';
@@ -39,9 +40,31 @@ class _SafeNestAppState extends State<SafeNestApp> {
   final _session = Session();
   Brand _brand = const Brand();
 
+  /// Light, dark, or follow the phone. Remembered — a theme that resets on every
+  /// launch is one nobody bothers to set. Not a secret, so SharedPreferences
+  /// rather than the secure store.
+  ThemeMode _themeMode = ThemeMode.system;
+
+  Future<void> _loadThemeMode() async {
+    final prefs = await SharedPreferences.getInstance();
+    final saved = prefs.getString('theme.mode');
+    if (!mounted) return;
+    setState(() => _themeMode = ThemeMode.values.firstWhere(
+          (m) => m.name == saved,
+          orElse: () => ThemeMode.system,
+        ));
+  }
+
+  Future<void> _setThemeMode(ThemeMode mode) async {
+    setState(() => _themeMode = mode);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('theme.mode', mode.name);
+  }
+
   @override
   void initState() {
     super.initState();
+    _loadThemeMode();
     _session.restore().then((_) => _loadBrand());
   }
 
@@ -73,6 +96,7 @@ class _SafeNestAppState extends State<SafeNestApp> {
           debugShowCheckedModeBanner: false,
           theme: buildTheme(_brand, Brightness.light),
           darkTheme: buildTheme(_brand, Brightness.dark),
+          themeMode: _themeMode,
           home: session.loading
               ? const _Splash()
               // A blocked licence takes over the whole app rather than failing
@@ -90,7 +114,11 @@ class _SafeNestAppState extends State<SafeNestApp> {
                       ),
                     )
                   : session.signedIn
-                      ? HomeScreen(brand: _brand)
+                      ? HomeScreen(
+                          brand: _brand,
+                          themeMode: _themeMode,
+                          onThemeChanged: _setThemeMode,
+                        )
                       : SignInScreen(brand: _brand, onSignedIn: _loadBrand),
         ),
       ),
