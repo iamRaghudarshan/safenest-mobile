@@ -16,6 +16,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import 'api.dart';
+import 'masters.dart';
 
 class Session extends ChangeNotifier {
   static const _store = FlutterSecureStorage(
@@ -55,6 +56,18 @@ class Session extends ChangeNotifier {
           notifyListeners();
         },
       );
+
+  /// The user's category and bank lists, fetched once per run.
+  ///
+  /// Lives on the Session rather than in each screen because a record sheet and
+  /// the Masters screen must agree: editing a category there has to change what
+  /// the sheet offers here, and two independent caches would drift until the
+  /// app was restarted.
+  ///
+  /// `() => api`, not `api` — see MasterCache. And cleared on sign-out below,
+  /// because these lists are per USER: a household member signing in after
+  /// somebody else would otherwise be offered the previous person's categories.
+  late final MasterCache masters = MasterCache(() => api);
 
   Future<void> restore() async {
     _baseUrl = await _store.read(key: _kUrl);
@@ -181,6 +194,10 @@ class Session extends ChangeNotifier {
   Future<void> signOut() async {
     _token = null;
     _user = null;
+    // Whoever signs in next has their OWN categories and banks — masters are
+    // per-user rows. Keeping them would show one household member the previous
+    // one's lists, which is both wrong and a small leak of what they file.
+    masters.forget();
     // The address is deliberately KEPT. Signing out is not forgetting which
     // computer is yours, and making somebody retype it every time is friction
     // with nothing behind it.

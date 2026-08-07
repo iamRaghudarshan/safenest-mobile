@@ -2,18 +2,32 @@
 /// computer rather than to a person.
 ///
 /// WHAT IS HERE, and it mirrors screens/Profile.tsx group for group:
-///   Account       edit your name, change your password
-///   Appearance    light, dark or follow the phone
-///   Photos        find duplicates, find similar
-///   My data       notifications, activity log
-///   Your licence  read-only, from the copy you signed in to
-///   App           version, and what this app is keeping on the phone
+///   Account        edit your name, change your password
+///   Appearance     light, dark or follow the phone
+///   Photos         back up this phone
+///   Customization  Manage lists — the categories and banks the forms offer
+///   Daily summary  whether it comes, at what hour, and what goes in it
+///   My data        notifications, activity log
+///   Your licence   read-only, from the copy you signed in to
+///   App            version, and what this app is keeping on the phone
+///
+/// The middle two were missing for a long time and should not have been.
+/// "Manage lists" is not a settings nicety — the categories and banks it edits
+/// are what every record form offers, so without it the phone could pick from
+/// those lists and never change them. The daily-summary settings are wanted on a
+/// PHONE most of all, because the phone is the thing the message arrives on, and
+/// they were reachable only from the laptop.
 ///
 /// WHAT IS NOT, and deliberately: user management, licence ISSUING, app name and
 /// icon, web address, household, services, storage and "this computer". Those
 /// configure the machine, are done once, and are done at the machine. Building
 /// them twice is how the two halves drift, and the more consequential half is
 /// always the one nobody is looking at.
+///
+/// The test for whether something belongs here is not "does the web app have
+/// it". It is "would somebody reasonably do this from a phone". Managing lists
+/// and choosing when to be interrupted pass it; issuing a licence to a customer
+/// does not.
 library;
 
 import 'package:flutter/material.dart';
@@ -23,6 +37,8 @@ import 'package:provider/provider.dart';
 import '../api.dart';
 import '../session.dart';
 import '../theme.dart';
+import '../widgets/notification_settings.dart';
+import 'masters_screen.dart';
 import '../widgets/brand_button.dart';
 import '../widgets/brand_logo.dart';
 import 'activity_screen.dart';
@@ -170,6 +186,29 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ),
             ],
           ),
+
+          // The web app's "Customization" group. It has been there since the
+          // beginning and the phone had no way in at all — the lists were
+          // seeded, used by the forms, and unreachable.
+          SettingsGroup(
+            title: 'Customization',
+            footer: 'These are the categories and banks the forms offer you.',
+            children: [
+              SettingsRow(
+                icon: Icons.category_outlined,
+                tint: kModuleColours['expenses']!,
+                label: 'Manage lists',
+                value: 'Categories, banks',
+                onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const MastersScreen())),
+              ),
+            ],
+          ),
+
+          // The daily-summary settings the web app has had all along. Most
+          // wanted on a phone of all places — it is the device the message
+          // actually arrives on — and it was only changeable at the laptop.
+          const NotificationSettingsSection(),
 
           SettingsGroup(title: 'My data', children: [
             SettingsRow(

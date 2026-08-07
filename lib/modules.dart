@@ -21,14 +21,23 @@ import 'package:flutter/material.dart';
 
 import 'theme.dart';
 
-enum FieldKind { text, number, money, date, time, note, choice, toggle }
+enum FieldKind { text, number, money, date, time, note, choice, toggle, master }
 
 class ModuleField {
   const ModuleField(this.key, this.label, this.kind,
-      {this.choices = const [], this.required = false, this.hint});
+      {this.choices = const [],
+      this.required = false,
+      this.hint,
+      this.masterType});
   final String key;
   final String label;
   final FieldKind kind;
+
+  /// For FieldKind.master — which of the user's lists to offer, matching
+  /// `masters.py::MASTER_TYPES`. The value SAVED is still the label, because
+  /// that is what these record columns hold and what the web app writes; the
+  /// list only decides what is easy to pick.
+  final String? masterType;
 
   /// EVERY value here must be one the column will accept.
   ///
@@ -101,7 +110,11 @@ const kModules = <ModuleSpec>[
     fields: [
       ModuleField('kind', 'Kind', FieldKind.choice,
           choices: ['expense', 'income'], required: true),
-      ModuleField('category', 'Category', FieldKind.text, required: true),
+      // The user's own expense categories, with their emoji — not a blank
+      // box. Typing "food" here where the laptop stored "Food & Dining" makes
+      // one category into two, and every total that adds them up is then wrong.
+      ModuleField('category', 'Category', FieldKind.master,
+          required: true, masterType: 'expense_category'),
       ModuleField('amount', 'Amount', FieldKind.money, required: true),
       ModuleField('method', 'Paid by', FieldKind.text),
       ModuleField('txn_date', 'Date', FieldKind.date, required: true),
@@ -178,7 +191,11 @@ const kModules = <ModuleSpec>[
     // dropped on the floor, so typing a statement amount appeared to work and
     // then the value was simply gone.
     fields: [
-      ModuleField('bank', 'Bank', FieldKind.text, required: true),
+      // Nine banks are seeded per user, each with its brand colour. The web
+      // app's card form never used them either; the list has been sitting
+      // behind /api/masters unread.
+      ModuleField('bank', 'Bank', FieldKind.master,
+          required: true, masterType: 'bank'),
       ModuleField('last4', 'Last 4 digits', FieldKind.text),
       ModuleField('credit_limit', 'Limit', FieldKind.money),
       ModuleField('billing_day', 'Billing day', FieldKind.number,
@@ -197,7 +214,8 @@ const kModules = <ModuleSpec>[
     dateField: 'next_due_date',
     blurb: 'What is owed, and the next instalment',
     fields: [
-      ModuleField('lender', 'Lender', FieldKind.text, required: true),
+      ModuleField('lender', 'Lender', FieldKind.master,
+          required: true, masterType: 'bank'),
       ModuleField('loan_type', 'Kind', FieldKind.text),
       ModuleField('principal', 'Principal', FieldKind.money),
       ModuleField('interest_rate', 'Interest %', FieldKind.number),

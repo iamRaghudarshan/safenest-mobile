@@ -22,6 +22,7 @@ import '../modules.dart';
 import '../session.dart';
 import '../theme.dart';
 import '../widgets/brand_button.dart';
+import '../widgets/master_picker.dart';
 import '../widgets/pill.dart';
 import '../widgets/skeleton.dart';
 
@@ -536,6 +537,12 @@ class _RecordSheetState extends State<_RecordSheet> {
         case FieldKind.choice:
           _values[f.key] = current?.toString() ??
               (f.choices.isNotEmpty ? f.choices.first : null);
+        case FieldKind.master:
+          // Never defaulted to the first item. Pre-selecting a category means
+          // every expense saved without touching the field is filed under
+          // whatever happens to sort first, which is worse than being asked.
+          _values[f.key] =
+              (current == null || '$current'.isEmpty) ? null : '$current';
         case FieldKind.toggle:
           _values[f.key] = current == 1 || current == true;
         case FieldKind.date:
@@ -567,6 +574,7 @@ class _RecordSheetState extends State<_RecordSheet> {
       switch (f.kind) {
         case FieldKind.choice:
         case FieldKind.date:
+        case FieldKind.master:
           if (_values[f.key] != null) body[f.key] = _values[f.key];
         case FieldKind.time:
           // Sent even when empty, unlike every other field. The server only
@@ -716,6 +724,13 @@ class _RecordSheetState extends State<_RecordSheet> {
             for (final c in f.choices)
               DropdownMenuItem(value: c, child: Text(prettyChoice(c)))
           ],
+          onChanged: (v) => setState(() => _values[f.key] = v),
+        );
+      case FieldKind.master:
+        return MasterPicker(
+          type: f.masterType!,
+          label: f.label,
+          value: _values[f.key] as String?,
           onChanged: (v) => setState(() => _values[f.key] = v),
         );
       case FieldKind.toggle:
