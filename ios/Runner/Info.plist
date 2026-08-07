@@ -38,6 +38,21 @@
 		<true/>
 	</dict>
 
+	<!-- Answers Apple's export-compliance question here rather than by hand on
+	     every upload. Without it each build sits in TestFlight marked "Missing
+	     Compliance" and reaches nobody until someone clicks through the same two
+	     questions again — which turns a one-command release back into a chore.
+
+	     false means "no encryption beyond the exemption": this app uses HTTPS to
+	     reach the owner's own computer and nothing else. It implements no
+	     cryptography of its own — the vault is AES-256-GCM on the server, under a
+	     key that never leaves that machine and never reaches this app.
+
+	     If that ever stops being true, this key has to change, and it is a legal
+	     declaration rather than a convenience. -->
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
+
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
