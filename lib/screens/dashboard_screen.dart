@@ -24,10 +24,23 @@ import '../theme.dart';
 import '../widgets/brand_button.dart';
 
 class DashboardScreen extends StatefulWidget {
-  const DashboardScreen({super.key, required this.onOpen});
+  const DashboardScreen({
+    super.key,
+    required this.onOpen,
+    this.initialData,
+    this.initialBrief,
+  });
 
   /// Opens another tab or module by key — 'expenses', 'gallery', 'modules'.
   final void Function(String key) onOpen;
+
+  /// Supplied ONLY by tests, so this screen can be laid out with realistic
+  /// content and no server. It exists because the overflow that reached a real
+  /// phone — Columns inside Rows inside a ListView, defaulting to
+  /// MainAxisSize.max and so trying to fill infinite height — is exactly what a
+  /// widget test catches and an analyser never will.
+  final Map<String, dynamic>? initialData;
+  final Map<String, dynamic>? initialBrief;
 
   @override
   State<DashboardScreen> createState() => _DashboardScreenState();
@@ -41,6 +54,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
   @override
   void initState() {
     super.initState();
+    if (widget.initialData != null || widget.initialBrief != null) {
+      _data = widget.initialData;
+      _brief = widget.initialBrief;
+      _loading = false;
+      return;
+    }
     _load();
   }
 
@@ -89,7 +108,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final dues = upcoming.where((u) => (u as Map)['days'] != null).toList();
 
     return Scaffold(
-      body: RefreshIndicator(
+      // SafeArea, because this is the ONE screen with no AppBar.
+      //
+      // Every other screen has one, and an AppBar insets itself below the status
+      // bar automatically. Home does not — so its content began at y=0, under
+      // the clock and behind the notch, with the greeting and the person's own
+      // name half-hidden. That is what "the home page is going out of screen"
+      // was, and it appears on a phone and on no simulator sized without a
+      // notch.
+      //
+      // bottom: false — the ListView already reserves its own room at the end,
+      // and insetting twice would leave a visible gap above the tab bar.
+      body: SafeArea(
+        bottom: false,
+        child: RefreshIndicator(
         onRefresh: _load,
         child: ListView(
           padding: const EdgeInsets.fromLTRB(14, 8, 14, 24),
@@ -98,6 +130,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
               children: [
                 Expanded(
                   child: Column(
+                    mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(name.isEmpty ? 'Home' : name,
@@ -131,6 +164,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 const SizedBox(width: 12),
                 Expanded(
                   child: Column(
+                    mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text('Add an expense', style: theme.textTheme.titleSmall),
@@ -156,6 +190,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   const SizedBox(width: 12),
                   Expanded(
                     child: Column(
+                      mainAxisSize: MainAxisSize.min,
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text('All clear!', style: theme.textTheme.titleSmall),
@@ -226,6 +261,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
             ]),
           ],
         ),
+        ),
       ),
     );
   }
@@ -277,6 +313,7 @@ class _DueRow extends StatelessWidget {
           const SizedBox(width: 12),
           Expanded(
             child: Column(
+              mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text('${item['title'] ?? ''}',
@@ -316,7 +353,7 @@ class _Quick extends StatelessWidget {
   Widget build(BuildContext context) => Expanded(
         child: GestureDetector(
           onTap: onTap,
-          child: Column(children: [
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
             Container(
               height: 46,
               width: 46,
@@ -341,6 +378,7 @@ class _Stat extends StatelessWidget {
   Widget build(BuildContext context) => BrandCard(
         padding: const EdgeInsets.all(14),
         child: Column(
+          mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(label, style: Theme.of(context).textTheme.labelSmall),

@@ -192,6 +192,7 @@ class _ModuleListScreenState extends State<ModuleListScreen> {
                                     const SizedBox(width: 12),
                                     Expanded(
                                       child: Column(
+                                        mainAxisSize: MainAxisSize.min,
                                         crossAxisAlignment:
                                             CrossAxisAlignment.start,
                                         children: [
