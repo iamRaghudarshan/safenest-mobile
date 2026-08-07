@@ -190,6 +190,22 @@ class Api {
       onLicenceBlocked?.call(err);
       throw err;
     }
+    // A GATEWAY error is not the app failing. 502/503/504 come from the tunnel
+    // in front of it: Cloudflare answered, the computer behind it did not. That
+    // is the laptop asleep, the API not started, or the terminal closed — none
+    // of which is a bug in SafeNest.
+    //
+    // Lumping these in with 500 told a real person "your SafeNest ran into a
+    // problem" while the truth was that it was not running, and sent them
+    // looking at the app instead of at the machine. The web client already drew
+    // this distinction; it was not carried across, and it cost a sign-in that
+    // looked like a broken app.
+    if (res.statusCode == 502 || res.statusCode == 503 || res.statusCode == 504) {
+      throw ApiError(res.statusCode,
+          'Your computer is not answering. Check that it is switched on and '
+          'that SafeNest is running on it.',
+          offline: true);
+    }
     if (res.statusCode >= 500) {
       throw ApiError(res.statusCode, 'Your SafeNest ran into a problem.');
     }
