@@ -21,6 +21,7 @@ import 'package:provider/provider.dart';
 
 import '../session.dart';
 import '../theme.dart';
+import '../widgets/avatar.dart';
 import '../widgets/brand_button.dart';
 
 class DashboardScreen extends StatefulWidget {
@@ -139,7 +140,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       Text(
                         '$_greeting 👋'
                         '${_brief?['date'] != null ? " · ${_brief!['date']}" : ""}',
-                        style: theme.textTheme.bodySmall,
+                        // .home-greeting — 13.5px, weight 500, line-height 1.35.
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          fontSize: 13.5,
+                          fontWeight: FontWeight.w500,
+                          height: 1.35,
+                        ),
                       ),
                     ],
                   ),
@@ -148,6 +154,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   icon: const Icon(Icons.search),
                   onPressed: () => widget.onOpen('search'),
                 ),
+                const SizedBox(width: 4),
+                // The web app's .avatar-btn — the one thing in this header that
+                // belongs to the person rather than to their money. It opens
+                // Profile, as it does there.
+                Avatar(size: 40, onTap: () => widget.onOpen('profile')),
               ],
             ),
             const SizedBox(height: 14),
