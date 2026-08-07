@@ -146,7 +146,12 @@ void main() {
             ModuleListScreen(spec: spec, initialRows: const [])));
         await tester.pump();
 
-        await tester.tap(find.byType(FloatingActionButton));
+        // By its icon, not by FloatingActionButton. The add control is a
+        // gradient Container now (Material's FAB cannot express the brand's
+        // 135° fill), and a test that names the widget CLASS fails on a change
+        // that is invisible to the person using it. What matters is that there
+        // is one + on the screen and tapping it opens the sheet.
+        await tester.tap(find.byIcon(Icons.add));
         await tester.pumpAndSettle();
 
         expect(tester.takeException(), isNull,
@@ -195,6 +200,77 @@ void main() {
     // A tick per row — the action that was not available at all before.
     expect(find.byIcon(Icons.radio_button_unchecked), findsNWidgets(2));
     expect(find.byIcon(Icons.check_circle), findsOneWidget);
+  });
+
+  testWidgets('a row crowded with badges still fits the narrowest phone',
+      (tester) async {
+    tester.view.physicalSize = const Size(375, 667);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+
+    // Worst case on purpose: a long bank name, a big amount, and every badge
+    // this row can show at once. Rows grew a 44px icon tile and a wrap of pills,
+    // and a row that only fits when it is nearly empty is not a row that fits.
+    await tester.pumpWidget(_wrap(ModuleListScreen(
+      spec: moduleByKey('cards')!,
+      initialRows: const [
+        {
+          'id': 1,
+          'bank': 'Housing Development Finance Corporation Bank',
+          'last4': '4242',
+          'credit_limit': 2500000,
+          'next_due_fmt': '12-08-2026',
+          'paid_this_month': false,
+          'days': -6,
+        },
+      ],
+    )));
+    await tester.pump();
+
+    expect(tester.takeException(), isNull, reason: 'a full card row overflowed');
+    expect(find.text('Not paid'), findsOneWidget);
+    expect(find.text('6d overdue'), findsOneWidget);
+  });
+
+  testWidgets('an empty module invites rather than just reporting',
+      (tester) async {
+    tester.view.physicalSize = const Size(375, 667);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+
+    await tester.pumpWidget(_wrap(ModuleListScreen(
+        spec: moduleByKey('loans')!, initialRows: const [])));
+    await tester.pump();
+
+    expect(tester.takeException(), isNull);
+    expect(find.text('No loans yet'), findsOneWidget);
+    // The button matters more than the wording: the empty state is the first
+    // thing a new customer sees in a module, and it used to be a dead end.
+    expect(find.text('Add your first'), findsOneWidget);
+  });
+
+  testWidgets('money in and money out are not the same colour', (tester) async {
+    tester.view.physicalSize = const Size(375, 667);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+
+    final spec = moduleByKey('expenses')!;
+    final income = rowAccent(spec, const {'kind': 'income'});
+    final spend = rowAccent(spec, const {'kind': 'expense'});
+    expect(income.colour, isNot(spend.colour),
+        reason: 'this is the one list where a wrong glance costs you a wrong '
+            'belief about your month');
+    expect(income.colour, kOk);
+
+    await tester.pumpWidget(_wrap(ModuleListScreen(
+      spec: spec,
+      initialRows: const [
+        {'id': 1, 'kind': 'income', 'category': 'Salary', 'amount': 150000},
+        {'id': 2, 'kind': 'expense', 'category': 'Groceries', 'amount': 2400},
+      ],
+    )));
+    await tester.pump();
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('what is late comes first and what is done sinks',

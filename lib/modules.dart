@@ -19,6 +19,8 @@ library;
 
 import 'package:flutter/material.dart';
 
+import 'theme.dart';
+
 enum FieldKind { text, number, money, date, time, note, choice, toggle }
 
 class ModuleField {
@@ -262,3 +264,71 @@ ModuleSpec? moduleByKey(String key) {
   }
   return null;
 }
+
+/// The colour and glyph for ONE row, which is not always the module's own.
+///
+/// Every row on a screen being the same colour is what made these lists look
+/// like a spreadsheet. The web app does not do that: Todos.tsx colours a task by
+/// its priority (high red, medium amber, low green) and Reminders.tsx colours a
+/// reminder by the module it belongs to, so a card reminder is pink and an
+/// insurance one is blue. That is colour carrying meaning rather than decoration,
+/// and it is the difference between scanning a list and reading it.
+({Color colour, IconData icon}) rowAccent(
+    ModuleSpec s, Map<String, dynamic> r) {
+  switch (s.key) {
+    case 'expenses':
+      // Money in and money out should never be the same colour. This is the one
+      // list where the wrong glance costs you a wrong belief about your month.
+      final income = '${r['kind']}' == 'income';
+      return (
+        colour: income ? kOk : const Color(0xFFF59E0B),
+        icon: income ? Icons.south_west : Icons.north_east,
+      );
+    case 'todos':
+      const byPriority = {
+        'high': kDanger,
+        'medium': kWarn,
+        'low': kOk,
+      };
+      final done = '${r['status']}' == 'done';
+      return (
+        colour: done ? kOk : (byPriority['${r['priority']}'] ?? kWarn),
+        icon: done ? Icons.check : Icons.flag_outlined,
+      );
+    case 'reminders':
+      // Belongs-to drives the colour, exactly as the web list does.
+      final mod = '${r['module_ref'] ?? ''}';
+      final owner = moduleByKey(mod == 'todo' ? 'todos' : mod);
+      return (
+        colour: r['is_done'] == 1 ? kOk : (owner?.colour ?? s.colour),
+        icon: r['is_done'] == 1
+            ? Icons.check
+            : (owner?.icon ?? Icons.notifications_outlined),
+      );
+    case 'cards':
+    case 'loans':
+      // Paid is the single fact worth reading off a bill without opening it.
+      final paid = r['paid_this_month'] == true;
+      return (
+        colour: paid ? kOk : s.colour,
+        icon: paid ? Icons.check : s.icon,
+      );
+    case 'investments':
+      // Up or down against what was put in. Green for a gain is the one colour
+      // convention nobody has to be taught.
+      final put = _num(r['invested_amount']);
+      final now = _num(r['current_value']);
+      if (put != null && now != null && put > 0) {
+        final up = now >= put;
+        return (
+          colour: up ? kOk : kDanger,
+          icon: up ? Icons.trending_up : Icons.trending_down,
+        );
+      }
+      return (colour: s.colour, icon: s.icon);
+    default:
+      return (colour: s.colour, icon: s.icon);
+  }
+}
+
+double? _num(dynamic v) => v is num ? v.toDouble() : double.tryParse('${v ?? ''}');

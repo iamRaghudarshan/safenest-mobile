@@ -22,6 +22,8 @@ import '../modules.dart';
 import '../session.dart';
 import '../theme.dart';
 import '../widgets/brand_button.dart';
+import '../widgets/pill.dart';
+import '../widgets/skeleton.dart';
 
 class ModuleListScreen extends StatefulWidget {
   const ModuleListScreen(
@@ -142,6 +144,64 @@ class _ModuleListScreenState extends State<ModuleListScreen> {
     if (saved == true) _load();
   }
 
+  /// The tinted badges on a row: when it is due, whether it is paid, how
+  /// urgent it is. Transcribed from format.ts::dueLabel, which the web list uses
+  /// for exactly the same job — same wording, same thresholds, same tones, so a
+  /// reminder reading "2d overdue" in red on the laptop reads the same here.
+  List<Widget> _badges(
+      Map<String, dynamic> r, int? days, bool late, bool done) {
+    final out = <Widget>[];
+
+    if (_payable) {
+      final paid = r['paid_this_month'] == true;
+      out.add(Pill(paid ? 'Paid this month' : 'Not paid',
+          tone: paid ? PillTone.ok : PillTone.warn,
+          icon: paid ? Icons.check_circle_outline : Icons.schedule));
+    }
+
+    // A finished thing needs no urgency badge; saying "3d overdue" next to
+    // something already ticked off is just wrong.
+    if (!done && days != null) {
+      if (days < 0) {
+        out.add(Pill('${days.abs()}d overdue',
+            tone: PillTone.danger, icon: Icons.priority_high));
+      } else if (days == 0) {
+        out.add(const Pill('Due today',
+            tone: PillTone.danger, icon: Icons.today_outlined));
+      } else if (days == 1) {
+        out.add(const Pill('Due tomorrow', tone: PillTone.warn));
+      } else if (days <= 7) {
+        out.add(Pill('In $days days', tone: PillTone.warn));
+      }
+      // Beyond a week is not news, and a row of grey pills on everything makes
+      // the coloured ones stop meaning anything.
+    }
+
+    if (!done && '${r['time_fmt'] ?? ''}'.isNotEmpty) {
+      out.add(Pill('${r['time_fmt']}',
+          tone: PillTone.brand, icon: Icons.notifications_active_outlined));
+    }
+
+    if (widget.spec.key == 'todos' && !done) {
+      final p = '${r['priority'] ?? ''}';
+      if (p == 'high') {
+        out.add(const Pill('High', tone: PillTone.danger));
+      } else if (p == 'low') {
+        out.add(const Pill('Low', tone: PillTone.muted));
+      }
+      // 'medium' is the default and the common case — a badge on nearly every
+      // row is noise, not information.
+    }
+
+    final rec = '${r['recurrence'] ?? 'none'}';
+    if (rec != 'none' && rec.isNotEmpty && rec != 'null') {
+      out.add(Pill(prettyChoice(rec),
+          tone: PillTone.muted, icon: Icons.repeat));
+    }
+
+    return out;
+  }
+
   Future<void> _pay(Map<String, dynamic> row, {required bool paid}) async {
     final messenger = ScaffoldMessenger.of(context);
     try {
@@ -179,9 +239,46 @@ class _ModuleListScreenState extends State<ModuleListScreen> {
         title: Text(s.label),
         automaticallyImplyLeading: !widget.embedded,
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () => _openSheet(),
-        child: const Icon(Icons.add),
+      // .fab — 58px, radius 20, the 135° brand gradient and its glow. Material's
+      // default is a flat circle in one colour, which is the one control on the
+      // screen that should look like the app rather than like Android.
+      floatingActionButton: Container(
+        width: 58,
+        height: 58,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(20),
+          gradient: const LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [kBrand, kBrand2],
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: kBrand.withValues(alpha: 0.44),
+              blurRadius: 28,
+              offset: const Offset(0, 12),
+            ),
+          ],
+        ),
+        child: Material(
+          color: Colors.transparent,
+          // A Container with an InkWell is not a button as far as a screen
+          // reader is concerned — it announces nothing and has no role. The
+          // widget this replaced carried both for free, so they have to be put
+          // back by hand rather than lost to a nicer gradient.
+          child: Semantics(
+            button: true,
+            label: 'Add to ${s.label}',
+            child: Tooltip(
+              message: 'Add to ${s.label}',
+              child: InkWell(
+                borderRadius: BorderRadius.circular(20),
+                onTap: () => _openSheet(),
+                child: const Icon(Icons.add, size: 30, color: Colors.white),
+              ),
+            ),
+          ),
+        ),
       ),
       body: Column(children: [
         if (_rows.length > 5)
@@ -198,11 +295,18 @@ class _ModuleListScreenState extends State<ModuleListScreen> {
           ),
         Expanded(
           child: _loading
-              ? const Center(child: CircularProgressIndicator())
+              // Placeholder cards, not a spinner — the shape of what is coming
+              // reads as "loading" where a lone circle on a blank page reads as
+              // "broken", and over a home network that wait is long enough to
+              // matter.
+              ? const SkeletonList()
               : _err != null
-                  ? _Retry(message: _err!.message, onRetry: _load)
+                  ? _LoadError(message: _err!.message, onRetry: _load)
                   : rows.isEmpty
-                      ? _Empty(spec: s, filtered: _filter.isNotEmpty)
+                      ? _Empty(
+                          spec: s,
+                          filtered: _filter.isNotEmpty,
+                          onAdd: () => _openSheet())
                       : RefreshIndicator(
                           onRefresh: _load,
                           // Cards with air between them, not flat rows divided
@@ -248,25 +352,52 @@ class _ModuleListScreenState extends State<ModuleListScreen> {
                                   ? (r['days'] as num).toInt()
                                   : null;
                               final late = !done && days != null && days < 0;
+                              final accent = rowAccent(s, r);
+                              // Built once. It was called twice per row — once
+                              // to ask whether it was empty and once to render —
+                              // which is a list-length multiplier on work that
+                              // allocates widgets.
+                              final badges = _badges(r, days, late, done);
 
                               return Padding(
                                 padding: const EdgeInsets.only(bottom: 10),
                                 child: BrandCard(
                                   onTap: () => _openSheet(r),
                                   padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
-                                  child: Row(children: [
-                                    // A colour bar rather than a circle: it
-                                    // states the module without stealing the
-                                    // width a real value needs.
+                                  // Badges sit UNDER the row, across the whole
+                                  // card, rather than inside the title column.
+                                  // Beside the amount and the pay button they
+                                  // were squeezed into 41 logical pixels and
+                                  // every pill overflowed its own text — a
+                                  // horizontal row is the wrong place for
+                                  // something that needs to wrap.
+                                  child: Column(
+                                      mainAxisSize: MainAxisSize.min,
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                  Row(children: [
+                                    // .rowitem .grip — 44px, radius 13, SOLID
+                                    // colour, white 22px glyph. A 4px bar was
+                                    // here before: technically the accent, but
+                                    // so thin that every list read as grey.
                                     Container(
-                                      width: 4,
-                                      height: 38,
+                                      width: 44,
+                                      height: 44,
                                       decoration: BoxDecoration(
-                                        // Late turns the bar red. It is the one
-                                        // thing worth spotting without reading.
-                                        color: late ? kDanger : s.colour,
-                                        borderRadius: BorderRadius.circular(2),
+                                        color: accent.colour,
+                                        borderRadius: BorderRadius.circular(13),
+                                        boxShadow: [
+                                          BoxShadow(
+                                            color: accent.colour
+                                                .withValues(alpha: 0.32),
+                                            blurRadius: 10,
+                                            offset: const Offset(0, 4),
+                                          ),
+                                        ],
                                       ),
+                                      child: Icon(accent.icon,
+                                          size: 22, color: Colors.white),
                                     ),
                                     const SizedBox(width: 12),
                                     if (_tickable)
@@ -324,8 +455,18 @@ class _ModuleListScreenState extends State<ModuleListScreen> {
                                       Text(amount,
                                           style: TextStyle(
                                               fontSize: 15.5,
-                                              fontWeight: FontWeight.w700,
-                                              color: s.colour)),
+                                              fontWeight: FontWeight.w800,
+                                              // Tabular figures, so a column of
+                                              // amounts lines up on the decimal
+                                              // instead of jittering per row.
+                                              fontFeatures: const [
+                                                FontFeature.tabularFigures()
+                                              ],
+                                              // The row's accent, not the
+                                              // module's: money coming IN reads
+                                              // green and an investment that is
+                                              // down reads red.
+                                              color: accent.colour)),
                                     if (_payable)
                                       IconButton(
                                         tooltip:
@@ -341,6 +482,21 @@ class _ModuleListScreenState extends State<ModuleListScreen> {
                                         onPressed: () => _pay(r, paid: !paid),
                                       ),
                                   ]),
+                                  if (badges.isNotEmpty) ...[
+                                    const SizedBox(height: 10),
+                                    // Indented to the title, not to the card, so
+                                    // the badges read as belonging to the record
+                                    // rather than floating under it.
+                                    Padding(
+                                      padding:
+                                          const EdgeInsets.only(left: 56, right: 4),
+                                      child: Wrap(
+                                          spacing: 6,
+                                          runSpacing: 6,
+                                          children: badges),
+                                    ),
+                                  ],
+                                ]),
                                 ),
                               );
                             },
@@ -485,9 +641,24 @@ class _RecordSheetState extends State<_RecordSheet> {
       child: SingleChildScrollView(
         child: Column(mainAxisSize: MainAxisSize.min, children: [
           Row(children: [
-            CircleAvatar(
-              backgroundColor: s.colour.withValues(alpha: 0.14),
-              child: Icon(s.icon, size: 19, color: s.colour),
+            // The same solid tile the rows and the empty state use. A 14% wash
+            // was the odd one out, and the sheet is the screen you look at
+            // longest.
+            Container(
+              width: 42,
+              height: 42,
+              decoration: BoxDecoration(
+                color: s.colour,
+                borderRadius: BorderRadius.circular(13),
+                boxShadow: [
+                  BoxShadow(
+                    color: s.colour.withValues(alpha: 0.34),
+                    blurRadius: 12,
+                    offset: const Offset(0, 5),
+                  ),
+                ],
+              ),
+              child: Icon(s.icon, size: 20, color: Colors.white),
             ),
             const SizedBox(width: 10),
             Expanded(
@@ -636,43 +807,141 @@ class _RecordSheetState extends State<_RecordSheet> {
   }
 }
 
+/// `.mod-empty` — the module's own icon on its OWN colour, its purpose, and the
+/// button that fixes it.
+///
+/// A grey outline glyph and two lines of text was what was here. The web app
+/// gives this a 66px tile in the module's accent with a big soft shadow, because
+/// the empty state is the FIRST thing a new customer sees in every module — it
+/// is not an error condition, it is the invitation.
 class _Empty extends StatelessWidget {
-  const _Empty({required this.spec, required this.filtered});
+  const _Empty({required this.spec, required this.filtered, this.onAdd});
   final ModuleSpec spec;
   final bool filtered;
+  final VoidCallback? onAdd;
 
   @override
   Widget build(BuildContext context) => ListView(children: [
         Padding(
-          padding: const EdgeInsets.all(48),
+          padding: const EdgeInsets.fromLTRB(22, 34, 22, 20),
           child: Column(children: [
-            Icon(spec.icon, size: 44, color: spec.colour),
-            const SizedBox(height: 14),
-            Text(filtered ? 'Nothing matches' : 'Nothing here yet',
-                style: Theme.of(context).textTheme.titleMedium),
-            const SizedBox(height: 6),
-            Text(filtered ? 'Try a different search' : spec.blurb,
+            Container(
+              width: 66,
+              height: 66,
+              decoration: BoxDecoration(
+                color: spec.colour,
+                borderRadius: BorderRadius.circular(22),
+                boxShadow: [
+                  BoxShadow(
+                    color: spec.colour.withValues(alpha: 0.38),
+                    blurRadius: 28,
+                    offset: const Offset(0, 12),
+                  ),
+                ],
+              ),
+              child: Icon(spec.icon, size: 30, color: Colors.white),
+            ),
+            const SizedBox(height: 16),
+            Text(
+                filtered
+                    ? 'Nothing matches'
+                    : 'No ${spec.label.toLowerCase()} yet',
                 textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.bodySmall),
+                style: const TextStyle(
+                    fontSize: 19,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: -0.38)),
+            const SizedBox(height: 8),
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 300),
+              child: Text(filtered ? 'Try a different search' : spec.blurb,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                      fontSize: 13.5,
+                      height: 1.55,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant)),
+            ),
+            if (!filtered && onAdd != null) ...[
+              const SizedBox(height: 20),
+              // min-width, NOT width. `.mod-empty-btn { min-width: 190px }` is
+              // a floor the label may exceed; pinning it to 190 clipped
+              // "Add your first" by 57 pixels on a small phone.
+              ConstrainedBox(
+                constraints: const BoxConstraints(minWidth: 190),
+                child: BrandButton(label: 'Add your first', onPressed: onAdd),
+              ),
+            ],
           ]),
         )
       ]);
 }
 
-class _Retry extends StatelessWidget {
-  const _Retry({required this.message, required this.onRetry});
+/// NOT the empty state, and that distinction is the whole point.
+///
+/// Telling somebody "no loans yet" because their laptop is asleep reads as
+/// "your records are gone" — alarming and untrue, in the one app where a person
+/// keeps everything. The web app splits these two for exactly that reason and
+/// says so in as many words; the phone showed one bare line of error text.
+class _LoadError extends StatelessWidget {
+  const _LoadError({required this.message, required this.onRetry});
   final String message;
   final VoidCallback onRetry;
 
   @override
-  Widget build(BuildContext context) => ListView(children: [
-        Padding(
-          padding: const EdgeInsets.all(32),
-          child: Column(children: [
-            Text(message, textAlign: TextAlign.center),
-            const SizedBox(height: 16),
-            FilledButton.tonal(onPressed: onRetry, child: const Text('Try again')),
-          ]),
-        )
-      ]);
+  Widget build(BuildContext context) {
+    final offline =
+        RegExp(r'offline|reach|connection|refused|timed out', caseSensitive: false)
+            .hasMatch(message);
+    return ListView(children: [
+      Padding(
+        padding: const EdgeInsets.fromLTRB(22, 34, 22, 20),
+        child: Column(children: [
+          Container(
+            width: 66,
+            height: 66,
+            decoration: BoxDecoration(
+              color: kWarn.withValues(alpha: 0.18),
+              borderRadius: BorderRadius.circular(22),
+            ),
+            child: Center(
+                child: Text(offline ? '📡' : '⚠️',
+                    style: const TextStyle(fontSize: 30))),
+          ),
+          const SizedBox(height: 16),
+          Text(offline ? 'Can’t load right now' : 'Something went wrong',
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                  fontSize: 19,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: -0.38)),
+          const SizedBox(height: 8),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 300),
+            child: Text(message,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                    fontSize: 13.5,
+                    height: 1.55,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant)),
+          ),
+          const SizedBox(height: 10),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 300),
+            child: Text(
+                'Your records are safe on your computer — they just cannot be '
+                'fetched at the moment.',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                    fontSize: 12.5,
+                    height: 1.5,
+                    color: Theme.of(context).colorScheme.outline)),
+          ),
+          const SizedBox(height: 20),
+          ConstrainedBox(
+              constraints: const BoxConstraints(minWidth: 190),
+              child: BrandButton(label: 'Try again', onPressed: onRetry)),
+        ]),
+      )
+    ]);
+  }
 }
