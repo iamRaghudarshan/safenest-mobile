@@ -40,10 +40,28 @@ subprojects {
 subprojects {
     val forceCompileSdk = {
         extensions.findByName("android")?.let { android ->
-            runCatching {
-                android.javaClass
-                    .getMethod("setCompileSdkVersion", Int::class.java)
-                    .invoke(android, 36)
+            // Two spellings, because which one exists depends on the Android
+            // Gradle Plugin version: compileSdk (Int) on AGP 8's CommonExtension,
+            // compileSdkVersion(int) on the older BaseExtension.
+            val applied = listOf("setCompileSdk", "setCompileSdkVersion").any { name ->
+                try {
+                    android.javaClass.getMethod(name, Int::class.java).invoke(android, 36)
+                    true
+                } catch (_: NoSuchMethodException) {
+                    false
+                } catch (e: Exception) {
+                    logger.warn("compileSdk override on ${project.path} failed: $e")
+                    false
+                }
+            }
+            // SAID OUT LOUD when it does not work. The first version of this
+            // wrapped the whole thing in runCatching, so when the method name was
+            // wrong it failed silently and the build died later blaming the
+            // plugin — which cost two rounds of guessing at the wrong thing. A
+            // flag that is never read is the same as no flag at all.
+            if (!applied) {
+                logger.warn("compileSdk override did NOT apply to ${project.path} " +
+                            "— if the AAR metadata check fails, this is why")
             }
         }
     }

@@ -115,7 +115,14 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
   }
 
   Future<void> _upload() async {
-    final picked = await FilePicker.platform.pickFiles(
+    // Static in file_picker 11 — `FilePicker.platform` was the 8.x spelling.
+    // Upgraded because 8.x compiles against android-34 and the build now
+    // requires 36; the API change came with it.
+    //
+    // withData false on purpose: reading every chosen file into memory to hand
+    // it to the picker is how a phone dies on a large selection. The path is
+    // enough — the bytes are read one file at a time below.
+    final picked = await FilePicker.pickFiles(
       allowMultiple: true,
       withData: false,
     );
