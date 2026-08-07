@@ -283,6 +283,33 @@ ModuleSpec? moduleByKey(String key) {
   return null;
 }
 
+/// EVERY module key the app can show — not just the record ones.
+///
+/// `kModules` is the seven modules that share the generic list-and-sheet.
+/// Gallery, Documents and Vault are screens of their own and are not in it, and
+/// that is the whole of the following bug:
+///
+///   home_screen.dart built its "allow everything" set as
+///   `{...kModules.map((m) => m.key), 'vault', 'documents'}` — which omits
+///   GALLERY. That set is used on three paths: an admin, a user whose
+///   permissions come back empty, and a user whose permissions could not be
+///   fetched. On all three the Gallery tab was filtered straight out of the
+///   navigation bar, and `_open('gallery')` found no tab, no ModuleSpec and no
+///   special case, so the Modules tile and the Dashboard shortcut did nothing
+///   at all.
+///
+///   The module was never removed or disabled. It was unreachable, for the
+///   administrator most of all, in every build from 0.4.0 onward.
+///
+/// One list, so the next screen that needs "all of them" cannot get a different
+/// answer from this one.
+final kAllModuleKeys = <String>{
+  for (final m in kModules) m.key,
+  'gallery',
+  'documents',
+  'vault',
+};
+
 /// The colour and glyph for ONE row, which is not always the module's own.
 ///
 /// Every row on a screen being the same colour is what made these lists look

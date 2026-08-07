@@ -25,6 +25,7 @@ import 'documents_screen.dart';
 import 'module_list_screen.dart';
 import 'modules_screen.dart';
 import 'photos_home.dart';
+import 'vault_screen.dart';
 import 'profile_screen.dart';
 
 class _Tab {
@@ -83,7 +84,7 @@ class _HomeScreenState extends State<HomeScreen> {
           map['user'] is Map ? Map<String, dynamic>.from(map['user'] as Map) : map;
 
       if (user['role'] == 'admin') {
-        setState(() => _allowed = {...kModules.map((m) => m.key), 'vault', 'documents'});
+        setState(() => _allowed = kAllModuleKeys);
         return;
       }
       final perms = map['modules'] ?? map['permissions'] ?? user['modules'];
@@ -101,13 +102,13 @@ class _HomeScreenState extends State<HomeScreen> {
         });
       }
       setState(() => _allowed = allowed.isEmpty
-          ? {...kModules.map((m) => m.key), 'vault', 'documents'}
+          ? kAllModuleKeys
           : allowed);
     } on ApiError {
       // Unreachable is not the same as forbidden. Showing everything means the
       // server still refuses what it should; hiding everything would leave a
       // person staring at two tabs wondering what happened to their app.
-      setState(() => _allowed = {...kModules.map((m) => m.key), 'vault', 'documents'});
+      setState(() => _allowed = kAllModuleKeys);
     }
   }
 
@@ -130,9 +131,21 @@ class _HomeScreenState extends State<HomeScreen> {
           .push(MaterialPageRoute(builder: (_) => ModuleListScreen(spec: spec)));
       return;
     }
-    if (key == 'documents') {
-      Navigator.of(context)
-          .push(MaterialPageRoute(builder: (_) => const DocumentsScreen()));
+    // The screens that are not record modules. Gallery was missing here as well
+    // as from the allow-set, so there was no second way in either: tapping
+    // Gallery on the Modules grid, or the Dashboard shortcut, fell through this
+    // method and did nothing at all. A tap that produces no result and no error
+    // is the hardest kind of broken to report.
+    switch (key) {
+      case 'documents':
+        Navigator.of(context)
+            .push(MaterialPageRoute(builder: (_) => const DocumentsScreen()));
+      case 'gallery':
+        Navigator.of(context)
+            .push(MaterialPageRoute(builder: (_) => const PhotosHome()));
+      case 'vault':
+        Navigator.of(context)
+            .push(MaterialPageRoute(builder: (_) => const VaultScreen()));
     }
   }
 

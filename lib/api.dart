@@ -147,7 +147,18 @@ class Api {
   /// answer. A photo the server already had is not a failure to retry for ever;
   /// it is the backup working, and counting it as an error would make every
   /// second run look broken.
-  Future<bool> postRaw(String path, List<int> body, String contentType) async {
+  /// Returns the HTTP status, or 0 when the request never got an answer.
+  ///
+  /// This used to return a bare bool, and that is precisely why a failing
+  /// backup could not be reported: an expired token (401), a lapsed licence
+  /// (402), a file the server refused (413) and a dropped connection all
+  /// collapsed into `false`. The screen could then only say "could not be
+  /// read", which is not even the right half of the system — the photo read
+  /// perfectly, the upload failed.
+  ///
+  /// Keeping the status is what separates "sign in again" from "your laptop is
+  /// asleep", and the person can act on exactly one of those.
+  Future<int> postRawStatus(String path, List<int> body, String contentType) async {
     try {
       final res = await http
           .post(_url(path),
@@ -157,10 +168,15 @@ class Api {
               },
               body: body)
           .timeout(const Duration(minutes: 5));
-      return res.statusCode >= 200 && res.statusCode < 300;
+      return res.statusCode;
     } catch (_) {
-      return false;
+      return 0;   // never reached the server at all
     }
+  }
+
+  Future<bool> postRaw(String path, List<int> body, String contentType) async {
+    final s = await postRawStatus(path, body, contentType);
+    return s >= 200 && s < 300;
   }
 
   Future<dynamic> _send(Future<http.Response> Function() run) async {

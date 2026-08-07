@@ -27,6 +27,7 @@ library;
 
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:photo_manager/photo_manager.dart';
@@ -114,6 +115,20 @@ class BackupService extends ChangeNotifier {
               'Open Settings and grant access to all photos.'));
       return;
     }
+    // `hasAccess` is TRUE for PermissionState.limited — the comment on
+    // requestAccess() said this had to be named and then the code did not name
+    // it. iOS lets somebody grant access to a handful of chosen photos; the
+    // library then reports only those, so the backup would sweep four pictures
+    // out of twenty thousand and report a clean success. Nobody would look
+    // again for months.
+    if (perm == PermissionState.limited) {
+      _emit(const BackupProgress(
+          state: BackupState.failed,
+          message: 'SafeNest can only see the few photos you picked, not your '
+              'whole library. Settings → Privacy → Photos → SafeNest → '
+              'All Photos, then run this again.'));
+      return;
+    }
 
     await load();
 
@@ -171,54 +186,127 @@ class BackupService extends ChangeNotifier {
     }
 
     await _flush();
+
+    // A run where NOTHING got through is a failure, not a success with a small
+    // number in it. The old message was "Backed up. 0 new, 0 already there."
+    // whatever had happened — so an expired session, a lapsed licence or a
+    // sleeping laptop all read as a completed backup, and the photos were not
+    // there. That is the worst outcome this app can produce: it is the one
+    // screen whose entire promise is "your photos are safe now".
+    final nothingWorked = handledFail > 0 && handledDone == 0;
+    final someFailed = handledFail > 0;
+
     _emit(BackupProgress(
-      state: _stop ? BackupState.paused : BackupState.done,
+      state: _stop
+          ? BackupState.paused
+          : nothingWorked
+              ? BackupState.failed
+              : BackupState.done,
       total: count,
       done: handledDone,
       skipped: handledSkip,
       failed: handledFail,
       message: _stop
           ? 'Stopped — nothing is lost, it carries on from here next time.'
-          : 'Backed up. $handledDone new, $handledSkip already there.',
+          : nothingWorked
+              ? 'Nothing could be backed up. ${_lastProblem ?? ""}'.trim()
+              : someFailed
+                  // Named, and the count kept, so a partial run cannot pass for
+                  // a whole one. They are not marked sent, so the next run
+                  // retries exactly these.
+                  ? '$handledDone backed up, $handledSkip already there, '
+                      '$handledFail could not be sent. '
+                      '${_lastProblem ?? ""} They will be tried again next time.'
+                      .trim()
+                  : 'Backed up. $handledDone new, $handledSkip already there.',
     ));
   }
+
+  /// Why the most recent failures failed, in the server's own terms. Kept so the
+  /// screen can say something true instead of "could not be read".
+  String? _lastProblem;
 
   Future<bool> _send(AssetEntity asset) async {
     try {
       // originFile, not file: `file` hands back a transcoded copy on iOS, which
       // is slower and loses the original. The server decodes HEIC itself.
       final f = await asset.originFile;
-      if (f == null || !await f.exists()) return false;
+      if (f == null || !await f.exists()) {
+        _lastProblem = 'Some photos are stored in iCloud and are not on this '
+            'phone. Open them in Photos once, or turn off "Optimise Storage".';
+        return false;
+      }
       final bytes = await f.readAsBytes();
-      if (bytes.isEmpty) return false;   // iCloud placeholder, not a real file
+      if (bytes.isEmpty) {
+        _lastProblem = 'Some photos are in iCloud rather than on the phone.';
+        return false;
+      }
 
-      final ok = await _upload(bytes, asset.title ?? '${asset.id}.jpg');
-      if (ok) await _remember(asset.id);
-      return ok;
+      final status = await _upload(bytes, asset.title ?? '${asset.id}.jpg');
+      if (status >= 200 && status < 300) {
+        await _remember(asset.id);
+        return true;
+      }
+      // Naming the cause is the entire difference between a person fixing this
+      // in ten seconds and reporting "backup does not work".
+      _lastProblem = switch (status) {
+        0 => 'Your computer could not be reached. Check it is awake and that '
+            'the address in Profile is right.',
+        401 => 'Your session has expired. Sign out and back in.',
+        402 => 'The licence on your computer needs attention — photos cannot '
+            'be added until it does.',
+        403 => 'This account is not allowed to add photos.',
+        413 => 'Some photos are larger than your computer will accept.',
+        >= 500 => 'Your computer answered with an error ($status). Its own '
+            'console may say more.',
+        _ => 'Your computer refused the upload ($status).',
+      };
+      return false;
     } catch (_) {
+      _lastProblem = 'Something went wrong reading a photo from this phone.';
       return false;
     }
   }
 
-  Future<bool> _upload(Uint8List bytes, String name) async {
+  /// Returns the HTTP status: 2xx is a success, 0 means it never arrived.
+  Future<int> _upload(Uint8List bytes, String name) async {
     // Multipart by hand rather than pulling in a client: one field, one file, and
     // the server's /api/gallery/upload has been driven with exactly this shape.
     final boundary = '----safenest${DateTime.now().microsecondsSinceEpoch}';
+
+    // A filename is a header VALUE. A quote, a newline or a stray CR in a photo
+    // title would break the Content-Disposition line and, with a newline, let
+    // the name inject headers of its own. Phone camera names are tame; names
+    // that came off a computer, a messaging app or a rename are not.
+    final safe = name
+        .replaceAll(RegExp(r'[\r\n"\\]'), '_')
+        .replaceAll(RegExp(r'[\x00-\x1f]'), '_');
+
     final head = utf8.encode('--$boundary\r\n'
-        'Content-Disposition: form-data; name="file"; filename="$name"\r\n'
+        'Content-Disposition: form-data; name="file"; filename="$safe"\r\n'
         'Content-Type: application/octet-stream\r\n\r\n');
     final tail = utf8.encode('\r\n--$boundary--\r\n');
-    final body = <int>[...head, ...bytes, ...tail];
+
+    // A BytesBuilder, not `<int>[...head, ...bytes, ...tail]`.
+    //
+    // That spread built a growable List<int> of BOXED integers — for a 4 MB
+    // photo, four million heap objects instead of a four-megabyte buffer, and
+    // four of those alive at once because uploads run four at a time. On a
+    // phone backing up a large library that is an out-of-memory kill, and the
+    // library most worth backing up is the biggest one.
+    final buf = BytesBuilder(copy: false)
+      ..add(head)
+      ..add(bytes)
+      ..add(tail);
 
     try {
-      final res = await _api.postRaw(
+      return await _api.postRawStatus(
         '/api/gallery/upload?faces=0',
-        body,
+        buf.takeBytes(),
         'multipart/form-data; boundary=$boundary',
       );
-      return res;
     } catch (_) {
-      return false;
+      return 0;
     }
   }
 }
