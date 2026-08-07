@@ -15,6 +15,7 @@ import '../api.dart';
 import '../modules.dart';
 import '../session.dart';
 import 'module_list_screen.dart';
+import 'vault_screen.dart';
 
 class RecordsScreen extends StatefulWidget {
   const RecordsScreen({super.key});
@@ -42,7 +43,11 @@ class _RecordsScreenState extends State<RecordsScreen> {
       // An admin bypasses the per-module checks everywhere on the server, so
       // showing them everything is not a shortcut — it is the same rule.
       if (user['role'] == 'admin') {
-        setState(() => _allowed = kModules.map((m) => m.key).toSet());
+        // 'vault' is not in kModules — it has a reveal flow rather than a
+        // list-and-form, so it is not driven by a ModuleSpec — but an admin can
+        // still open it, and leaving it out here would hide it from them.
+        setState(() =>
+            _allowed = {...kModules.map((m) => m.key), 'vault'});
         return;
       }
 
@@ -66,7 +71,7 @@ class _RecordsScreenState extends State<RecordsScreen> {
       // an empty screen. The server still refuses what it should, so the worst
       // case is a 403 the person can read — not a menu that looks broken.
       setState(() => _allowed = allowed.isEmpty
-          ? kModules.map((m) => m.key).toSet()
+          ? {...kModules.map((m) => m.key), 'vault'}
           : allowed);
     } on ApiError catch (e) {
       setState(() => _error = e.message);
@@ -85,6 +90,20 @@ class _RecordsScreenState extends State<RecordsScreen> {
               : ListView(
                   padding: const EdgeInsets.symmetric(vertical: 8),
                   children: [
+                    if (allowed.contains('vault'))
+                      ListTile(
+                        leading: CircleAvatar(
+                          backgroundColor: Colors.deepPurple.withValues(alpha: 0.14),
+                          child: const Icon(Icons.lock_outline,
+                              color: Colors.deepPurple),
+                        ),
+                        title: const Text('Vault'),
+                        subtitle: const Text('Passwords, encrypted on your computer'),
+                        trailing: const Icon(Icons.chevron_right),
+                        onTap: () => Navigator.of(context).push(
+                          MaterialPageRoute(builder: (_) => const VaultScreen()),
+                        ),
+                      ),
                     for (final m in kModules)
                       if (allowed.contains(m.key))
                         ListTile(

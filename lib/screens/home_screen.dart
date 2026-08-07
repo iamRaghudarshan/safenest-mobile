@@ -18,6 +18,7 @@ import '../theme.dart';
 import 'photos_home.dart';
 import 'backup_screen.dart';
 import 'records_screen.dart';
+import 'documents_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key, required this.brand});
@@ -34,12 +35,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     final pages = [
       const PhotosHome(),
-      const _NotYet(
-        icon: Icons.folder_outlined,
-        title: 'Documents',
-        note: 'Coming next — a Drive-style file browser over the documents '
-            'already on your computer.',
-      ),
+      const DocumentsScreen(),
       const RecordsScreen(),
       _Profile(brand: widget.brand),
     ];
@@ -81,42 +77,6 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
     );
   }
-}
-
-/// Says what is not built yet, rather than showing an empty screen that looks
-/// broken. A tab that is honestly unfinished beats one that seems faulty.
-class _NotYet extends StatelessWidget {
-  const _NotYet({required this.icon, required this.title, required this.note});
-  final IconData icon;
-  final String title;
-  final String note;
-
-  @override
-  Widget build(BuildContext context) => Scaffold(
-        appBar: AppBar(title: Text(title)),
-        body: Center(
-          child: Padding(
-            padding: const EdgeInsets.all(32),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(icon, size: 48, color: Theme.of(context).colorScheme.outline),
-                const SizedBox(height: 16),
-                Text('Not built yet',
-                    style: Theme.of(context).textTheme.titleMedium),
-                const SizedBox(height: 8),
-                Text(note,
-                    textAlign: TextAlign.center,
-                    style: Theme.of(context).textTheme.bodySmall),
-                const SizedBox(height: 16),
-                Text('It is all on your computer in the meantime.',
-                    textAlign: TextAlign.center,
-                    style: Theme.of(context).textTheme.bodySmall),
-              ],
-            ),
-          ),
-        ),
-      );
 }
 
 class _Profile extends StatelessWidget {

@@ -63,6 +63,63 @@ class Api {
   Future<dynamic> delete(String path) =>
       _send(() => http.delete(_url(path), headers: _headers(json: false)));
 
+  /// Fetch a file's bytes — a document to open, an export to save.
+  ///
+  /// Signed and expiring on the server, and bound to the owner, so this cannot
+  /// be handed to an external viewer as a URL and fetched later: by then the
+  /// signature has lapsed. It is downloaded here and written to a temporary file
+  /// instead, which is also the only way a PDF viewer on the phone can see it.
+  Future<List<int>> download(String path) async {
+    final res = await http.get(_url(path), headers: {
+      if (token != null) 'Authorization': 'Bearer $token',
+    }).timeout(const Duration(minutes: 5));
+    if (res.statusCode >= 400) {
+      throw ApiError(res.statusCode,
+          res.statusCode == 404 ? 'That file is no longer there' : 'Could not fetch it');
+    }
+    return res.bodyBytes;
+  }
+
+  /// One file plus form fields, framed by hand.
+  ///
+  /// By hand rather than with a client package because the framing has to match
+  /// what the server's UploadFile expects exactly, and that shape has already
+  /// been driven end to end against these endpoints.
+  Future<bool> postMultipart(
+    String path, {
+    required String fileField,
+    required String filename,
+    required List<int> bytes,
+    Map<String, String> fields = const {},
+  }) async {
+    final boundary = '----safenest${DateTime.now().microsecondsSinceEpoch}';
+    final body = <int>[];
+    void add(String s) => body.addAll(utf8.encode(s));
+
+    fields.forEach((k, v) {
+      add('--$boundary\r\nContent-Disposition: form-data; name="$k"\r\n\r\n$v\r\n');
+    });
+    add('--$boundary\r\n'
+        'Content-Disposition: form-data; name="$fileField"; filename="$filename"\r\n'
+        'Content-Type: application/octet-stream\r\n\r\n');
+    body.addAll(bytes);
+    add('\r\n--$boundary--\r\n');
+
+    try {
+      final res = await http
+          .post(_url(path),
+              headers: {
+                'Content-Type': 'multipart/form-data; boundary=$boundary',
+                if (token != null) 'Authorization': 'Bearer $token',
+              },
+              body: body)
+          .timeout(const Duration(minutes: 5));
+      return res.statusCode >= 200 && res.statusCode < 300;
+    } catch (_) {
+      return false;
+    }
+  }
+
   /// A body we have already framed ourselves — one photo, as multipart.
   ///
   /// Returns true for "the server has this photo", which INCLUDES the duplicate
