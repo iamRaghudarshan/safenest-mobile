@@ -6,7 +6,16 @@ plugins {
 
 android {
     namespace = "online.raghudarshan.safenest"
-    compileSdk = flutter.compileSdkVersion
+
+    // Pinned, not flutter.compileSdkVersion. That default was 34, and the first
+    // CI build failed on it: flutter_plugin_android_lifecycle now requires
+    // everything depending on it to compile against 36 or later. The failure
+    // names the plugin rather than this line, so it reads as a dependency
+    // problem when it is a project setting.
+    //
+    // compileSdk only says which APIs the code may reference. It does not change
+    // which phones can install the app — minSdk does that, and it stays low.
+    compileSdk = 36
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
@@ -15,11 +24,18 @@ android {
     }
 
     defaultConfig {
-        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
+        // Deliberately NOT the same string as the iOS bundle id. Apple's had to
+        // become safenest.raghudarshan.online because the reverse-DNS form was
+        // taken globally; Android's is independent, already registered nowhere,
+        // and changing it would mean moving the Kotlin package folders for no
+        // gain.
         applicationId = "online.raghudarshan.safenest"
-        // You can update the following values to match your application needs.
-        // For more information, see: https://flutter.dev/to/review-gradle-config.
-        minSdk = flutter.minSdkVersion
+
+        // 23, not flutter.minSdkVersion. flutter_secure_storage needs it for
+        // EncryptedSharedPreferences — which is the whole reason the sign-in
+        // token is not sitting in a plain XML file readable by anything with
+        // root. Android 6 and later, so about every phone still in use.
+        minSdk = 23
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
