@@ -16,8 +16,9 @@ import '../session.dart';
 import '../screens/gallery_screen.dart';
 
 class PhotoTile extends StatelessWidget {
-  const PhotoTile({super.key, required this.photo});
+  const PhotoTile({super.key, required this.photo, this.onOpen});
   final Photo photo;
+  final VoidCallback? onOpen;
 
   @override
   Widget build(BuildContext context) {
@@ -28,29 +29,31 @@ class PhotoTile extends StatelessWidget {
         : '$base${photo.thumbUrl}';
 
     return GestureDetector(
-      onTap: () {
-        // The lightbox lands in the next pass; opening a half-built viewer
-        // would be worse than the tile doing nothing yet.
-      },
+      onTap: onOpen,
       child: Stack(
         fit: StackFit.expand,
         children: [
           ColoredBox(color: Theme.of(context).colorScheme.surfaceContainerHighest),
-          Image.network(
-            url,
-            fit: BoxFit.cover,
-            // cacheWidth caps the DECODED size in memory. Without it, Flutter
-            // decodes at full resolution regardless of how small it is drawn,
-            // which is the usual reason a photo grid is killed by the OS.
-            cacheWidth: 320,
-            gaplessPlayback: true,
-            errorBuilder: (context, error, stack) => Icon(
-              Icons.broken_image_outlined,
-              color: Theme.of(context).colorScheme.outline,
-              size: 20,
+          // Hero tag matches the viewer's, so the tile grows into the full photo
+          // instead of the screen cutting to it.
+          Hero(
+            tag: photo.id,
+            child: Image.network(
+              url,
+              fit: BoxFit.cover,
+              // cacheWidth caps the DECODED size in memory. Without it, Flutter
+              // decodes at full resolution regardless of how small it is drawn,
+              // which is the usual reason a photo grid is killed by the OS.
+              cacheWidth: 320,
+              gaplessPlayback: true,
+              errorBuilder: (context, error, stack) => Icon(
+                Icons.broken_image_outlined,
+                color: Theme.of(context).colorScheme.outline,
+                size: 20,
+              ),
+              loadingBuilder: (ctx, child, progress) =>
+                  progress == null ? child : const SizedBox.shrink(),
             ),
-            loadingBuilder: (ctx, child, progress) =>
-                progress == null ? child : const SizedBox.shrink(),
           ),
           if (photo.isFavourite)
             const Positioned(

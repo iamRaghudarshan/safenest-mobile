@@ -20,22 +20,31 @@
 /// is that it is not that.
 library;
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../api.dart';
 import '../session.dart';
 import '../widgets/photo_tile.dart';
+import 'photo_viewer.dart';
 
 class Photo {
-  Photo(this.id, this.thumbUrl, this.takenAt, this.isFavourite);
+  Photo(this.id, this.url, this.thumbUrl, this.takenAt, this.isFavourite);
   final int id;
+  /// Full size — for the viewer only. The grid must never load these.
+  final String url;
   final String thumbUrl;
   final DateTime? takenAt;
   final bool isFavourite;
 
+  Photo copyWith({bool? isFavourite}) =>
+      Photo(id, url, thumbUrl, takenAt, isFavourite ?? this.isFavourite);
+
   static Photo fromJson(Map<String, dynamic> j) => Photo(
         j['id'] as int,
+        (j['url'] ?? '') as String,
         (j['thumb_url'] ?? '') as String,
         DateTime.tryParse((j['taken_at'] ?? '') as String),
         (j['is_favourite'] ?? j['is_favorite'] ?? 0) == 1,
@@ -59,6 +68,7 @@ class _GalleryScreenState extends State<GalleryScreen> {
   static const _page = 150;
 
   final _scroll = ScrollController();
+  final _search = TextEditingController();
   final List<Photo> _photos = [];
   int _total = 0;
   int _offset = 0;
@@ -66,6 +76,22 @@ class _GalleryScreenState extends State<GalleryScreen> {
   bool _more = false;
   bool _done = false;
   String? _error;
+
+  // Typing must not become a request per keystroke; the committed term lags the
+  // field by a beat, the same way the web app does it.
+  String _query = '';
+  bool _smart = false;
+  bool _favesOnly = false;
+  Timer? _debounce;
+
+  void _typed(String v) {
+    _debounce?.cancel();
+    _debounce = Timer(const Duration(milliseconds: 350), () {
+      if (v.trim() == _query) return;
+      setState(() => _query = v.trim());
+      _load(reset: true);
+    });
+  }
 
   @override
   void initState() {
@@ -83,6 +109,8 @@ class _GalleryScreenState extends State<GalleryScreen> {
 
   @override
   void dispose() {
+    _debounce?.cancel();
+    _search.dispose();
     _scroll.dispose();
     super.dispose();
   }
@@ -102,6 +130,12 @@ class _GalleryScreenState extends State<GalleryScreen> {
       final d = await api.get('/api/gallery', {
         'offset': '$off',
         'limit': '$_page',
+        if (_query.isNotEmpty) 'q': _query,
+        // Content search, using the CLIP embeddings the server already builds.
+        // Only offered once there are enough photos for the scores to mean
+        // anything — see CLIP_MIN_LIBRARY on the server.
+        if (_query.isNotEmpty && _smart) 'smart': '1',
+        if (_favesOnly) 'fav': '1',
       });
       final items = ((d as Map)['items'] as List)
           .map((e) => Photo.fromJson(Map<String, dynamic>.from(e as Map)))
@@ -157,6 +191,59 @@ class _GalleryScreenState extends State<GalleryScreen> {
                 ),
               ],
             ),
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(14, 0, 14, 4),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    TextField(
+                      controller: _search,
+                      onChanged: _typed,
+                      textInputAction: TextInputAction.search,
+                      decoration: InputDecoration(
+                        hintText: _smart
+                            ? 'Describe it — beach, cake, my dog'
+                            : 'Search by name, person, album or year',
+                        prefixIcon: Icon(_smart ? Icons.auto_awesome : Icons.search),
+                        suffixIcon: _search.text.isEmpty
+                            ? null
+                            : IconButton(
+                                icon: const Icon(Icons.close),
+                                onPressed: () {
+                                  _search.clear();
+                                  setState(() => _query = '');
+                                  _load(reset: true);
+                                },
+                              ),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Wrap(spacing: 8, children: [
+                      FilterChip(
+                        label: const Text('★ Favourites'),
+                        selected: _favesOnly,
+                        onSelected: (v) {
+                          setState(() => _favesOnly = v);
+                          _load(reset: true);
+                        },
+                      ),
+                      // Content search is only meaningful with a search term —
+                      // offering it against an empty box would return nothing
+                      // and look broken.
+                      FilterChip(
+                        label: const Text('✨ What’s in the photo'),
+                        selected: _smart,
+                        onSelected: (v) {
+                          setState(() => _smart = v);
+                          if (_query.isNotEmpty) _load(reset: true);
+                        },
+                      ),
+                    ]),
+                  ],
+                ),
+              ),
+            ),
             if (_loading)
               const SliverFillRemaining(
                   child: Center(child: CircularProgressIndicator()))
@@ -189,7 +276,21 @@ class _GalleryScreenState extends State<GalleryScreen> {
                       crossAxisSpacing: 2,
                     ),
                     delegate: SliverChildBuilderDelegate(
-                      (ctx, i) => PhotoTile(photo: g.photos[i]),
+                      (ctx, i) => PhotoTile(
+                        photo: g.photos[i],
+                        // Opened against the WHOLE loaded list, not just this
+                        // day, so swiping carries on across dates the way it
+                        // does in any gallery worth the name.
+                        onOpen: () => Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => PhotoViewer(
+                              photos: _photos,
+                              initialIndex: _photos.indexOf(g.photos[i]),
+                              onChanged: () => _load(reset: true),
+                            ),
+                          ),
+                        ),
+                      ),
                       childCount: g.photos.length,
                     ),
                   ),
