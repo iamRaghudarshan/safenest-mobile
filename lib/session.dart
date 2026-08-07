@@ -35,7 +35,26 @@ class Session extends ChangeNotifier {
   bool get loading => _loading;
   bool get signedIn => _token != null && _baseUrl != null;
 
-  Api get api => Api(baseUrl: _baseUrl ?? '', token: _token);
+  /// Set when the customer's copy refuses on licence grounds. The app shows one
+  /// notice rather than each screen reporting it as its own failure.
+  ApiError? _licence;
+  ApiError? get licenceBlock => _licence;
+
+  void clearLicenceBlock() {
+    if (_licence == null) return;
+    _licence = null;
+    notifyListeners();
+  }
+
+  Api get api => Api(
+        baseUrl: _baseUrl ?? '',
+        token: _token,
+        onLicenceBlocked: (e) {
+          if (_licence?.message == e.message) return;   // do not loop on repeats
+          _licence = e;
+          notifyListeners();
+        },
+      );
 
   Future<void> restore() async {
     _baseUrl = await _store.read(key: _kUrl);

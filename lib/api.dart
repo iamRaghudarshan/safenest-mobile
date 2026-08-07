@@ -22,10 +22,19 @@ import 'dart:io';
 import 'package:http/http.dart' as http;
 
 class ApiError implements Exception {
-  ApiError(this.status, this.message, {this.offline = false});
+  ApiError(this.status, this.message, {this.offline = false, this.licence});
   final int status;
   final String message;
   final bool offline;
+
+  /// The licence gate answers 402 with {state, expires_on, key_id} beside the
+  /// message. Kept whole rather than flattened to a sentence: "expired" and
+  /// "withdrawn" need different things said to the person, and the key id is
+  /// what they will be asked for when they get in touch.
+  final Map<String, dynamic>? licence;
+
+  bool get licenceBlocked => status == 402;
+
   @override
   String toString() => message;
 }
@@ -36,7 +45,13 @@ const _unreachableMsg = 'Cannot reach your SafeNest. Check the address, and that
     'the computer running it is switched on.';
 
 class Api {
-  Api({required this.baseUrl, this.token});
+  Api({required this.baseUrl, this.token, this.onLicenceBlocked});
+
+  /// Told whenever the server refuses on licence grounds, so the whole app can
+  /// say so once instead of every screen discovering it separately. The gate is
+  /// global — middleware over every /api/ path — so the answer to it should be
+  /// global too.
+  final void Function(ApiError)? onLicenceBlocked;
 
   /// e.g. https://finmate.example.com — the customer's own address.
   final String baseUrl;
@@ -165,8 +180,15 @@ class Api {
       // The licence gate. Reads and writes are refused, but an export never is —
       // a lapsed licence ends the right to USE the software, it does not make
       // somebody's records ours to withhold.
-      throw ApiError(402, _detailOf(data) ??
-          'This copy of SafeNest needs its licence renewing.');
+      final err = ApiError(
+        402,
+        _detailOf(data) ?? 'This copy of SafeNest needs its licence renewing.',
+        licence: (data is Map && data['licence'] is Map)
+            ? Map<String, dynamic>.from(data['licence'] as Map)
+            : null,
+      );
+      onLicenceBlocked?.call(err);
+      throw err;
     }
     if (res.statusCode >= 500) {
       throw ApiError(res.statusCode, 'Your SafeNest ran into a problem.');

@@ -22,6 +22,7 @@ import 'session.dart';
 import 'theme.dart';
 import 'screens/sign_in_screen.dart';
 import 'screens/home_screen.dart';
+import 'widgets/licence_notice.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -74,9 +75,23 @@ class _SafeNestAppState extends State<SafeNestApp> {
           darkTheme: buildTheme(_brand, Brightness.dark),
           home: session.loading
               ? const _Splash()
-              : session.signedIn
-                  ? HomeScreen(brand: _brand)
-                  : SignInScreen(brand: _brand, onSignedIn: _loadBrand),
+              // A blocked licence takes over the whole app rather than failing
+              // screen by screen, because that is how the server treats it: the
+              // gate is middleware over everything.
+              : session.licenceBlock != null
+                  ? Scaffold(
+                      appBar: AppBar(title: Text(_brand.name)),
+                      body: LicenceNotice(
+                        error: session.licenceBlock!,
+                        onRetry: () {
+                          session.clearLicenceBlock();
+                          _loadBrand();
+                        },
+                      ),
+                    )
+                  : session.signedIn
+                      ? HomeScreen(brand: _brand)
+                      : SignInScreen(brand: _brand, onSignedIn: _loadBrand),
         ),
       ),
     );
