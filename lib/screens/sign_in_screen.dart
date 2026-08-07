@@ -145,12 +145,16 @@ class _SignInScreenState extends State<SignInScreen> {
                             child: CircularProgressIndicator(strokeWidth: 2))
                         : const Text('Sign in'),
                   ),
-                  const SizedBox(height: 14),
-                  Text(
-                    'On the same Wi-Fi you can use the computer’s local address, '
-                    'like 192.168.1.5:8080.',
-                    textAlign: TextAlign.center,
-                    style: Theme.of(context).textTheme.bodySmall,
+                  const SizedBox(height: 10),
+                  TextButton.icon(
+                    onPressed: () => showModalBottomSheet(
+                      context: context,
+                      showDragHandle: true,
+                      isScrollControlled: true,
+                      builder: (_) => const _AddressHelp(),
+                    ),
+                    icon: const Icon(Icons.help_outline, size: 18),
+                    label: const Text('What address do I use?'),
                   ),
                 ],
               ),
@@ -160,4 +164,117 @@ class _SignInScreenState extends State<SignInScreen> {
       ),
     );
   }
+}
+
+/// Which address to type, for someone who has just installed both halves.
+///
+/// Two answers, and the difference matters: at home the phone can reach the
+/// computer directly, and from anywhere it cannot unless a web address has been
+/// set up on the computer first. Getting this wrong is the most likely reason a
+/// new install fails, and "cannot reach your SafeNest" does not distinguish
+/// between a wrong address, a sleeping computer and a tunnel that was never
+/// created.
+class _AddressHelp extends StatelessWidget {
+  const _AddressHelp();
+
+  @override
+  Widget build(BuildContext context) {
+    final small = Theme.of(context).textTheme.bodySmall;
+    return SafeArea(
+      child: ListView(
+        shrinkWrap: true,
+        padding: const EdgeInsets.fromLTRB(22, 0, 22, 28),
+        children: [
+          Text('What address do I use?',
+              style: Theme.of(context).textTheme.titleMedium),
+          const SizedBox(height: 18),
+
+          const _Step(
+            n: 1,
+            title: 'At home, on the same Wi-Fi',
+            body: 'Use the computer’s own address on your network — it looks '
+                'like 192.168.1.5:8080.\n\n'
+                'Find it in SafeNest on that computer: Profile → This computer. '
+                'The phone talks to it directly, which is the fastest way to '
+                'back up photos and never leaves your house.',
+          ),
+          const _Step(
+            n: 2,
+            title: 'From anywhere — set a web address first',
+            body: 'A home address only works at home. To reach your SafeNest '
+                'from outside, open it on the computer and go to '
+                'Profile → Reaching this app → Web address.\n\n'
+                'It walks through all of it: buying a domain, adding it to '
+                'Cloudflare, and connecting it. Every command it shows is built '
+                'from what you type, so there is nothing to substitute.',
+          ),
+          const _Step(
+            n: 3,
+            title: 'Then use that domain here',
+            body: 'Type it as safenest.yourdomain.com — no https:// needed, the '
+                'app adds it.\n\n'
+                'Home addresses may use plain http because a computer on your '
+                'own network cannot have a certificate. Anything on the internet '
+                'is forced to https, so your password is never sent in the '
+                'clear.',
+          ),
+
+          const SizedBox(height: 8),
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.surfaceContainerHighest,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Text(
+              'Whichever you use, the computer running SafeNest has to be switched '
+              'on — it is where everything of yours actually lives. If it sleeps, '
+              'this app will say it cannot reach it, and that is the honest '
+              'answer rather than showing you a stale copy.',
+              style: small,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _Step extends StatelessWidget {
+  const _Step({required this.n, required this.title, required this.body});
+  final int n;
+  final String title;
+  final String body;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.only(bottom: 20),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            CircleAvatar(
+              radius: 13,
+              backgroundColor: Theme.of(context).colorScheme.primaryContainer,
+              child: Text('$n',
+                  style: TextStyle(
+                      fontSize: 12,
+                      color: Theme.of(context).colorScheme.onPrimaryContainer)),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title,
+                      style: const TextStyle(fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 5),
+                  Text(body,
+                      style: Theme.of(context).textTheme.bodySmall
+                          ?.copyWith(height: 1.5)),
+                ],
+              ),
+            ),
+          ],
+        ),
+      );
 }
