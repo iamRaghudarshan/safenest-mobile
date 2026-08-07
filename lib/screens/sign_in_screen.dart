@@ -14,6 +14,8 @@ import 'package:provider/provider.dart';
 import '../api.dart';
 import '../session.dart';
 import '../theme.dart';
+import '../widgets/brand_logo.dart';
+import '../widgets/brand_button.dart';
 
 class SignInScreen extends StatefulWidget {
   const SignInScreen({super.key, required this.brand, this.onSignedIn});
@@ -80,12 +82,7 @@ class _SignInScreenState extends State<SignInScreen> {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Icon(Icons.shield_outlined,
-                      size: 56, color: Theme.of(context).colorScheme.primary),
-                  const SizedBox(height: 16),
-                  Text(widget.brand.name,
-                      textAlign: TextAlign.center,
-                      style: Theme.of(context).textTheme.headlineSmall),
+                  BrandMasthead(brand: widget.brand),
                   const SizedBox(height: 6),
                   Text(
                     'Your records stay on your own computer.\n'
@@ -136,14 +133,10 @@ class _SignInScreenState extends State<SignInScreen> {
                             color: Theme.of(context).colorScheme.error)),
                   ],
                   const SizedBox(height: 22),
-                  FilledButton(
+                  BrandButton(
+                    label: 'Sign in',
+                    busy: _busy,
                     onPressed: _busy ? null : _submit,
-                    child: _busy
-                        ? const SizedBox(
-                            height: 20,
-                            width: 20,
-                            child: CircularProgressIndicator(strokeWidth: 2))
-                        : const Text('Sign in'),
                   ),
                   const SizedBox(height: 10),
                   TextButton.icon(

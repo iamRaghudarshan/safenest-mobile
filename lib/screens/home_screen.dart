@@ -15,6 +15,7 @@ import 'package:provider/provider.dart';
 
 import '../session.dart';
 import '../theme.dart';
+import '../widgets/brand_logo.dart';
 import 'photos_home.dart';
 import 'backup_screen.dart';
 import 'records_screen.dart';
@@ -91,6 +92,14 @@ class _Profile extends StatelessWidget {
       appBar: AppBar(title: const Text('You')),
       body: ListView(
         children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(0, 18, 0, 10),
+            child: Column(children: [
+              const BrandLogo(size: 64),
+              const SizedBox(height: 10),
+              Text(brand.name, style: Theme.of(context).textTheme.titleMedium),
+            ]),
+          ),
           ListTile(
             leading: const Icon(Icons.person_outline),
             title: Text((user?['name'] ?? 'Signed in') as String),

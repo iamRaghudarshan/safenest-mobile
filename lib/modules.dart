@@ -9,6 +9,12 @@
 ///
 /// The order matters: it is the order they appear on the Records screen, and it
 /// is roughly how often a person opens them, not alphabetical.
+///
+/// The colours are NOT chosen here. They are the web app's per-module accents —
+/// --c-expenses, --c-loans and the rest from index.css — so a module is the same
+/// colour in the hand as on the laptop. The first version invented its own, and
+/// the same module was two different colours depending on which screen you were
+/// looking at.
 library;
 
 import 'package:flutter/material.dart';
@@ -60,7 +66,7 @@ const kModules = <ModuleSpec>[
     key: 'expenses',
     label: 'Expenses',
     icon: Icons.receipt_long_outlined,
-    colour: Color(0xFF2E7D32),
+    colour: Color(0xFFF59E0B),
     titleField: 'category',
     subtitleField: 'note',
     amountField: 'amount',
@@ -80,7 +86,7 @@ const kModules = <ModuleSpec>[
     key: 'reminders',
     label: 'Reminders',
     icon: Icons.notifications_outlined,
-    colour: Color(0xFFEF6C00),
+    colour: Color(0xFF8B5CF6),
     titleField: 'title',
     dateField: 'due_date',
     blurb: 'Things with a date attached',
@@ -96,7 +102,7 @@ const kModules = <ModuleSpec>[
     key: 'todos',
     label: 'To-dos',
     icon: Icons.checklist_outlined,
-    colour: Color(0xFF00838F),
+    colour: Color(0xFF14B8A6),
     titleField: 'title',
     subtitleField: 'status',
     dateField: 'due_date',
@@ -114,7 +120,7 @@ const kModules = <ModuleSpec>[
     key: 'cards',
     label: 'Cards',
     icon: Icons.credit_card_outlined,
-    colour: Color(0xFF6A1B9A),
+    colour: Color(0xFFEC4899),
     titleField: 'bank',
     subtitleField: 'last4',
     amountField: 'statement_amount',
@@ -135,7 +141,7 @@ const kModules = <ModuleSpec>[
     key: 'loans',
     label: 'Loans',
     icon: Icons.account_balance_outlined,
-    colour: Color(0xFF283593),
+    colour: Color(0xFF6366F1),
     titleField: 'lender',
     subtitleField: 'loan_type',
     amountField: 'outstanding',
@@ -158,7 +164,7 @@ const kModules = <ModuleSpec>[
     key: 'insurance',
     label: 'Insurance',
     icon: Icons.health_and_safety_outlined,
-    colour: Color(0xFF00695C),
+    colour: Color(0xFF0EA5E9),
     titleField: 'provider',
     subtitleField: 'policy_no',
     amountField: 'premium',
@@ -179,7 +185,7 @@ const kModules = <ModuleSpec>[
     key: 'investments',
     label: 'Investments',
     icon: Icons.trending_up_outlined,
-    colour: Color(0xFFAD1457),
+    colour: Color(0xFF10B981),
     titleField: 'name',
     subtitleField: 'broker',
     amountField: 'current_value',

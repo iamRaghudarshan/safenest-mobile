@@ -14,6 +14,7 @@ import 'package:provider/provider.dart';
 import '../api.dart';
 import '../modules.dart';
 import '../session.dart';
+import '../theme.dart';
 import 'module_list_screen.dart';
 import 'vault_screen.dart';
 
@@ -93,9 +94,9 @@ class _RecordsScreenState extends State<RecordsScreen> {
                     if (allowed.contains('vault'))
                       ListTile(
                         leading: CircleAvatar(
-                          backgroundColor: Colors.deepPurple.withValues(alpha: 0.14),
-                          child: const Icon(Icons.lock_outline,
-                              color: Colors.deepPurple),
+                          backgroundColor: kModuleColours['vault']!.withValues(alpha: 0.14),
+                          child: Icon(Icons.lock_outline,
+                              color: kModuleColours['vault']),
                         ),
                         title: const Text('Vault'),
                         subtitle: const Text('Passwords, encrypted on your computer'),

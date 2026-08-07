@@ -44,3 +44,13 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+
+  # The owner's own icon, taken from their server's /branding/icon-512.png and
+  # bundled so it is there before anyone signs in — the sign-in screen needs a
+  # logo at the one moment there is no server to ask.
+  #
+  # Once signed in the app uses the LIVE icon from their machine instead, so
+  # renaming or re-uploading on the desktop follows through to the phone. Only
+  # the launcher icon is fixed at build time; nothing can change that.
+  assets:
+    - assets/icon-512.png
