@@ -17,6 +17,7 @@ import '../session.dart';
 import '../theme.dart';
 import 'gallery_screen.dart';
 import 'backup_screen.dart';
+import 'records_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key, required this.brand});
@@ -39,12 +40,7 @@ class _HomeScreenState extends State<HomeScreen> {
         note: 'Coming next — a Drive-style file browser over the documents '
             'already on your computer.',
       ),
-      const _NotYet(
-        icon: Icons.account_balance_wallet_outlined,
-        title: 'Records',
-        note: 'Expenses, loans, cards, insurance, investments, vault, '
-            'reminders and to-dos.',
-      ),
+      const RecordsScreen(),
       _Profile(brand: widget.brand),
     ];
 
