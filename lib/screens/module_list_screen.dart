@@ -149,10 +149,13 @@ class _ModuleListScreenState extends State<ModuleListScreen> {
                       ? _Empty(spec: s, filtered: _filter.isNotEmpty)
                       : RefreshIndicator(
                           onRefresh: _load,
-                          child: ListView.separated(
-                            padding: const EdgeInsets.only(bottom: 90),
+                          // Cards with air between them, not flat rows divided
+                          // by hairlines. A divided list is a desktop table; on a
+                          // phone each record should be a thing you can tap,
+                          // which means it needs edges.
+                          child: ListView.builder(
+                            padding: const EdgeInsets.fromLTRB(14, 4, 14, 96),
                             itemCount: rows.length,
-                            separatorBuilder: (_, i) => const Divider(height: 1),
                             itemBuilder: (ctx, i) {
                               final r = rows[i];
                               final amount = s.amountField == null
@@ -169,44 +172,65 @@ class _ModuleListScreenState extends State<ModuleListScreen> {
                               ].join(' · ');
                               final paid = r['is_paid'] == 1 || r['paid'] == true;
 
-                              return ListTile(
-                                leading: CircleAvatar(
-                                  backgroundColor:
-                                      s.colour.withValues(alpha: 0.14),
-                                  child: Icon(s.icon, size: 20, color: s.colour),
-                                ),
-                                title: Text('${r[s.titleField] ?? '—'}'),
-                                subtitle: sub.isEmpty ? null : Text(sub),
-                                trailing: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
+                              return Padding(
+                                padding: const EdgeInsets.only(bottom: 10),
+                                child: BrandCard(
+                                  onTap: () => _openSheet(r),
+                                  padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
+                                  child: Row(children: [
+                                    // A colour bar rather than a circle: it
+                                    // states the module without stealing the
+                                    // width a real value needs.
+                                    Container(
+                                      width: 4,
+                                      height: 38,
+                                      decoration: BoxDecoration(
+                                        color: s.colour,
+                                        borderRadius: BorderRadius.circular(2),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Text('${r[s.titleField] ?? '—'}',
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: theme.textTheme.titleSmall),
+                                          if (sub.isNotEmpty) ...[
+                                            const SizedBox(height: 2),
+                                            Text(sub,
+                                                maxLines: 1,
+                                                overflow: TextOverflow.ellipsis,
+                                                style: theme.textTheme.bodySmall),
+                                          ],
+                                        ],
+                                      ),
+                                    ),
                                     if (amount.isNotEmpty)
                                       Text(amount,
-                                          style: const TextStyle(
-                                              fontWeight: FontWeight.w600)),
-                                    if (_payable) ...[
-                                      const SizedBox(width: 6),
+                                          style: TextStyle(
+                                              fontSize: 15.5,
+                                              fontWeight: FontWeight.w700,
+                                              color: s.colour)),
+                                    if (_payable)
                                       IconButton(
-                                        tooltip: paid
-                                            ? 'Mark not paid'
-                                            : 'Mark paid',
+                                        tooltip:
+                                            paid ? 'Mark not paid' : 'Mark paid',
                                         icon: Icon(
                                           paid
                                               ? Icons.check_circle
-                                              : Icons.check_circle_outline,
+                                              : Icons.radio_button_unchecked,
                                           color: paid
                                               ? kOk
                                               : theme.colorScheme.outline,
                                         ),
-                                        onPressed: () =>
-                                            _pay(r, paid: !paid),
+                                        onPressed: () => _pay(r, paid: !paid),
                                       ),
-                                    ],
-                                  ],
+                                  ]),
                                 ),
-                                // Tap to edit, which is how every web screen
-                                // works and was the largest thing missing here.
-                                onTap: () => _openSheet(r),
                               );
                             },
                           ),

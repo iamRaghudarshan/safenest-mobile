@@ -1,49 +1,57 @@
-/// The Photos section: the grid, plus the three views that are not a grid.
+/// The Photos section — the grid, plus the three views that are not a grid.
 ///
-/// Four tabs rather than four bottom-bar entries, because the bottom bar already
-/// carries Photos, Documents, Records and You — and a phone with eight
-/// destinations has none. This is also the arrangement the web app uses, so
-/// somebody moving between the two is not learning a second layout.
+/// A SEGMENTED CONTROL, not a Material TabBar. The web app uses `.seg4`: a pill
+/// of segments on a card, the selected one filled with the brand colour and
+/// carrying its glow. An underlined tab bar is a different control from a
+/// different design language, and using it here was a large part of why the two
+/// halves did not look like one product.
 library;
 
 import 'package:flutter/material.dart';
 
+import '../widgets/brand_button.dart';
 import 'gallery_screen.dart';
 import 'library_tabs.dart';
 
-class PhotosHome extends StatelessWidget {
+class PhotosHome extends StatefulWidget {
   const PhotosHome({super.key});
+  @override
+  State<PhotosHome> createState() => _PhotosHomeState();
+}
+
+class _PhotosHomeState extends State<PhotosHome> {
+  int _tab = 0;
+
+  static const _labels = ['Photos', 'Albums', 'People', 'Memories'];
 
   @override
   Widget build(BuildContext context) {
-    return DefaultTabController(
-      length: 4,
-      child: Scaffold(
-        appBar: AppBar(
-          title: const Text('Photos'),
-          bottom: const TabBar(
-            isScrollable: true,
-            tabAlignment: TabAlignment.start,
-            tabs: [
-              Tab(text: 'Photos'),
-              Tab(text: 'Albums'),
-              Tab(text: 'People'),
-              Tab(text: 'Memories'),
+    return Scaffold(
+      appBar: AppBar(title: const Text('Gallery')),
+      body: Column(children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(14, 0, 14, 10),
+          child: Segmented(
+            labels: _labels,
+            index: _tab,
+            onChanged: (i) => setState(() => _tab = i),
+          ),
+        ),
+        Expanded(
+          // IndexedStack, so the grid keeps its scroll position and its paging
+          // while the other views are looked at. Rebuilding it would mean
+          // scrolling back through several thousand photos to get where you were.
+          child: IndexedStack(
+            index: _tab,
+            children: const [
+              GalleryScreen(embedded: true),
+              AlbumsTab(),
+              PeopleTab(),
+              MemoriesTab(),
             ],
           ),
         ),
-        // The grid keeps its own scroll position and its own paging state while
-        // the other tabs are looked at; rebuilding it would mean scrolling back
-        // through several thousand photos to get where you were.
-        body: const TabBarView(
-          children: [
-            GalleryScreen(embedded: true),
-            AlbumsTab(),
-            PeopleTab(),
-            MemoriesTab(),
-          ],
-        ),
-      ),
+      ]),
     );
   }
 }
