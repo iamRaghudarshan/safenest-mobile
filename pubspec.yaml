@@ -33,6 +33,12 @@ dependencies:
   open_filex: ^4.5.0
   path_provider: ^2.1.5
 
+  # Reads the version out of the BUILD rather than a string someone has to
+  # remember to update. The first version of the Profile screen hardcoded
+  # "0.4.0" and was wrong by the next release — a version number that lies is
+  # worse than none, because it is what somebody reports when asking for help.
+  package_info_plus: ^8.1.1
+
   provider: ^6.1.2
   intl: ^0.19.0
   cupertino_icons: ^1.0.8

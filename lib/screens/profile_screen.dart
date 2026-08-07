@@ -17,6 +17,7 @@
 library;
 
 import 'package:flutter/material.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:provider/provider.dart';
 
 import '../api.dart';
@@ -46,11 +47,23 @@ class ProfileScreen extends StatefulWidget {
 
 class _ProfileScreenState extends State<ProfileScreen> {
   Map<String, dynamic>? _licence;
+  String _version = '';
 
   @override
   void initState() {
     super.initState();
     _loadLicence();
+    _loadVersion();
+  }
+
+  Future<void> _loadVersion() async {
+    final info = await PackageInfo.fromPlatform();
+    if (mounted) {
+      // Build number as well as version: two builds can share a version number
+      // while only one of them has the fix, and the build is what identifies
+      // which one somebody is actually running.
+      setState(() => _version = '${info.version} (${info.buildNumber})');
+    }
   }
 
   Future<void> _loadLicence() async {
@@ -208,19 +221,23 @@ class _ProfileScreenState extends State<ProfileScreen> {
             title: 'This app',
             footer: 'Everything you see is read from ${widget.brand.name} on your '
                 'computer and saved back to it. This app keeps only your sign-in '
-                'and a list of which photos it has already sent.',
+                'and a list of which photos it has already sent. '
+                'Tap the address to switch between your home network and your '
+                'web address — at home the phone reaches the computer directly, '
+                'which is faster and never leaves the house.',
             children: [
               SettingsRow(
                 icon: Icons.dns_outlined,
                 tint: kModuleColours['insurance']!,
-                label: 'Your SafeNest',
+                label: 'Address',
                 value: session.baseUrl ?? '—',
+                onTap: () => _changeAddress(context, session.baseUrl ?? ''),
               ),
-              const SettingsRow(
+              SettingsRow(
                 icon: Icons.info_outline,
-                tint: Color(0xFF9A9DB5),
+                tint: const Color(0xFF9A9DB5),
                 label: 'Version',
-                value: '0.4.0',
+                value: _version.isEmpty ? '…' : _version,
               ),
             ],
           ),
@@ -248,6 +265,59 @@ class _ProfileScreenState extends State<ProfileScreen> {
         return kWarn;
       default:
         return kDanger;
+    }
+  }
+
+  Future<void> _changeAddress(BuildContext context, String current) async {
+    final controller = TextEditingController(text: current);
+    final session = context.read<Session>();
+    final messenger = ScaffoldMessenger.of(context);
+
+    final go = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (ctx) => Padding(
+        padding: EdgeInsets.fromLTRB(
+            22, 0, 22, MediaQuery.of(ctx).viewInsets.bottom + 24),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Text('Address of your SafeNest',
+              style: Theme.of(ctx).textTheme.titleMedium),
+          const SizedBox(height: 6),
+          Text(
+            'On your own Wi-Fi use the computer’s address, like '
+            '192.168.1.5:8080 — the phone then talks to it directly and nothing '
+            'leaves the house. Away from home, use your web address.',
+            textAlign: TextAlign.center,
+            style: Theme.of(ctx).textTheme.bodySmall,
+          ),
+          const SizedBox(height: 16),
+          TextField(
+            controller: controller,
+            autofocus: true,
+            keyboardType: TextInputType.url,
+            autocorrect: false,
+            decoration: const InputDecoration(
+              labelText: 'Address',
+              hintText: 'safenest.example.com',
+            ),
+          ),
+          const SizedBox(height: 18),
+          BrandButton(label: 'Use this address',
+              onPressed: () => Navigator.pop(ctx, true)),
+        ]),
+      ),
+    );
+    if (go != true) return;
+    try {
+      final kept = await session.changeAddress(controller.text);
+      messenger.showSnackBar(SnackBar(
+        content: Text(kept
+            ? 'Now using that address'
+            : 'That is a different SafeNest — sign in again'),
+      ));
+    } on ApiError catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text(e.message)));
     }
   }
 

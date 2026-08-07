@@ -134,6 +134,50 @@ class Session extends ChangeNotifier {
     }
   }
 
+  /// Point the app at a different address for the SAME computer.
+  ///
+  /// Needed because the address is not one thing for ever: at home the phone
+  /// should use 192.168.x.x and talk to the machine directly, and away from home
+  /// it needs the domain. Before this, changing it meant signing out — which
+  /// discarded a perfectly good session over what is only a different way of
+  /// reaching the same server.
+  ///
+  /// The existing token is TESTED against the new address rather than assumed.
+  /// If it still works this is the same computer and the session stands; if it
+  /// does not, the address points somewhere else and signing in again is the
+  /// honest outcome. Nothing is written until one of those is known.
+  Future<bool> changeAddress(String address) async {
+    final url = normaliseAddress(address);
+    final probe = Api(baseUrl: url, token: _token);
+
+    final health = await probe.get('/api/health');
+    if (health is! Map || health['service'] != 'finmate-api') {
+      throw ApiError(0,
+          'That address answered, but it is not a SafeNest. Check it and try again.');
+    }
+
+    var stillSignedIn = true;
+    try {
+      await probe.get('/api/auth/me');
+    } on ApiError catch (e) {
+      if (e.status == 401) {
+        stillSignedIn = false;
+      } else {
+        rethrow;   // unreachable, or a licence block — not a reason to sign out
+      }
+    }
+
+    _baseUrl = url;
+    await _store.write(key: _kUrl, value: url);
+    if (!stillSignedIn) {
+      _token = null;
+      _user = null;
+      await _store.delete(key: _kToken);
+    }
+    notifyListeners();
+    return stillSignedIn;
+  }
+
   Future<void> signOut() async {
     _token = null;
     _user = null;
