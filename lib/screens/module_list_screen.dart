@@ -1,8 +1,16 @@
-/// One list and one form, for all seven record modules.
+/// One list and one sheet, for all seven record modules.
 ///
-/// Driven entirely by ModuleSpec, because the server treats them identically:
-/// `GET /api/<key>` lists, `POST` creates, `DELETE /api/<key>/<id>` removes. Seven
-/// hand-written screens would be seven places to fix a bug and six to forget.
+/// WHAT WAS MISSING, and it was most of the screen: you could add a record and
+/// long-press to delete one, and that was all. There was no way to EDIT
+/// anything, no filter, and no way to mark a card or a loan paid. Every web
+/// screen does all four — tap a row, a sheet opens filled in, save or delete
+/// from inside it — so the phone was not a smaller version of the web app, it
+/// was a much emptier one.
+///
+/// A SHEET, not a pushed page, because that is what the web app uses and because
+/// on a phone a sheet keeps the list visible behind it. Add and edit are the
+/// same sheet: an empty one is an add, a filled one is an edit, and having two
+/// would mean fixing every field twice.
 library;
 
 import 'package:flutter/material.dart';
@@ -12,6 +20,8 @@ import 'package:provider/provider.dart';
 import '../api.dart';
 import '../modules.dart';
 import '../session.dart';
+import '../theme.dart';
+import '../widgets/brand_button.dart';
 
 class ModuleListScreen extends StatefulWidget {
   const ModuleListScreen({super.key, required this.spec, this.embedded = false});
@@ -28,7 +38,12 @@ class ModuleListScreen extends StatefulWidget {
 class _ModuleListScreenState extends State<ModuleListScreen> {
   List<Map<String, dynamic>> _rows = [];
   bool _loading = true;
-  String? _error;
+  ApiError? _err;
+  String _filter = '';
+
+  /// Cards and loans can be marked paid; the others have no such idea.
+  bool get _payable =>
+      widget.spec.key == 'cards' || widget.spec.key == 'loans';
 
   @override
   void initState() {
@@ -37,62 +52,34 @@ class _ModuleListScreenState extends State<ModuleListScreen> {
   }
 
   Future<void> _load() async {
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
+    setState(() => _loading = true);
     try {
       final d = await context.read<Session>().api.get('/api/${widget.spec.key}');
-      // Some modules answer with a bare list, others wrap it in {items: []}.
       final list = d is List
           ? d
           : (d is Map ? (d['items'] ?? d['rows'] ?? const []) : const []);
       setState(() {
         _rows = [for (final e in (list as List)) Map<String, dynamic>.from(e as Map)];
         _loading = false;
+        _err = null;
       });
     } on ApiError catch (e) {
       setState(() {
-        _error = e.message;
+        _err = e;
         _loading = false;
       });
     }
   }
 
-  Future<void> _add() async {
-    final saved = await Navigator.of(context).push<bool>(
-      MaterialPageRoute(builder: (_) => ModuleFormScreen(spec: widget.spec)),
-    );
-    if (saved == true) _load();
-  }
-
-  Future<void> _delete(Map<String, dynamic> row) async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Delete this?'),
-        content: const Text('It is removed from your computer as well.'),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx, false), child: const Text('Keep')),
-          TextButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Delete')),
-        ],
-      ),
-    );
-    // The dialog was awaited, so this screen may have been disposed in the
-    // meantime — reading context after that is a crash, not a style point.
-    if (ok != true || !mounted) return;
-    try {
-      await context.read<Session>().api.delete('/api/${widget.spec.key}/${row['id']}');
-      _load();
-    } on ApiError catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(e.message)));
-      }
-    }
+  List<Map<String, dynamic>> get _shown {
+    if (_filter.isEmpty) return _rows;
+    final q = _filter.toLowerCase();
+    return _rows.where((r) {
+      // Searches every field rather than just the title: looking for "HDFC"
+      // should find a card whose bank it is, even though the row is titled by
+      // something else.
+      return r.values.any((v) => '$v'.toLowerCase().contains(q));
+    }).toList();
   }
 
   String _money(dynamic v) {
@@ -102,112 +89,172 @@ class _ModuleListScreenState extends State<ModuleListScreen> {
         .format(n);
   }
 
+  Future<void> _openSheet([Map<String, dynamic>? existing]) async {
+    final saved = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (_) => _RecordSheet(spec: widget.spec, existing: existing),
+    );
+    if (saved == true) _load();
+  }
+
+  Future<void> _pay(Map<String, dynamic> row, {required bool paid}) async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await context
+          .read<Session>()
+          .api
+          .post('/api/${widget.spec.key}/${row['id']}/${paid ? 'pay' : 'unpay'}', {});
+      _load();
+    } on ApiError catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text(e.message)));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final s = widget.spec;
+    final theme = Theme.of(context);
+    final rows = _shown;
+
     return Scaffold(
-      appBar: AppBar(title: Text(s.label), automaticallyImplyLeading: !widget.embedded),
+      appBar: AppBar(
+        title: Text(s.label),
+        automaticallyImplyLeading: !widget.embedded,
+      ),
       floatingActionButton: FloatingActionButton(
-        onPressed: _add,
+        onPressed: () => _openSheet(),
         child: const Icon(Icons.add),
       ),
-      body: RefreshIndicator(
-        onRefresh: _load,
-        child: _loading
-            ? const Center(child: CircularProgressIndicator())
-            : _error != null
-                ? ListView(children: [
-                    Padding(
-                      padding: const EdgeInsets.all(32),
-                      child: Column(children: [
-                        Text(_error!, textAlign: TextAlign.center),
-                        const SizedBox(height: 16),
-                        FilledButton.tonal(
-                            onPressed: _load, child: const Text('Try again')),
-                      ]),
-                    )
-                  ])
-                : _rows.isEmpty
-                    ? ListView(children: [
-                        Padding(
-                          padding: const EdgeInsets.all(48),
-                          child: Column(children: [
-                            Icon(s.icon, size: 44, color: s.colour),
-                            const SizedBox(height: 14),
-                            Text('Nothing here yet',
-                                style: Theme.of(context).textTheme.titleMedium),
-                            const SizedBox(height: 6),
-                            Text(s.blurb,
-                                textAlign: TextAlign.center,
-                                style: Theme.of(context).textTheme.bodySmall),
-                          ]),
-                        )
-                      ])
-                    : ListView.separated(
-                        itemCount: _rows.length,
-                        separatorBuilder: (_, i) => const Divider(height: 1),
-                        itemBuilder: (ctx, i) {
-                          final r = _rows[i];
-                          final amount = s.amountField == null
-                              ? ''
-                              : _money(r[s.amountField]);
-                          final date = s.dateField == null
-                              ? ''
-                              : '${r[s.dateField] ?? ''}';
-                          final sub = [
-                            if (s.subtitleField != null &&
-                                '${r[s.subtitleField] ?? ''}'.isNotEmpty)
-                              '${r[s.subtitleField]}',
-                            if (date.isNotEmpty) date,
-                          ].join(' · ');
-                          return ListTile(
-                            leading: CircleAvatar(
-                              backgroundColor: s.colour.withValues(alpha: 0.14),
-                              child: Icon(s.icon, size: 20, color: s.colour),
-                            ),
-                            title: Text('${r[s.titleField] ?? '—'}'),
-                            subtitle: sub.isEmpty ? null : Text(sub),
-                            trailing: amount.isEmpty
-                                ? null
-                                : Text(amount,
-                                    style: const TextStyle(
-                                        fontWeight: FontWeight.w600)),
-                            onLongPress: () => _delete(r),
-                          );
-                        },
-                      ),
-      ),
+      body: Column(children: [
+        if (_rows.length > 5)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 6, 14, 8),
+            child: TextField(
+              onChanged: (v) => setState(() => _filter = v.trim()),
+              decoration: InputDecoration(
+                hintText: 'Search ${s.label.toLowerCase()}',
+                prefixIcon: const Icon(Icons.search),
+                isDense: true,
+              ),
+            ),
+          ),
+        Expanded(
+          child: _loading
+              ? const Center(child: CircularProgressIndicator())
+              : _err != null
+                  ? _Retry(message: _err!.message, onRetry: _load)
+                  : rows.isEmpty
+                      ? _Empty(spec: s, filtered: _filter.isNotEmpty)
+                      : RefreshIndicator(
+                          onRefresh: _load,
+                          child: ListView.separated(
+                            padding: const EdgeInsets.only(bottom: 90),
+                            itemCount: rows.length,
+                            separatorBuilder: (_, i) => const Divider(height: 1),
+                            itemBuilder: (ctx, i) {
+                              final r = rows[i];
+                              final amount = s.amountField == null
+                                  ? ''
+                                  : _money(r[s.amountField]);
+                              final date = s.dateField == null
+                                  ? ''
+                                  : '${r[s.dateField] ?? ''}';
+                              final sub = [
+                                if (s.subtitleField != null &&
+                                    '${r[s.subtitleField] ?? ''}'.isNotEmpty)
+                                  '${r[s.subtitleField]}',
+                                if (date.isNotEmpty) date,
+                              ].join(' · ');
+                              final paid = r['is_paid'] == 1 || r['paid'] == true;
+
+                              return ListTile(
+                                leading: CircleAvatar(
+                                  backgroundColor:
+                                      s.colour.withValues(alpha: 0.14),
+                                  child: Icon(s.icon, size: 20, color: s.colour),
+                                ),
+                                title: Text('${r[s.titleField] ?? '—'}'),
+                                subtitle: sub.isEmpty ? null : Text(sub),
+                                trailing: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    if (amount.isNotEmpty)
+                                      Text(amount,
+                                          style: const TextStyle(
+                                              fontWeight: FontWeight.w600)),
+                                    if (_payable) ...[
+                                      const SizedBox(width: 6),
+                                      IconButton(
+                                        tooltip: paid
+                                            ? 'Mark not paid'
+                                            : 'Mark paid',
+                                        icon: Icon(
+                                          paid
+                                              ? Icons.check_circle
+                                              : Icons.check_circle_outline,
+                                          color: paid
+                                              ? kOk
+                                              : theme.colorScheme.outline,
+                                        ),
+                                        onPressed: () =>
+                                            _pay(r, paid: !paid),
+                                      ),
+                                    ],
+                                  ],
+                                ),
+                                // Tap to edit, which is how every web screen
+                                // works and was the largest thing missing here.
+                                onTap: () => _openSheet(r),
+                              );
+                            },
+                          ),
+                        ),
+        ),
+      ]),
     );
   }
 }
 
-/// Adding one, built from the same spec.
-class ModuleFormScreen extends StatefulWidget {
-  const ModuleFormScreen({super.key, required this.spec});
+/// Add or edit — the same sheet, because an empty one is an add.
+class _RecordSheet extends StatefulWidget {
+  const _RecordSheet({required this.spec, this.existing});
   final ModuleSpec spec;
+  final Map<String, dynamic>? existing;
 
   @override
-  State<ModuleFormScreen> createState() => _ModuleFormScreenState();
+  State<_RecordSheet> createState() => _RecordSheetState();
 }
 
-class _ModuleFormScreenState extends State<ModuleFormScreen> {
+class _RecordSheetState extends State<_RecordSheet> {
   final _values = <String, dynamic>{};
   final _controllers = <String, TextEditingController>{};
   bool _busy = false;
   String? _error;
 
+  bool get _editing => widget.existing != null;
+
   @override
   void initState() {
     super.initState();
+    final e = widget.existing;
     for (final f in widget.spec.fields) {
-      if (f.kind == FieldKind.choice && f.choices.isNotEmpty) {
-        _values[f.key] = f.choices.first;
-      } else if (f.kind == FieldKind.toggle) {
-        _values[f.key] = false;
-      } else if (f.kind == FieldKind.date && f.required) {
-        _values[f.key] = DateFormat('yyyy-MM-dd').format(DateTime.now());
+      final current = e?[f.key];
+      switch (f.kind) {
+        case FieldKind.choice:
+          _values[f.key] = current?.toString() ??
+              (f.choices.isNotEmpty ? f.choices.first : null);
+        case FieldKind.toggle:
+          _values[f.key] = current == 1 || current == true;
+        case FieldKind.date:
+          _values[f.key] = current?.toString() ??
+              (f.required ? DateFormat('yyyy-MM-dd').format(DateTime.now()) : null);
+        default:
+          _controllers[f.key] =
+              TextEditingController(text: current == null ? '' : '$current');
       }
-      _controllers[f.key] = TextEditingController();
+      _controllers.putIfAbsent(f.key, () => TextEditingController());
     }
   }
 
@@ -232,8 +279,7 @@ class _ModuleFormScreenState extends State<ModuleFormScreen> {
           final t = _controllers[f.key]!.text.trim();
           if (t.isNotEmpty) body[f.key] = t;
       }
-      if (f.required &&
-          (body[f.key] == null || '${body[f.key]}'.isEmpty)) {
+      if (f.required && (body[f.key] == null || '${body[f.key]}'.isEmpty)) {
         setState(() => _error = '${f.label} is needed');
         return;
       }
@@ -243,8 +289,13 @@ class _ModuleFormScreenState extends State<ModuleFormScreen> {
       _busy = true;
       _error = null;
     });
+    final api = context.read<Session>().api;
     try {
-      await context.read<Session>().api.post('/api/${widget.spec.key}', body);
+      if (_editing) {
+        await api.put('/api/${widget.spec.key}/${widget.existing!['id']}', body);
+      } else {
+        await api.post('/api/${widget.spec.key}', body);
+      }
       if (mounted) Navigator.pop(context, true);
     } on ApiError catch (e) {
       setState(() {
@@ -254,33 +305,76 @@ class _ModuleFormScreenState extends State<ModuleFormScreen> {
     }
   }
 
+  Future<void> _delete() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete this?'),
+        content: const Text('It is removed from your computer as well.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false), child: const Text('Keep')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Delete')),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    try {
+      await context
+          .read<Session>()
+          .api
+          .delete('/api/${widget.spec.key}/${widget.existing!['id']}');
+      if (mounted) Navigator.pop(context, true);
+    } on ApiError catch (e) {
+      if (mounted) setState(() => _error = e.message);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final s = widget.spec;
-    return Scaffold(
-      appBar: AppBar(title: Text('Add to ${s.label}')),
-      body: ListView(
-        padding: const EdgeInsets.all(20),
-        children: [
+    return Padding(
+      padding: EdgeInsets.fromLTRB(
+          20, 0, 20, MediaQuery.of(context).viewInsets.bottom + 24),
+      child: SingleChildScrollView(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Row(children: [
+            CircleAvatar(
+              backgroundColor: s.colour.withValues(alpha: 0.14),
+              child: Icon(s.icon, size: 19, color: s.colour),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(_editing ? 'Edit' : 'Add to ${s.label}',
+                  style: Theme.of(context).textTheme.titleMedium),
+            ),
+            if (_editing)
+              IconButton(
+                icon: const Icon(Icons.delete_outline, color: kDanger),
+                onPressed: _delete,
+              ),
+          ]),
+          const SizedBox(height: 14),
           for (final f in s.fields) ...[
             _field(f),
-            const SizedBox(height: 14),
-          ],
-          if (_error != null) ...[
-            Text(_error!,
-                style: TextStyle(color: Theme.of(context).colorScheme.error)),
             const SizedBox(height: 12),
           ],
-          FilledButton(
+          if (_error != null) ...[
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Text(_error!,
+                  style: TextStyle(color: Theme.of(context).colorScheme.error)),
+            ),
+            const SizedBox(height: 10),
+          ],
+          BrandButton(
+            label: _editing ? 'Save changes' : 'Add it',
+            busy: _busy,
             onPressed: _busy ? null : _save,
-            child: _busy
-                ? const SizedBox(
-                    height: 20,
-                    width: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2))
-                : const Text('Save'),
           ),
-        ],
+        ]),
       ),
     );
   }
@@ -292,13 +386,13 @@ class _ModuleFormScreenState extends State<ModuleFormScreen> {
           initialValue: _values[f.key] as String?,
           decoration: InputDecoration(labelText: f.label),
           items: [
-            for (final c in f.choices)
-              DropdownMenuItem(value: c, child: Text(c))
+            for (final c in f.choices) DropdownMenuItem(value: c, child: Text(c))
           ],
           onChanged: (v) => setState(() => _values[f.key] = v),
         );
       case FieldKind.toggle:
         return SwitchListTile(
+          contentPadding: EdgeInsets.zero,
           title: Text(f.label),
           value: _values[f.key] == true,
           onChanged: (v) => setState(() => _values[f.key] = v),
@@ -306,10 +400,11 @@ class _ModuleFormScreenState extends State<ModuleFormScreen> {
       case FieldKind.date:
         final v = _values[f.key] as String?;
         return ListTile(
+          contentPadding: const EdgeInsets.symmetric(horizontal: 14),
           shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
+              borderRadius: BorderRadius.circular(13),
               side: BorderSide(color: Theme.of(context).dividerColor)),
-          title: Text(f.label),
+          title: Text(f.label, style: const TextStyle(fontSize: 14)),
           subtitle: Text(v ?? 'Not set'),
           trailing: const Icon(Icons.calendar_today, size: 18),
           onTap: () async {
@@ -320,8 +415,8 @@ class _ModuleFormScreenState extends State<ModuleFormScreen> {
               lastDate: DateTime(2100),
             );
             if (picked != null) {
-              setState(() => _values[f.key] =
-                  DateFormat('yyyy-MM-dd').format(picked));
+              setState(() =>
+                  _values[f.key] = DateFormat('yyyy-MM-dd').format(picked));
             }
           },
         );
@@ -339,4 +434,45 @@ class _ModuleFormScreenState extends State<ModuleFormScreen> {
         );
     }
   }
+}
+
+class _Empty extends StatelessWidget {
+  const _Empty({required this.spec, required this.filtered});
+  final ModuleSpec spec;
+  final bool filtered;
+
+  @override
+  Widget build(BuildContext context) => ListView(children: [
+        Padding(
+          padding: const EdgeInsets.all(48),
+          child: Column(children: [
+            Icon(spec.icon, size: 44, color: spec.colour),
+            const SizedBox(height: 14),
+            Text(filtered ? 'Nothing matches' : 'Nothing here yet',
+                style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 6),
+            Text(filtered ? 'Try a different search' : spec.blurb,
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.bodySmall),
+          ]),
+        )
+      ]);
+}
+
+class _Retry extends StatelessWidget {
+  const _Retry({required this.message, required this.onRetry});
+  final String message;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) => ListView(children: [
+        Padding(
+          padding: const EdgeInsets.all(32),
+          child: Column(children: [
+            Text(message, textAlign: TextAlign.center),
+            const SizedBox(height: 16),
+            FilledButton.tonal(onPressed: onRetry, child: const Text('Try again')),
+          ]),
+        )
+      ]);
 }
