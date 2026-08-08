@@ -69,6 +69,51 @@ subprojects {
     plugins.withId("com.android.application") { forceCompileSdk() }
 }
 
+// COMPILE THE PLUGINS' KOTLIN. Without this the Android build cannot succeed,
+// and it never had.
+//
+// file_picker's own android/build.gradle does:
+//
+//     def isAgp9OrAbove = ANDROID_GRADLE_PLUGIN_VERSION...toInteger() >= 9
+//     apply plugin: 'com.android.library'
+//     if (!isAgp9OrAbove) { apply plugin: 'org.jetbrains.kotlin.android' }
+//
+// so on AGP 9 — which this project uses — it deliberately does NOT apply the
+// Kotlin plugin, expecting AGP 9's built-in Kotlin support to compile its
+// sources. That support is opt-in and nothing here opts in, so
+// FilePickerPlugin.kt was never compiled at all. The class then does not exist,
+// and the APP's Java compile of the generated plugin registrant fails with:
+//
+//     GeneratedPluginRegistrant.java:24: error: cannot find symbol
+//       symbol: class FilePickerPlugin
+//
+// which names our generated file and reads as a problem with our code. It is
+// not; it is a plugin whose sources were silently skipped.
+//
+// Applied by us, to any library subproject that ships Kotlin and has no Kotlin
+// plugin of its own. Scoped that way rather than applied blindly so a plugin
+// that already handles itself is left alone.
+subprojects {
+    plugins.withId("com.android.library") {
+        val shipsKotlin = file("src/main/kotlin").isDirectory
+        if (shipsKotlin && !plugins.hasPlugin("org.jetbrains.kotlin.android")) {
+            logger.lifecycle("applying the Kotlin plugin to ${project.path} " +
+                             "— it ships .kt sources and did not apply one itself")
+            plugins.apply("org.jetbrains.kotlin.android")
+        }
+    }
+}
+
+// Kotlin 2.x defaults to JVM target 1.8, and these plugins set their Java
+// target to 17. Gradle fails that mismatch outright rather than warning, so
+// applying the Kotlin plugin above without this trades one build error for
+// another.
+subprojects {
+    tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
+        compilerOptions.jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+    }
+}
+
 subprojects {
     project.evaluationDependsOn(":app")
 }
