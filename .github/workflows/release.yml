@@ -36,18 +36,26 @@
 #   IOS_PROFILE_BASE64       the provisioning profile, base64
 name: Build and release the phone app
 
-# MANUAL ONLY. Nothing here builds by itself.
+# DELIBERATE RELEASES ONLY — a tag, or the button. Never a code change.
 #
-# It used to run on any push that touched VERSION, which meant a version bump
-# — something done as part of writing code, not as a decision to ship — sent a
-# build to Apple and put it in front of testers. That is the wrong default for
-# this repo: a release should be a thing somebody chooses, and the owner asked
-# for exactly that after four builds went out in an afternoon without being
-# asked for.
+# This used to run on any push that touched VERSION, which meant a version bump
+# — something done while writing code, not a decision to ship — sent a build to
+# Apple and put it in front of testers. Four went out in one afternoon without
+# being asked for, and the owner rightly said stop.
 #
-# To release: Actions → "Build and release the phone app" → Run workflow. The
-# version comes from the VERSION file as before.
+# So the trigger is a TAG. Pushing `v1.4.0` is an act with no other purpose; you
+# cannot do it by accident the way you can bump a file. It also gives whoever
+# holds only push access a way to cut a release, which `workflow_dispatch` does
+# not: dispatching needs an Actions:write token, and the token this project
+# keeps is deliberately read-only.
+#
+#   git tag v1.4.0 && git push origin v1.4.0     <- releases
+#   editing VERSION                              <- does nothing
+#
+# The button is still here for a rebuild of the same version.
 on:
+  push:
+    tags: ["v*"]
   workflow_dispatch:
     inputs:
       android:
