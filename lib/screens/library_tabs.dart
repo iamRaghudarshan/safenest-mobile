@@ -506,6 +506,12 @@ class _CollectionScreenState extends State<CollectionScreen> {
   String? _error;
   bool _busy = false;
 
+  static const _pageSize = 120;
+  int _offset = 0;
+  int? _total;
+  bool _hasMore = true;
+  bool _loadingMore = false;
+
   /// Selecting inside an album, so photos can be taken back OUT of it. The
   /// endpoint (/albums/{id}/remove) has always taken a batch and nothing here
   /// could send one.
@@ -618,28 +624,93 @@ class _CollectionScreenState extends State<CollectionScreen> {
     }
   }
 
-  Future<void> _load() async {
-    setState(() => _loading = true);
+  /// One page at a time.
+  ///
+  /// This used to fetch `widget.path` once and render whatever came back. The
+  /// server answers 150 by default, so any collection bigger than that showed
+  /// its first 150 photos, gave no sign there were more, and looked exactly
+  /// like a complete collection — a silent truncation of somebody's own
+  /// records. It mattered little when this screen only held albums; it holds
+  /// favourites, places and "recently added" now, and those are the ones that
+  /// grow without anyone curating them.
+  Future<void> _load({bool more = false}) async {
+    if (more && (_loadingMore || !_hasMore)) return;
+    setState(() {
+      if (more) {
+        _loadingMore = true;
+      } else {
+        _loading = true;
+        _offset = 0;
+        _hasMore = true;
+      }
+    });
     try {
-      final d = await context.read<Session>().api.get(widget.path);
+      // The paths here already carry a query string as often as not
+      // (`?album=3`, `?fav=1`, `?near=…`), so the separator has to be worked
+      // out rather than assumed. Appending a second `?` produces a request the
+      // server reads as one enormous parameter name and answers with page one
+      // for ever.
+      final sep = widget.path.contains('?') ? '&' : '?';
+      final start = more ? _offset : 0;
+      final d = await context
+          .read<Session>()
+          .api
+          .get('${widget.path}${sep}offset=$start&limit=$_pageSize');
       // Albums answer {album:…, items:[…]}, people answer {items:[…]}, and a
       // bare list is possible too. Accepting all three beats guessing one.
       final list = d is List
           ? d
           : (d is Map ? (d['items'] ?? d['photos'] ?? const []) : const []);
+      final page = [
+        for (final e in (list as List))
+          Photo.fromJson(Map<String, dynamic>.from(e as Map))
+      ];
+      if (!mounted) return;
+
+      // An endpoint that does not understand `offset` answers the second page
+      // with the first one — and appending that would duplicate every photo
+      // and ask again for ever, which on a phone means a grid that grows until
+      // it runs out of memory. This app talks to whatever server version the
+      // owner happens to be running, and older builds of `/api/people/{id}/
+      // photos` took no offset at all, so the guard is not theoretical.
+      final known = _photos.map((p) => p.id).toSet();
+      final fresh = more ? page.where((p) => !known.contains(p.id)).toList() : page;
+      final ignoredOffset = more && page.isNotEmpty && fresh.isEmpty;
+
       setState(() {
-        _photos = [
-          for (final e in (list as List))
-            Photo.fromJson(Map<String, dynamic>.from(e as Map))
-        ];
+        if (more) {
+          _photos.addAll(fresh);
+        } else {
+          _photos = fresh;
+        }
+        _offset = _photos.length;
+        // An endpoint that reports a total is believed; one that does not is
+        // judged by whether the page came back full.
+        final total = d is Map ? d['total'] : null;
+        _total = total is int ? total : null;
+        _hasMore = ignoredOffset
+            ? false
+            : (_total != null
+                ? _photos.length < _total!
+                : page.length >= _pageSize);
         _loading = false;
+        _loadingMore = false;
         _error = null;
       });
     } on ApiError catch (e) {
+      if (!mounted) return;
       setState(() {
-        _error = e.message;
+        // A failure part-way through must not throw away the pages already on
+        // screen — that turns a flaky connection into "my album emptied".
+        if (!more) _error = e.message;
         _loading = false;
+        _loadingMore = false;
+        _hasMore = false;
       });
+      if (more) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(e.message)));
+      }
     }
   }
 
@@ -665,7 +736,12 @@ class _CollectionScreenState extends State<CollectionScreen> {
           preferredSize: const Size.fromHeight(18),
           child: Padding(
             padding: const EdgeInsets.only(bottom: 6),
-            child: Text('${_photos.length} photos',
+            // "12 of 340" while more is still to come. A bare count that is
+            // really a page count is the thing this screen used to get wrong.
+            child: Text(
+                _total != null && _total! > _photos.length
+                    ? '${_photos.length} of $_total'
+                    : '${_photos.length} photos',
                 style: Theme.of(context).textTheme.bodySmall),
           ),
         ),
@@ -731,37 +807,51 @@ class _CollectionScreenState extends State<CollectionScreen> {
                       // how to be selected, caps its decode, and shows a
                       // broken-image glyph instead of a grey square. Three
                       // behaviours that were reimplemented worse here.
-                      itemBuilder: (ctx, i) => PhotoTile(
-                        photo: _photos[i],
-                        selecting: _selecting,
-                        selected: _selected.contains(_photos[i].id),
-                        onOpen: () {
-                          if (_selecting) {
-                            setState(() {
-                              if (!_selected.remove(_photos[i].id)) {
-                                _selected.add(_photos[i].id);
-                              }
-                            });
-                            return;
-                          }
-                          Navigator.of(ctx).push(MaterialPageRoute(
-                            builder: (_) => PhotoViewer(
-                              photos: _photos,
-                              initialIndex: i,
-                              onChanged: _load,
-                            ),
-                          ));
-                        },
-                        // Only an album can have photos taken out of it, so
-                        // only an album offers the long-press that starts it.
-                        onLongPress: _isAlbum
-                            ? () => setState(() {
-                                  if (!_selected.remove(_photos[i].id)) {
-                                    _selected.add(_photos[i].id);
-                                  }
-                                })
-                            : null,
-                      ),
+                      itemBuilder: (ctx, i) {
+                        // Fetch the next page while there is still a screenful
+                        // left to scroll, so the grid never stops under a
+                        // finger. The builder is the trigger rather than a
+                        // scroll listener because it fires for exactly the
+                        // tiles being laid out, whatever the row height
+                        // happens to be.
+                        if (i >= _photos.length - 12 && _hasMore && !_loadingMore) {
+                          // After this frame: calling setState from inside a
+                          // build is an error, and _load does.
+                          WidgetsBinding.instance.addPostFrameCallback(
+                              (_) => _load(more: true));
+                        }
+                        return PhotoTile(
+                          photo: _photos[i],
+                          selecting: _selecting,
+                          selected: _selected.contains(_photos[i].id),
+                          onOpen: () {
+                            if (_selecting) {
+                              setState(() {
+                                if (!_selected.remove(_photos[i].id)) {
+                                  _selected.add(_photos[i].id);
+                                }
+                              });
+                              return;
+                            }
+                            Navigator.of(ctx).push(MaterialPageRoute(
+                              builder: (_) => PhotoViewer(
+                                photos: _photos,
+                                initialIndex: i,
+                                onChanged: _load,
+                              ),
+                            ));
+                          },
+                          // Only an album can have photos taken out of it, so
+                          // only an album offers the long-press that starts it.
+                          onLongPress: _isAlbum
+                              ? () => setState(() {
+                                    if (!_selected.remove(_photos[i].id)) {
+                                      _selected.add(_photos[i].id);
+                                    }
+                                  })
+                              : null,
+                        );
+                      },
                     ),
     );
   }
