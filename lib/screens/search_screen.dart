@@ -25,6 +25,7 @@ import '../session.dart';
 import '../theme.dart';
 import '../widgets/brand_button.dart';
 import '../widgets/pill.dart';
+import 'library_tabs.dart';
 
 class SearchScreen extends StatefulWidget {
   const SearchScreen({super.key, required this.onOpen, this.initialResults});
@@ -45,6 +46,14 @@ class _SearchScreenState extends State<SearchScreen> {
   Timer? _debounce;
 
   Map<String, dynamic>? _results;
+
+  /// Faces whose name matches. `/api/people?q=` has always supported this and
+  /// nothing used it — and `/api/search` covers no people at all, so searching
+  /// somebody's name found photographs that merely mentioned it and not the
+  /// person. Google Photos puts matching faces at the TOP of a search, because
+  /// a name is far more often a person than a word.
+  List<Map<String, dynamic>> _people = const [];
+
   bool _loading = false;
   String? _error;
   String _query = '';
@@ -83,15 +92,32 @@ class _SearchScreenState extends State<SearchScreen> {
       _error = null;
     });
     if (q.isEmpty) {
-      setState(() => _results = null);
+      setState(() {
+        _results = null;
+        _people = const [];
+      });
       return;
     }
     setState(() => _loading = true);
     try {
-      final d = await context.read<Session>().api.get('/api/search', {'q': q});
+      final api = context.read<Session>().api;
+      // Both at once. People is a small query and waiting for it serially would
+      // add a round trip to every keystroke that survives the debounce.
+      final both = await Future.wait([
+        api.get('/api/search', {'q': q}),
+        api.get('/api/people', {'q': q, 'limit': '12'})
+            .catchError((_) => <String, dynamic>{}),
+      ]);
       if (!mounted) return;
+      final ppl = both[1];
       setState(() {
-        _results = d is Map ? Map<String, dynamic>.from(d) : null;
+        _results = both[0] is Map ? Map<String, dynamic>.from(both[0] as Map) : null;
+        _people = ppl is Map
+            ? [
+                for (final p in (ppl['people'] as List? ?? const []))
+                  Map<String, dynamic>.from(p as Map)
+              ]
+            : const [];
         _loading = false;
       });
     } on ApiError catch (e) {
@@ -140,6 +166,84 @@ class _SearchScreenState extends State<SearchScreen> {
     return (colour: kBrand, icon: Icons.search, module: null);
   }
 
+  /// Matching faces, as circles — the same shape as the People tab, because a
+  /// face is a person in both places and two shapes for one thing is how an app
+  /// stops feeling like one app.
+  Widget _peopleRow() {
+    final base = context.read<Session>().baseUrl ?? '';
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 14),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          Container(
+            width: 30,
+            height: 30,
+            decoration: BoxDecoration(
+                color: kBrand, borderRadius: BorderRadius.circular(9)),
+            child: const Icon(Icons.person_outline, size: 16, color: Colors.white),
+          ),
+          const SizedBox(width: 8),
+          const Text('People',
+              style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800)),
+          const SizedBox(width: 8),
+          Pill('${_people.length}', colour: kBrand),
+        ]),
+        const SizedBox(height: 10),
+        SizedBox(
+          height: 92,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            itemCount: _people.length,
+            separatorBuilder: (_, _) => const SizedBox(width: 12),
+            itemBuilder: (ctx, i) {
+              final p = _people[i];
+              final cover = '${p['cover_url'] ?? ''}';
+              final n = '${p['name'] ?? 'Someone'}';
+              return GestureDetector(
+                onTap: () => Navigator.of(ctx).push(MaterialPageRoute(
+                  builder: (_) => CollectionScreen(
+                    title: n,
+                    path: '/api/people/${p['id']}/photos',
+                  ),
+                )),
+                child: SizedBox(
+                  width: 66,
+                  child: Column(children: [
+                    Container(
+                      width: 60,
+                      height: 60,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: Theme.of(ctx).colorScheme.surfaceContainerHighest,
+                      ),
+                      clipBehavior: Clip.antiAlias,
+                      child: cover.isEmpty
+                          ? Icon(Icons.person,
+                              color: Theme.of(ctx).colorScheme.outline)
+                          : Image.network(
+                              cover.startsWith('http') ? cover : '$base$cover',
+                              fit: BoxFit.cover,
+                              cacheWidth: 180,
+                              errorBuilder: (_, _, _) => Icon(Icons.person,
+                                  color: Theme.of(ctx).colorScheme.outline)),
+                    ),
+                    const SizedBox(height: 5),
+                    Text(n,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                            fontSize: 11.5, fontWeight: FontWeight.w600)),
+                  ]),
+                ),
+              );
+            },
+          ),
+        ),
+      ]),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -181,15 +285,20 @@ class _SearchScreenState extends State<SearchScreen> {
                   onRetry: () => _run(_query))
               : res == null
                   ? const _Prompt()
-                  : groups.isEmpty
+                  : (groups.isEmpty && _people.isEmpty)
                       ? _Message(
                           icon: '🔍',
                           title: 'Nothing found',
-                          note: 'No records or photos match “$_query”. '
+                          note: 'No records, photos or people match “$_query”. '
                               'Try a shorter word.')
                       : ListView(
                           padding: const EdgeInsets.fromLTRB(14, 6, 14, 24),
                           children: [
+                            // FACES FIRST. A name is far more often a person
+                            // than a word, so somebody typing "Meera" wants her
+                            // photos before they want a document mentioning her.
+                            if (_people.isNotEmpty) _peopleRow(),
+                            if (groups.isNotEmpty)
                             Padding(
                               padding: const EdgeInsets.fromLTRB(4, 2, 4, 10),
                               child: Text(
