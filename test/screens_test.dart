@@ -13,6 +13,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
 
 import 'package:safenest/backup.dart';
+import 'package:safenest/screens/storage_screen.dart';
 import 'package:safenest/screens/activity_screen.dart';
 import 'package:safenest/screens/backup_screen.dart';
 import 'package:safenest/screens/scan_screen.dart';
@@ -30,6 +31,7 @@ Widget _wrap(Widget child, {Brightness brightness = Brightness.light}) {
 }
 
 void main() {
+  _storageTests();
   group('Backup — every state it can be in', () {
     final states = <String, BackupProgress>{
       'idle': const BackupProgress(),
@@ -54,6 +56,22 @@ void main() {
           done: 120,
           skipped: 4001,
           message: 'Stopped — nothing is lost, it carries on from here next time.'),
+      // Several causes at once, which is the case the old single-string
+      // message could not represent at all.
+      'partly failed — several causes': const BackupProgress(
+          state: BackupState.done,
+          total: 20431,
+          done: 16000,
+          skipped: 4000,
+          failed: 431,
+          retryable: 431,
+          reasons: {
+            'stored in iCloud rather than on this phone. Open them in Photos '
+                'once, or turn off "Optimise Storage".': 400,
+            'your session has expired. Sign out and back in.': 28,
+            'they are larger than your computer will accept.': 3,
+          },
+          message: '16000 backed up, 4000 already there, 431 could not be sent.'),
       'failed — session expired': const BackupProgress(
           state: BackupState.failed,
           total: 20431,
@@ -98,6 +116,44 @@ void main() {
       // And the count is named as an UPLOAD failure, not a read failure.
       expect(find.textContaining('not sent'), findsOneWidget);
       expect(find.textContaining('could not be read'), findsNothing);
+    });
+
+    testWidgets('every cause is named, not just the last one', (tester) async {
+      tester.view.physicalSize = const Size(375, 1200);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      await tester.pumpWidget(_wrap(
+          BackupScreen(debugProgress: states['partly failed — several causes']!)));
+      await tester.pump();
+
+      expect(tester.takeException(), isNull);
+      expect(find.text('Why they did not go'), findsOneWidget);
+      // Counted per cause and ordered by how many photos each is blocking —
+      // the point being that the 400 stuck in iCloud must not be hidden behind
+      // whichever failure happened to be last.
+      expect(find.textContaining('400 photos:'), findsOneWidget);
+      expect(find.textContaining('28 photos:'), findsOneWidget);
+      expect(find.textContaining('3 photos:'), findsOneWidget);
+    });
+
+    testWidgets('failures can be retried without rescanning the library',
+        (tester) async {
+      tester.view.physicalSize = const Size(375, 1200);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      await tester.pumpWidget(_wrap(
+          BackupScreen(debugProgress: states['partly failed — several causes']!)));
+      await tester.pump();
+      expect(find.text('Try the 431 that failed again'), findsOneWidget);
+
+      // Absent when there is nothing to retry — a button that would do nothing
+      // is worse than no button.
+      await tester.pumpWidget(
+          _wrap(BackupScreen(debugProgress: states['finished']!)));
+      await tester.pump();
+      expect(find.textContaining('that failed again'), findsNothing);
     });
 
     testWidgets('a permission failure offers the settings shortcut, and a '
@@ -334,6 +390,24 @@ void main() {
           _wrap(const ScanScreen(initialPages: ['/nope/a.jpg'])));
       await tester.pump();
       expect(tester.takeException(), isNull);
+    });
+  });
+}
+
+void _storageTests() {
+  group('Storage — sizes people can act on', () {
+    test('bytes read as a person would say them', () {
+      expect(formatBytes(0), '0 B');
+      expect(formatBytes(900), '900 B');
+      // No false precision below a megabyte: "1.4 KB" pretends to a accuracy
+      // that changes every time a thumbnail is written.
+      expect(formatBytes(2048), '2 KB');
+      expect(formatBytes(5 * 1024 * 1024), '5.0 MB');
+      expect(formatBytes(3 * 1024 * 1024 * 1024), '3.0 GB');
+    });
+
+    test('a negative or nonsense size does not crash the screen', () {
+      expect(formatBytes(-1), '0 B');
     });
   });
 }

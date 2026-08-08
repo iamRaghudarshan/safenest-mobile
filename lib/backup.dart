@@ -32,6 +32,7 @@ import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:photo_manager/photo_manager.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:wakelock_plus/wakelock_plus.dart';
 
 import 'api.dart';
 
@@ -45,6 +46,8 @@ class BackupProgress {
     this.skipped = 0,
     this.failed = 0,
     this.message = '',
+    this.reasons = const {},
+    this.retryable = 0,
   });
 
   final BackupState state;
@@ -53,6 +56,17 @@ class BackupProgress {
   final int skipped;    // already on the server from a previous run
   final int failed;
   final String message;
+
+  /// Why photos did not go, and how many for each cause.
+  ///
+  /// This was one String, overwritten by every failure, so a run where forty
+  /// photos were stuck in iCloud and three hit an expired session reported
+  /// only whichever happened last. One cause is a thing you fix; "some
+  /// unspecified problem" is a thing you give up on.
+  final Map<String, int> reasons;
+
+  /// How many failures are worth trying again without rescanning the library.
+  final int retryable;
 
   int get handled => done + skipped + failed;
 
@@ -102,6 +116,26 @@ class BackupService extends ChangeNotifier {
 
   void stop() => _stop = true;
 
+  /// Keep the screen on for the length of a run, and only that long.
+  ///
+  /// A phone dims and sleeps an idle screen after a minute or two, and that
+  /// suspends the app — so a backup of a large library stopped shortly after
+  /// it was started and sat there looking frozen. The only workaround was
+  /// tapping the screen every minute for half an hour.
+  ///
+  /// Released in a `finally`, never on the happy path alone: a backup that
+  /// throws must not leave the phone awake all night, because a flat battery
+  /// in the morning is blamed on this app and is a fair thing to blame it for.
+  Future<void> _keepAwake(bool on) async {
+    try {
+      await WakelockPlus.toggle(enable: on);
+    } catch (_) {
+      // Not worth failing a backup over. On a device that refuses it the run
+      // still works; it just needs the screen touched.
+    }
+  }
+
+
   /// Ask for the library. Note `PermissionState.limited`: iOS lets someone grant
   /// access to a HANDFUL of photos, and an app that treats that as "granted"
   /// silently backs up four pictures and reports success. It has to be named.
@@ -109,7 +143,20 @@ class BackupService extends ChangeNotifier {
       PhotoManager.requestPermissionExtend();
 
   Future<void> runFullBackup() async {
+    await _keepAwake(true);
+    try {
+      await _runFullBackup();
+    } finally {
+      await _keepAwake(false);
+    }
+  }
+
+  Future<void> _runFullBackup() async {
     _stop = false;
+    // A fresh run's failures are its own. Carrying the previous run's causes
+    // over would report a problem that has just been fixed.
+    _problems.clear();
+    _failedAssets.clear();
     _emit(const BackupProgress(
         state: BackupState.scanning, message: 'Looking through your photos…'));
 
@@ -194,13 +241,15 @@ class BackupService extends ChangeNotifier {
       // Four at a time, matching what the server was measured to do best.
       for (var i = 0; i < todo.length; i += _concurrency) {
         if (_stop) break;
-        final slice = todo.skip(i).take(_concurrency);
+        final slice = todo.skip(i).take(_concurrency).toList();
         final results = await Future.wait(slice.map(_send));
-        for (final ok in results) {
-          if (ok) {
+        for (var k = 0; k < results.length; k++) {
+          if (results[k]) {
             handledDone++;
           } else {
             handledFail++;
+            // Kept so "try these again" does not mean "walk the library again".
+            _failedAssets.add(slice[k]);
           }
         }
         report();
@@ -230,25 +279,107 @@ class BackupService extends ChangeNotifier {
       done: handledDone,
       skipped: handledSkip,
       failed: handledFail,
+      reasons: Map.unmodifiable(_problems),
+      retryable: _failedAssets.length,
       message: _stop
           ? 'Stopped — nothing is lost, it carries on from here next time.'
           : nothingWorked
-              ? 'Nothing could be backed up. ${_lastProblem ?? ""}'.trim()
+              ? 'Nothing could be backed up.'
               : someFailed
                   // Named, and the count kept, so a partial run cannot pass for
-                  // a whole one. They are not marked sent, so the next run
-                  // retries exactly these.
+                  // a whole one. They are not marked sent, so they can be tried
+                  // again without rescanning anything.
                   ? '$handledDone backed up, $handledSkip already there, '
-                      '$handledFail could not be sent. '
-                      '${_lastProblem ?? ""} They will be tried again next time.'
-                      .trim()
+                      '$handledFail could not be sent.'
                   : 'Backed up. $handledDone new, $handledSkip already there.',
     ));
   }
 
-  /// Why the most recent failures failed, in the server's own terms. Kept so the
-  /// screen can say something true instead of "could not be read".
-  String? _lastProblem;
+  /// Try only the photos that did not go.
+  ///
+  /// Almost every backup failure here is one cause affecting many photos — a
+  /// sleeping computer, an expired session, a licence needing attention — and
+  /// all of them are fixed in seconds. Making someone re-run the whole library
+  /// to find out whether it worked is what turns a ten-second fix into "the
+  /// backup is broken". This walks only what failed, so it finishes in about
+  /// as long as the fix took.
+  Future<void> retryFailed() async {
+    if (_failedAssets.isEmpty) return;
+    await _keepAwake(true);
+    try {
+      await _retryFailed();
+    } finally {
+      await _keepAwake(false);
+    }
+  }
+
+  Future<void> _retryFailed() async {
+    _stop = false;
+    final queue = List<AssetEntity>.from(_failedAssets);
+    _failedAssets.clear();
+    _problems.clear();
+
+    final total = queue.length;
+    var ok = 0, bad = 0;
+    void report() => _emit(BackupProgress(
+          state: BackupState.running,
+          total: total,
+          done: ok,
+          failed: bad,
+          message: 'Trying $total photo${total == 1 ? '' : 's'} again…',
+        ));
+    report();
+
+    for (var i = 0; i < queue.length; i += _concurrency) {
+      if (_stop) break;
+      final slice = queue.skip(i).take(_concurrency).toList();
+      final results = await Future.wait(slice.map(_send));
+      for (var k = 0; k < results.length; k++) {
+        if (results[k]) {
+          ok++;
+        } else {
+          bad++;
+          _failedAssets.add(slice[k]);
+        }
+      }
+      report();
+    }
+    await _flush();
+
+    _emit(BackupProgress(
+      state: _stop
+          ? BackupState.paused
+          : (bad > 0 && ok == 0 ? BackupState.failed : BackupState.done),
+      total: total,
+      done: ok,
+      failed: bad,
+      reasons: Map.unmodifiable(_problems),
+      retryable: _failedAssets.length,
+      message: _stop
+          ? 'Stopped.'
+          : bad == 0
+              ? 'All $ok went through this time.'
+              : '$ok went through, $bad still could not be sent.',
+    ));
+  }
+
+  /// Why failures failed, in the server's own terms, counted per cause.
+  final Map<String, int> _problems = {};
+
+  /// The photos that did not go, so they can be retried directly instead of
+  /// walking the whole library again. A retry after fixing the cause — waking
+  /// the computer, signing back in — should take seconds, not another full
+  /// scan of twenty thousand photos.
+  final List<AssetEntity> _failedAssets = [];
+
+  void _blame(String reason) => _problems[reason] = (_problems[reason] ?? 0) + 1;
+
+  /// The causes, worst first, as sentences a person can act on.
+  List<String> get problemLines {
+    final e = _problems.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+    return [for (final x in e) '${x.value} photo${x.value == 1 ? '' : 's'}: ${x.key}'];
+  }
 
   Future<bool> _send(AssetEntity asset) async {
     try {
@@ -256,13 +387,13 @@ class BackupService extends ChangeNotifier {
       // is slower and loses the original. The server decodes HEIC itself.
       final f = await asset.originFile;
       if (f == null || !await f.exists()) {
-        _lastProblem = 'Some photos are stored in iCloud and are not on this '
-            'phone. Open them in Photos once, or turn off "Optimise Storage".';
+        _blame('stored in iCloud rather than on this phone. Open them in '
+            'Photos once, or turn off "Optimise Storage".');
         return false;
       }
       final bytes = await f.readAsBytes();
       if (bytes.isEmpty) {
-        _lastProblem = 'Some photos are in iCloud rather than on the phone.';
+        _blame('in iCloud rather than on the phone.');
         return false;
       }
 
@@ -273,21 +404,21 @@ class BackupService extends ChangeNotifier {
       }
       // Naming the cause is the entire difference between a person fixing this
       // in ten seconds and reporting "backup does not work".
-      _lastProblem = switch (status) {
-        0 => 'Your computer could not be reached. Check it is awake and that '
+      _blame(switch (status) {
+        0 => 'your computer could not be reached. Check it is awake and that '
             'the address in Profile is right.',
-        401 => 'Your session has expired. Sign out and back in.',
-        402 => 'The licence on your computer needs attention — photos cannot '
+        401 => 'your session has expired. Sign out and back in.',
+        402 => 'the licence on your computer needs attention — photos cannot '
             'be added until it does.',
-        403 => 'This account is not allowed to add photos.',
-        413 => 'Some photos are larger than your computer will accept.',
-        >= 500 => 'Your computer answered with an error ($status). Its own '
+        403 => 'this account is not allowed to add photos.',
+        413 => 'they are larger than your computer will accept.',
+        >= 500 => 'your computer answered with an error ($status). Its own '
             'console may say more.',
-        _ => 'Your computer refused the upload ($status).',
-      };
+        _ => 'your computer refused the upload ($status).',
+      });
       return false;
     } catch (_) {
-      _lastProblem = 'Something went wrong reading a photo from this phone.';
+      _blame('could not be read from this phone.');
       return false;
     }
   }

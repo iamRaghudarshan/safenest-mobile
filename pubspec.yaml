@@ -24,6 +24,17 @@ dependencies:
   # backed up so a second run costs a comparison rather than 20,000 uploads.
   photo_manager: ^3.6.1
   photo_manager_image_provider: ^2.1.4
+  # Holds the screen awake for the length of a backup, and only then.
+  #
+  # Both phone systems dim and then sleep an idle screen, and a sleeping screen
+  # suspends the app — so a backup of twenty thousand photos would stop a minute
+  # after it was started and the person watching would see it frozen at 3%. They
+  # would then have to sit tapping the screen for half an hour, which is what
+  # was actually happening.
+  #
+  # Released the moment the run ends, in a finally. A phone left awake all night
+  # because a backup crashed is a flat battery blamed on this app.
+  wakelock_plus: ^1.2.8
 
   # --- gallery, Google Photos shaped ---
   photo_view: ^0.15.0             # pinch-zoom in the lightbox

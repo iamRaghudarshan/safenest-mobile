@@ -240,6 +240,63 @@ class _BackupScreenState extends State<BackupScreen> {
               ),
             if (p.message.isNotEmpty) const SizedBox(height: 16),
 
+            // WHY, per cause, not one sentence from whichever failure happened
+            // last. Forty photos stuck in iCloud and three hitting an expired
+            // session are two different jobs, and reporting only the second
+            // leaves the first invisible. Every line here is something a person
+            // can act on in under a minute.
+            if (p.reasons.isNotEmpty) ...[
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(13),
+                decoration: BoxDecoration(
+                  color: kWarn.withValues(alpha: 0.09),
+                  borderRadius: BorderRadius.circular(kRadiusSm),
+                  border: Border.all(color: kWarn.withValues(alpha: 0.35)),
+                ),
+                child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('Why they did not go',
+                          style: TextStyle(
+                              fontWeight: FontWeight.w800, fontSize: 13.5)),
+                      const SizedBox(height: 7),
+                      for (final line in _reasonLines(p.reasons))
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 5),
+                          child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text('• '),
+                                // Expanded, or a full sentence overflows the
+                                // row on a narrow phone.
+                                Expanded(
+                                  child: Text(line,
+                                      style: const TextStyle(
+                                          fontSize: 12.5, height: 1.4)),
+                                ),
+                              ]),
+                        ),
+                    ]),
+              ),
+              const SizedBox(height: 12),
+            ],
+
+            // Retry only what failed. Nearly every cause here is one thing
+            // affecting many photos and is fixed in seconds — a sleeping
+            // computer, an expired session. Making someone re-walk twenty
+            // thousand photos to find out whether the fix worked is what turns
+            // a ten-second repair into "the backup is broken".
+            if (p.retryable > 0 && p.state != BackupState.running) ...[
+              BrandButton(
+                label: 'Try the ${p.retryable} that failed again',
+                icon: Icons.refresh,
+                block: true,
+                onPressed: () => _service?.retryFailed(),
+              ),
+              const SizedBox(height: 8),
+            ],
+
             BrandButton(
               label: p.state == BackupState.paused
                   ? 'Carry on backing up'
@@ -248,6 +305,8 @@ class _BackupScreenState extends State<BackupScreen> {
                       : 'Back up my photos',
               icon: Icons.backup_outlined,
               block: true,
+              // The quiet option once there is something more precise to do.
+              ghost: p.retryable > 0,
               onPressed: () => _service?.runFullBackup(),
             ),
 
@@ -265,6 +324,16 @@ class _BackupScreenState extends State<BackupScreen> {
         ],
       ),
     );
+  }
+
+  /// Largest cause first — the one worth fixing is the one blocking the most.
+  List<String> _reasonLines(Map<String, int> reasons) {
+    final e = reasons.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+    return [
+      for (final x in e)
+        '${x.value} photo${x.value == 1 ? '' : 's'}: ${x.key}',
+    ];
   }
 
   bool _looksLikePermission(String m) =>

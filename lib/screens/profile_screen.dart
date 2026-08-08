@@ -43,6 +43,7 @@ import '../widgets/brand_button.dart';
 import '../widgets/avatar.dart';
 import '../widgets/edit_profile_sheet.dart';
 import 'activity_screen.dart';
+import 'storage_screen.dart';
 import 'backup_screen.dart';
 import 'notifications_screen.dart';
 
@@ -232,6 +233,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
               label: 'Activity log',
               onTap: () => Navigator.of(context)
                   .push(MaterialPageRoute(builder: (_) => const ActivityScreen())),
+            ),
+            // Reading how much space photos take, and which drive they are on,
+            // configures nothing — it is the question you ask from a phone,
+            // usually just before backing up a few hundred more. Changing the
+            // location stays on the computer.
+            SettingsRow(
+              icon: Icons.pie_chart_outline,
+              tint: kModuleColours['investments']!,
+              label: 'Storage',
+              onTap: () => Navigator.of(context).push(MaterialPageRoute(
+                  builder: (_) => StorageScreen(appName: widget.brand.name))),
             ),
           ]),
 
