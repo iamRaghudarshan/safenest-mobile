@@ -53,9 +53,17 @@ name: Build and release the phone app
 #   editing VERSION                              <- does nothing
 #
 # The button is still here for a rebuild of the same version.
+#   git tag android-1.8.0 && git push origin android-1.8.0   <- APK only
+#
+# An `android-*` tag builds the APK and NOTHING else. It exists because the two
+# halves fail independently: Apple's upload service was down for a maintenance
+# window on a day the Android half was wanted for testing, and a `v*` tag would
+# have spent a macOS runner — billed at ten times the rate — on a door that was
+# shut. It also touches no release, so it cannot collide with a `v*` tag being
+# re-pushed to retry an upload.
 on:
   push:
-    tags: ["v*"]
+    tags: ["v*", "android-*"]
   workflow_dispatch:
     inputs:
       android:
@@ -72,7 +80,13 @@ jobs:
     # cannot succeed should not be spending the budget the working one needs.
     #
     # Turn it back on with the workflow_dispatch input once it is actually fixed.
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.android }}
+    #
+    # `android-*` tags build it too, and dispatching needs an Actions:write
+    # token this project deliberately does not keep — so a tag is the only way
+    # someone holding push access can ask for an APK at all.
+    if: >-
+      ${{ (github.event_name == 'workflow_dispatch' && inputs.android)
+          || startsWith(github.ref, 'refs/tags/android-') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -101,6 +115,8 @@ jobs:
 
   ios:
     name: iOS
+    # `v*` only. An android-* tag must not spend a macOS runner.
+    if: ${{ startsWith(github.ref, 'refs/tags/v') }}
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v5
@@ -210,8 +226,13 @@ jobs:
   publish:
     name: Attach to a release
     needs: [android]
-    # Only when Android actually ran and produced something to attach.
-    if: ${{ needs.android.result == 'success' }}
+    # Only when Android actually ran and produced something to attach, and only
+    # for a real release. An android-* tag is a test build: it leaves the APK as
+    # a run artifact and creates no release, so re-pushing a v* tag later cannot
+    # find a release already sitting on it.
+    if: >-
+      ${{ needs.android.result == 'success'
+          && startsWith(github.ref, 'refs/tags/v') }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
