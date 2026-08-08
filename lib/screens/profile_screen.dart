@@ -35,6 +35,7 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'package:provider/provider.dart';
 
 import '../api.dart';
+import '../dates.dart';
 import '../session.dart';
 import '../theme.dart';
 import '../widgets/notification_settings.dart';
@@ -247,7 +248,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ),
           ]),
 
-          if (_licence != null && _licence!['state'] != null)
+          // ONLY on a licensed copy. It used to appear whenever the server
+          // answered with a state at all — and the publisher's own
+          // installation answers `{licensed: false, state: "ok"}`. So this
+          // machine showed a "Your licence" box reading "Licensed copy — ok",
+          // with no date and no number, which is not a licence and not
+          // information.
+          if (_licence != null && _licence!['licensed'] == true)
             SettingsGroup(
               title: 'Your licence',
               footer: 'Issued for the copy on your computer. It covers this app '
@@ -257,15 +264,20 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   icon: Icons.card_membership_outlined,
                   tint: _licenceTint(),
                   label: '${_licence!['name'] ?? 'Licensed copy'}',
-                  value: '${_licence!['state'] ?? ''}',
+                  value: _licenceState(),
                 ),
-                if (_licence!['expires_on'] != null)
-                  SettingsRow(
-                    icon: Icons.event_outlined,
-                    tint: theme.colorScheme.outline,
-                    label: 'Valid until',
-                    value: '${_licence!['expires_on']}',
-                  ),
+                SettingsRow(
+                  icon: Icons.event_outlined,
+                  tint: theme.colorScheme.outline,
+                  label: 'Valid until',
+                  // dd-mm-yyyy, not the raw ISO column this printed before.
+                  // And a perpetual licence SAYS so: the row used to be hidden
+                  // when there was no expiry date, so the customer who paid
+                  // outright was the one told nothing at all.
+                  value: _licence!['expires_on'] == null
+                      ? 'Never expires'
+                      : fmtDate(parseDate('${_licence!['expires_on']}')),
+                ),
                 if (_licence!['key_id'] != null)
                   SettingsRow(
                     icon: Icons.tag,
@@ -324,6 +336,34 @@ class _ProfileScreenState extends State<ProfileScreen> {
         return kWarn;
       default:
         return kDanger;
+    }
+  }
+
+  /// The state in words, not the server's own token.
+  ///
+  /// It printed whatever the API said — "ok", "GRACE", "EXPIRING" — which are
+  /// names for the code's benefit. "GRACE" in particular tells the one person
+  /// who needs to act nothing about what is happening to them, and it is the
+  /// state where writing has already stopped working.
+  String _licenceState() {
+    final days = _licence?['days_left'];
+    switch ('${_licence?['state'] ?? ''}'.toUpperCase()) {
+      case 'OK':
+        return days is int && days > 0 ? '$days days left' : 'Active';
+      case 'EXPIRING':
+        return days is int ? 'Expires in $days days' : 'Expiring soon';
+      case 'GRACE':
+        return 'Expired — renew to save changes';
+      case 'EXPIRED':
+        return 'Expired';
+      case 'REVOKED':
+        return 'Withdrawn';
+      case 'INVALID':
+        return 'Not valid';
+      case 'MISSING':
+        return 'No licence found';
+      default:
+        return 'Active';
     }
   }
 
