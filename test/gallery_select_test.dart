@@ -115,6 +115,7 @@ void main() {
           onDelete: () {},
           onAlbum: () {},
           onFavourite: () {},
+          onShare: () {},
         ),
       )));
       await tester.pump();
@@ -144,6 +145,7 @@ void main() {
           onDelete: () => taps++,
           onAlbum: () => taps++,
           onFavourite: () => taps++,
+          onShare: () => taps++,
         ),
       )));
       await tester.pump();
@@ -172,6 +174,7 @@ void main() {
           onDelete: () {},
           onAlbum: () {},
           onFavourite: () {},
+          onShare: () {},
         ),
       )));
       await tester.pump();

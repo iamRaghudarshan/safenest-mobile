@@ -22,6 +22,7 @@ import '../modules.dart';
 import '../session.dart';
 import '../theme.dart';
 import '../widgets/brand_button.dart';
+import '../widgets/card_face.dart';
 import '../widgets/master_picker.dart';
 import '../widgets/pill.dart';
 import '../widgets/skeleton.dart';
@@ -359,6 +360,22 @@ class _ModuleListScreenState extends State<ModuleListScreen> {
                               // which is a list-length multiplier on work that
                               // allocates widgets.
                               final badges = _badges(r, days, late, done);
+
+                              // CARDS DO NOT LOOK LIKE LIST ROWS. The web app
+                              // draws an actual credit card — bank gradient,
+                              // gold chip, masked number, due date and limit —
+                              // and the phone was rendering the same generic
+                              // row it uses for an expense.
+                              if (s.key == 'cards') {
+                                return Padding(
+                                  padding: const EdgeInsets.only(bottom: 14),
+                                  child: CardFace(
+                                    card: r,
+                                    onTap: () => _openSheet(r),
+                                    onPay: () => _pay(r, paid: !paid),
+                                  ),
+                                );
+                              }
 
                               return Padding(
                                 padding: const EdgeInsets.only(bottom: 10),

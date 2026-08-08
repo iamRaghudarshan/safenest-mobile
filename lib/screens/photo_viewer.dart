@@ -22,6 +22,7 @@ import 'package:photo_view/photo_view_gallery.dart';
 import 'package:provider/provider.dart';
 
 import '../api.dart';
+import '../sharing.dart';
 import '../widgets/pill.dart';
 import '../theme.dart';
 import '../session.dart';
@@ -122,6 +123,24 @@ class _PhotoViewerState extends State<PhotoViewer> {
     }
   }
 
+  /// Send this photo out of the app.
+  ///
+  /// The ORIGINAL, not the thumbnail: somebody sharing a photo means the photo.
+  /// The bytes are fetched with the session token and shared as a file — never
+  /// the signed URL, which would lapse before the recipient opened it and would
+  /// put an address for a private machine into a chat thread.
+  Future<void> _share() async {
+    final p = _photos[_index];
+    final messenger = ScaffoldMessenger.of(context);
+    final api = context.read<Session>().api;
+    messenger.showSnackBar(const SnackBar(content: Text('Preparing…')));
+    final problem = await shareFromServer(api,
+        items: [(path: p.url, name: 'photo.jpg')]);
+    if (problem != null && mounted) {
+      messenger.showSnackBar(SnackBar(content: Text(problem)));
+    }
+  }
+
   Future<void> _info() async {
     final p = _photos[_index];
     Map<String, dynamic>? d;
@@ -198,6 +217,10 @@ class _PhotoViewerState extends State<PhotoViewer> {
                       active: p.isFavourite,
                       onTap: _toggleFavourite,
                     ),
+                    _Action(
+                        icon: Icons.ios_share,
+                        label: 'Share',
+                        onTap: _share),
                     _Action(
                         icon: Icons.info_outline,
                         label: 'Details',

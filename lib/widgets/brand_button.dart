@@ -132,10 +132,19 @@ class BrandButton extends StatelessWidget {
 
 /// The web app's `.card` — 18px radius, soft shadow, 16px padding, no border.
 class BrandCard extends StatelessWidget {
-  const BrandCard({super.key, required this.child, this.padding, this.onTap});
+  const BrandCard(
+      {super.key,
+      required this.child,
+      this.padding,
+      this.onTap,
+      this.onLongPress});
   final Widget child;
   final EdgeInsetsGeometry? padding;
   final VoidCallback? onTap;
+
+  /// Long-press for the secondary actions on a row — share, and whatever else
+  /// a module needs — so the card keeps its single obvious tap.
+  final VoidCallback? onLongPress;
 
   @override
   Widget build(BuildContext context) {

@@ -22,6 +22,7 @@ class SelectionBar extends StatelessWidget {
     required this.onDelete,
     required this.onAlbum,
     required this.onFavourite,
+    required this.onShare,
   });
 
   final int count;
@@ -31,6 +32,7 @@ class SelectionBar extends StatelessWidget {
   final VoidCallback onDelete;
   final VoidCallback onAlbum;
   final VoidCallback onFavourite;
+  final VoidCallback onShare;
 
   @override
   Widget build(BuildContext context) {
@@ -68,6 +70,10 @@ class SelectionBar extends StatelessWidget {
           // is all it knows.
           if (busy) const LinearProgressIndicator(minHeight: 2),
           Row(children: [
+            _Action(
+                icon: Icons.ios_share,
+                label: 'Share',
+                onTap: busy ? null : onShare),
             _Action(
                 icon: Icons.photo_album_outlined,
                 label: 'Album',

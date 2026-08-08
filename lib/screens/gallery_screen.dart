@@ -27,6 +27,7 @@ import 'package:provider/provider.dart';
 
 import '../api.dart';
 import '../session.dart';
+import '../sharing.dart';
 import '../widgets/selection_bar.dart';
 import '../widgets/photo_tile.dart';
 import 'photo_viewer.dart';
@@ -174,6 +175,33 @@ class _GalleryScreenState extends State<GalleryScreen>
             ids.skip(i).take(4).map((id) => api.delete('/api/gallery/$id')));
       }
     });
+  }
+
+  /// Send the selection out of the app.
+  ///
+  /// Not through _run(): sharing changes nothing on the server, so reloading
+  /// the grid and clearing the selection afterwards would be undoing work the
+  /// person may want to carry on with.
+  Future<void> _shareSelected() async {
+    final ids = _selected.toList();
+    if (ids.isEmpty) return;
+    final messenger = ScaffoldMessenger.of(context);
+    final api = context.read<Session>().api;
+    final chosen = _photos.where((p) => ids.contains(p.id)).toList();
+
+    setState(() => _busy = true);
+    final problem = await shareFromServer(
+      api,
+      items: [
+        for (var i = 0; i < chosen.length; i++)
+          (path: chosen[i].url, name: 'photo_${i + 1}.jpg')
+      ],
+    );
+    if (!mounted) return;
+    setState(() => _busy = false);
+    if (problem != null) {
+      messenger.showSnackBar(SnackBar(content: Text(problem)));
+    }
   }
 
   Future<void> _favouriteSelected() async {
@@ -336,6 +364,7 @@ class _GalleryScreenState extends State<GalleryScreen>
               onDelete: _deleteSelected,
               onAlbum: _addToAlbum,
               onFavourite: _favouriteSelected,
+              onShare: _shareSelected,
             )
           : null,
       body: RefreshIndicator(

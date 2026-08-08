@@ -30,6 +30,7 @@ import 'package:provider/provider.dart';
 
 import '../api.dart';
 import '../session.dart';
+import '../sharing.dart';
 import 'scan_screen.dart';
 import '../masters.dart';
 import '../theme.dart';
@@ -181,6 +182,45 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
       messenger.showSnackBar(SnackBar(content: Text(e.message)));
     } catch (e) {
       messenger.showSnackBar(SnackBar(content: Text('Could not open it: $e')));
+    }
+  }
+
+  /// Long-press a document: share it, or open it.
+  ///
+  /// Sharing a bill or a policy to an accountant, a landlord or an insurer is
+  /// most of what a filed document is FOR, and there was no way to get one out
+  /// of the app at all.
+  Future<void> _actions(Map<String, dynamic> doc) async {
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          ListTile(
+            leading: const Icon(Icons.ios_share),
+            title: const Text('Share'),
+            subtitle: const Text('Sends the file itself, not a link'),
+            onTap: () => Navigator.pop(ctx, 'share'),
+          ),
+          ListTile(
+            leading: const Icon(Icons.open_in_new),
+            title: const Text('Open'),
+            onTap: () => Navigator.pop(ctx, 'open'),
+          ),
+        ]),
+      ),
+    );
+    if (choice == null || !mounted) return;
+    if (choice == 'open') return _open(doc);
+
+    final messenger = ScaffoldMessenger.of(context);
+    final api = context.read<Session>().api;
+    messenger.showSnackBar(const SnackBar(content: Text('Preparing…')));
+    final name = '${doc['title'] ?? 'document'}.${doc['ext'] ?? 'pdf'}';
+    final problem = await shareFromServer(api,
+        items: [(path: '${doc['file_url']}', name: name)]);
+    if (problem != null && mounted) {
+      messenger.showSnackBar(SnackBar(content: Text(problem)));
     }
   }
 
@@ -411,6 +451,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
             padding: const EdgeInsets.only(bottom: 10),
             child: BrandCard(
               onTap: () => _open(d),
+              onLongPress: () => _actions(d),
               padding: const EdgeInsets.fromLTRB(14, 12, 12, 12),
               child: Row(children: [
                 // A PDF and a photo are different things to open, so they are
