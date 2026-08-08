@@ -12,6 +12,7 @@ import 'package:flutter/material.dart';
 import '../widgets/brand_button.dart';
 import 'gallery_screen.dart';
 import 'library_tabs.dart';
+import 'trash_screen.dart';
 
 class PhotosHome extends StatefulWidget {
   const PhotosHome({super.key});
@@ -27,7 +28,20 @@ class _PhotosHomeState extends State<PhotosHome> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Gallery')),
+      appBar: AppBar(
+        title: const Text('Gallery'),
+        actions: [
+          // The only way to reach a deleted photo. Delete is soft on the
+          // server, so without this the phone could put photos somewhere it
+          // could not then look.
+          IconButton(
+            tooltip: 'Recently deleted',
+            icon: const Icon(Icons.delete_outline),
+            onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const TrashScreen())),
+          ),
+        ],
+      ),
       body: Column(children: [
         Padding(
           padding: const EdgeInsets.fromLTRB(14, 0, 14, 10),

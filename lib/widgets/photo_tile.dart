@@ -13,12 +13,30 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../session.dart';
+import '../theme.dart';
 import '../screens/gallery_screen.dart';
 
 class PhotoTile extends StatelessWidget {
-  const PhotoTile({super.key, required this.photo, this.onOpen});
+  const PhotoTile({
+    super.key,
+    required this.photo,
+    this.onOpen,
+    this.onLongPress,
+    this.selecting = false,
+    this.selected = false,
+  });
   final Photo photo;
   final VoidCallback? onOpen;
+
+  /// Long-press starts selection, which is how every photo app on either
+  /// platform does it — there is no button to discover.
+  final VoidCallback? onLongPress;
+
+  /// True once ANY photo is selected. The whole grid switches behaviour then:
+  /// a tap toggles instead of opening, which is the convention people already
+  /// have, and the one thing that must not surprise them.
+  final bool selecting;
+  final bool selected;
 
   @override
   Widget build(BuildContext context) {
@@ -30,6 +48,7 @@ class PhotoTile extends StatelessWidget {
 
     return GestureDetector(
       onTap: onOpen,
+      onLongPress: onLongPress,
       child: Stack(
         fit: StackFit.expand,
         children: [
@@ -60,6 +79,47 @@ class PhotoTile extends StatelessWidget {
               right: 4,
               bottom: 4,
               child: Icon(Icons.star, size: 16, color: Colors.white),
+            ),
+
+          // A selected photo SHRINKS as well as gaining a tick. On a grid of
+          // thumbnails a tick alone is easy to miss against a busy picture;
+          // the gap between tiles is not.
+          if (selecting)
+            Positioned.fill(
+              child: IgnorePointer(
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 120),
+                  margin: EdgeInsets.all(selected ? 8 : 0),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(selected ? 8 : 0),
+                    border: selected
+                        ? Border.all(color: kBrand, width: 2.5)
+                        : null,
+                    color: selected
+                        ? kBrand.withValues(alpha: 0.18)
+                        : Colors.transparent,
+                  ),
+                ),
+              ),
+            ),
+          if (selecting)
+            Positioned(
+              left: 5,
+              top: 5,
+              child: IgnorePointer(
+                child: Container(
+                  width: 22,
+                  height: 22,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: selected ? kBrand : Colors.black.withValues(alpha: 0.35),
+                    border: Border.all(color: Colors.white, width: 1.6),
+                  ),
+                  child: selected
+                      ? const Icon(Icons.check, size: 14, color: Colors.white)
+                      : null,
+                ),
+              ),
             ),
         ],
       ),

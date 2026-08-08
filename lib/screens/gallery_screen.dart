@@ -27,6 +27,7 @@ import 'package:provider/provider.dart';
 
 import '../api.dart';
 import '../session.dart';
+import '../widgets/selection_bar.dart';
 import '../widgets/photo_tile.dart';
 import 'photo_viewer.dart';
 
@@ -91,6 +92,144 @@ class _GalleryScreenState extends State<GalleryScreen>
   bool _smart = false;
   bool _favesOnly = false;
   Timer? _debounce;
+
+  // ------------------------------------------------------------ selection ---
+  //
+  // The backend has supported this all along and the phone never used it:
+  // /albums/{id}/photos and /albums/{id}/remove both take a LIST of photo_ids,
+  // and album creation takes one too — its own comment says "creating an album
+  // straight from a selection is the common case". There was simply no way to
+  // select anything, so none of it was reachable.
+  //
+  // Ids rather than Photo objects: the list is reloaded after every action and
+  // the objects replaced, so holding them would leave a selection pointing at
+  // rows that no longer exist.
+  final Set<int> _selected = {};
+  bool _busy = false;
+
+  bool get _selecting => _selected.isNotEmpty;
+
+  void _toggle(Photo p) => setState(() {
+        if (!_selected.remove(p.id)) _selected.add(p.id);
+      });
+
+  void _clearSelection() => setState(_selected.clear);
+
+  /// Every photo currently LOADED. Deliberately not "every photo you own": the
+  /// grid pages, and an action on ten thousand rows somebody has never laid
+  /// eyes on is not what they meant by "select all".
+  void _selectAllLoaded() =>
+      setState(() => _selected.addAll(_photos.map((p) => p.id)));
+
+  /// Runs an action over the selection, then reloads and clears.
+  ///
+  /// One place, so every action reports the same way and none of them can
+  /// forget to clear a selection that now points at trashed rows.
+  Future<void> _run(String verb, Future<void> Function(List<int> ids) act) async {
+    final ids = _selected.toList();
+    if (ids.isEmpty) return;
+    final messenger = ScaffoldMessenger.of(context);
+    setState(() => _busy = true);
+    try {
+      await act(ids);
+      _selected.clear();
+      await _load(reset: true);
+      messenger.showSnackBar(SnackBar(
+          content: Text('$verb ${ids.length} '
+              '${ids.length == 1 ? "photo" : "photos"}')));
+    } on ApiError catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text(e.message)));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _deleteSelected() async {
+    final n = _selected.length;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Delete $n ${n == 1 ? "photo" : "photos"}?'),
+        // Not destructive, and saying so is the difference between somebody
+        // tapping it and somebody backing out of a screen they wanted.
+        content: const Text(
+            'They go to Recently deleted, where you can put them back. '
+            'Nothing is removed from this phone — only from your computer.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false), child: const Text('Keep')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, true), child: const Text('Delete')),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    final api = context.read<Session>().api;
+    // One call per photo: DELETE /api/gallery/{id} takes a single id. Sent
+    // four at a time rather than all at once — the same pacing the backup uses,
+    // and for the same reason.
+    await _run('Deleted', (ids) async {
+      for (var i = 0; i < ids.length; i += 4) {
+        await Future.wait(
+            ids.skip(i).take(4).map((id) => api.delete('/api/gallery/$id')));
+      }
+    });
+  }
+
+  Future<void> _favouriteSelected() async {
+    final api = context.read<Session>().api;
+    await _run('Starred', (ids) async {
+      for (var i = 0; i < ids.length; i += 4) {
+        await Future.wait(ids
+            .skip(i)
+            .take(4)
+            .map((id) => api.post('/api/gallery/$id/favourite')));
+      }
+    });
+  }
+
+  /// Add to an existing album, or make one from the selection.
+  Future<void> _addToAlbum() async {
+    final session = context.read<Session>();
+    final messenger = ScaffoldMessenger.of(context);
+
+    List<Map<String, dynamic>> albums = const [];
+    try {
+      final d = await session.api.get('/api/gallery/albums');
+      final raw = d is Map ? (d['items'] ?? d['albums'] ?? const []) : const [];
+      albums = [
+        for (final e in (raw as List)) Map<String, dynamic>.from(e as Map)
+      ];
+    } on ApiError catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text(e.message)));
+      return;
+    }
+    if (!mounted) return;
+
+    final choice = await showModalBottomSheet<Map<String, dynamic>>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (_) => AlbumPicker(albums: albums, count: _selected.length),
+    );
+    if (choice == null || !mounted) return;
+
+    final api = context.read<Session>().api;
+    if (choice['new'] == true) {
+      await _run('Added', (ids) async {
+        // Creating an album WITH the photos in one call — the endpoint takes
+        // photo_ids for exactly this, so there is no window where the album
+        // exists empty.
+        await api.post('/api/gallery/albums',
+            {'name': choice['name'], 'photo_ids': ids});
+      });
+    } else {
+      await _run('Added', (ids) async {
+        await api.post(
+            '/api/gallery/albums/${choice['id']}/photos', {'photo_ids': ids});
+      });
+    }
+  }
 
   void _typed(String v) {
     _debounce?.cancel();
@@ -185,6 +324,20 @@ class _GalleryScreenState extends State<GalleryScreen>
     super.build(context);   // required by AutomaticKeepAliveClientMixin
     final groups = _grouped;
     return Scaffold(
+      // The action bar only exists while something is selected, and it sits at
+      // the BOTTOM — on a phone the top of the screen is out of thumb reach,
+      // and these are the actions you take repeatedly.
+      bottomNavigationBar: _selecting
+          ? SelectionBar(
+              count: _selected.length,
+              busy: _busy,
+              onClear: _clearSelection,
+              onSelectAll: _selectAllLoaded,
+              onDelete: _deleteSelected,
+              onAlbum: _addToAlbum,
+              onFavourite: _favouriteSelected,
+            )
+          : null,
       body: RefreshIndicator(
         onRefresh: () => _load(reset: true),
         child: CustomScrollView(
@@ -281,18 +434,31 @@ class _GalleryScreenState extends State<GalleryScreen>
                     delegate: SliverChildBuilderDelegate(
                       (ctx, i) => PhotoTile(
                         photo: g.photos[i],
+                        selecting: _selecting,
+                        selected: _selected.contains(g.photos[i].id),
+                        // While selecting, a tap TOGGLES rather than opening.
+                        // That is the convention on both platforms and the one
+                        // thing here that must not surprise anybody.
+                        //
                         // Opened against the WHOLE loaded list, not just this
                         // day, so swiping carries on across dates the way it
                         // does in any gallery worth the name.
-                        onOpen: () => Navigator.of(context).push(
-                          MaterialPageRoute(
-                            builder: (_) => PhotoViewer(
-                              photos: _photos,
-                              initialIndex: _photos.indexOf(g.photos[i]),
-                              onChanged: () => _load(reset: true),
+                        onOpen: () {
+                          if (_selecting) {
+                            _toggle(g.photos[i]);
+                            return;
+                          }
+                          Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) => PhotoViewer(
+                                photos: _photos,
+                                initialIndex: _photos.indexOf(g.photos[i]),
+                                onChanged: () => _load(reset: true),
+                              ),
                             ),
-                          ),
-                        ),
+                          );
+                        },
+                        onLongPress: () => _toggle(g.photos[i]),
                       ),
                       childCount: g.photos.length,
                     ),
