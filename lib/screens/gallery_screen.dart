@@ -35,7 +35,8 @@ import '../widgets/photo_tile.dart';
 import 'photo_viewer.dart';
 
 class Photo {
-  Photo(this.id, this.url, this.thumbUrl, this.takenAt, this.isFavourite);
+  Photo(this.id, this.url, this.thumbUrl, this.takenAt, this.isFavourite,
+      {this.isVideo = false, this.durationMs});
   final int id;
   /// Full size — for the viewer only. The grid must never load these.
   final String url;
@@ -43,8 +44,25 @@ class Photo {
   final DateTime? takenAt;
   final bool isFavourite;
 
+  /// A video, whose `thumbUrl` is a still taken from it. Everything else about
+  /// it — trashing, albums, favourites, the signed URLs — is identical, which
+  /// is why this is a flag rather than a second kind of object.
+  final bool isVideo;
+  final int? durationMs;
+
+  /// "1:04". Blank when the server could not read a duration, which happens
+  /// with some containers and is not worth showing a zero for.
+  String get durationLabel {
+    final ms = durationMs ?? 0;
+    if (ms <= 0) return '';
+    final total = (ms / 1000).round();
+    final m = total ~/ 60, sec = total % 60;
+    return '$m:${sec.toString().padLeft(2, '0')}';
+  }
+
   Photo copyWith({bool? isFavourite}) =>
-      Photo(id, url, thumbUrl, takenAt, isFavourite ?? this.isFavourite);
+      Photo(id, url, thumbUrl, takenAt, isFavourite ?? this.isFavourite,
+          isVideo: isVideo, durationMs: durationMs);
 
   static Photo fromJson(Map<String, dynamic> j) => Photo(
         j['id'] as int,
@@ -52,6 +70,8 @@ class Photo {
         (j['thumb_url'] ?? '') as String,
         DateTime.tryParse((j['taken_at'] ?? '') as String),
         (j['is_favourite'] ?? j['is_favorite'] ?? 0) == 1,
+        isVideo: '${j['kind'] ?? 'photo'}' == 'video',
+        durationMs: j['duration_ms'] is int ? j['duration_ms'] as int : null,
       );
 }
 
@@ -94,6 +114,11 @@ class _GalleryScreenState extends State<GalleryScreen>
   String _query = '';
   bool _smart = false;
   bool _favesOnly = false;
+
+  /// '' for everything, 'photos' or 'videos'. Mutually exclusive rather than
+  /// two checkboxes: "neither" and "both" mean the same thing and offering
+  /// four states for two answers is how a filter row becomes a puzzle.
+  String _mediaKind = '';
   Timer? _debounce;
 
   // ------------------------------------------------------------ selection ---
@@ -371,6 +396,7 @@ class _GalleryScreenState extends State<GalleryScreen>
         // anything — see CLIP_MIN_LIBRARY on the server.
         if (_query.isNotEmpty && _smart) 'smart': '1',
         if (_favesOnly) 'fav': '1',
+        if (_mediaKind.isNotEmpty) 'kind': _mediaKind,
       });
       final items = ((d as Map)['items'] as List)
           .map((e) => Photo.fromJson(Map<String, dynamic>.from(e as Map)))
@@ -487,6 +513,26 @@ class _GalleryScreenState extends State<GalleryScreen>
                         selected: _favesOnly,
                         onSelected: (v) {
                           setState(() => _favesOnly = v);
+                          _load(reset: true);
+                        },
+                      ),
+                      // Photos and videos are one library, filtered — not two
+                      // tabs. They were taken on the same day and belong next
+                      // to each other; the filter is for the times you want
+                      // only one of them.
+                      FilterChip(
+                        label: const Text('🖼 Photos'),
+                        selected: _mediaKind == 'photos',
+                        onSelected: (v) {
+                          setState(() => _mediaKind = v ? 'photos' : '');
+                          _load(reset: true);
+                        },
+                      ),
+                      FilterChip(
+                        label: const Text('🎬 Videos'),
+                        selected: _mediaKind == 'videos',
+                        onSelected: (v) {
+                          setState(() => _mediaKind = v ? 'videos' : '');
                           _load(reset: true);
                         },
                       ),

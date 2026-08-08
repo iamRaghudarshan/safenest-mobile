@@ -38,6 +38,13 @@ dependencies:
 
   # --- gallery, Google Photos shaped ---
   photo_view: ^0.15.0             # pinch-zoom in the lightbox
+  # Plays a backed-up video in the viewer. The platform's own player on both
+  # systems, so a phone's hardware decoder does the work rather than anything
+  # shipped in this app.
+  #
+  # The URL it is given is the same signed, expiring one the grid uses for
+  # thumbnails, so a video is no more reachable than a photo is.
+  video_player: ^2.9.2
 
   # --- documents, Drive shaped ---
   file_picker: ^11.0.3

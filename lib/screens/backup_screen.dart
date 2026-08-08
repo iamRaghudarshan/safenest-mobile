@@ -322,6 +322,24 @@ class _BackupScreenState extends State<BackupScreen> {
               onPressed: () => _service?.runFullBackup(),
             ),
 
+            // THE WAY BACK from photos removed at the computer.
+            //
+            // This phone keeps its own list of what it has already sent, and the
+            // computer no longer having a photo does not change that list — so
+            // after emptying the bin there, "Back up my photos" skips every one
+            // of them and reports a clean success while they sit on the phone
+            // untouched. Without this button there is no way to notice, and no
+            // way to put them back.
+            if (p.state != BackupState.running &&
+                p.state != BackupState.scanning) ...[
+              const SizedBox(height: 8),
+              TextButton.icon(
+                onPressed: _confirmRecheck,
+                icon: const Icon(Icons.restart_alt, size: 19),
+                label: const Text('Photos missing on the computer?'),
+              ),
+            ],
+
             // Only for a permission refusal, which is the one failure a person
             // fixes somewhere other than in this app.
             if (failed && _looksLikePermission(p.message)) ...[
@@ -336,6 +354,39 @@ class _BackupScreenState extends State<BackupScreen> {
         ],
       ),
     );
+  }
+
+  /// Asked before doing, because it makes the next backup long.
+  ///
+  /// It deletes nothing and cannot: it clears this phone's memory of what it
+  /// has sent, and every photo is then offered again. The server recognises the
+  /// ones it still has by their content and stores nothing twice — so the cost
+  /// is time, and the thing it recovers is a library that was deleted at the
+  /// computer and could not otherwise come back.
+  Future<void> _confirmRecheck() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Check every photo again?'),
+        content: const Text(
+            'This phone remembers which photos it has already sent, so it '
+            'skips them. If photos were deleted on the computer, that memory '
+            'is why they do not come back.\n\n'
+            'Clearing it offers every photo again. Nothing is deleted from '
+            'this phone, and the computer keeps only one copy of each — but '
+            'the next backup will take a while.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Check everything')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    await _service?.forgetSent();
   }
 
   /// Largest cause first — the one worth fixing is the one blocking the most.

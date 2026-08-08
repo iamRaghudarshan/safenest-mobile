@@ -74,6 +74,32 @@ class PhotoTile extends StatelessWidget {
                   progress == null ? child : const SizedBox.shrink(),
             ),
           ),
+          // A video has to be recognisable AS a video before it is tapped.
+          // Its tile is a still frame, so without a mark it is a photograph
+          // that mysteriously plays.
+          if (photo.isVideo)
+            Positioned(
+              left: 4,
+              bottom: 4,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.55),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  const Icon(Icons.play_arrow, size: 12, color: Colors.white),
+                  if (photo.durationLabel.isNotEmpty) ...[
+                    const SizedBox(width: 2),
+                    Text(photo.durationLabel,
+                        style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 10,
+                            fontWeight: FontWeight.w700)),
+                  ],
+                ]),
+              ),
+            ),
           if (photo.isFavourite)
             const Positioned(
               right: 4,

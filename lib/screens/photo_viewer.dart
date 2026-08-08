@@ -23,6 +23,7 @@ import 'package:provider/provider.dart';
 import '../api.dart';
 import '../sharing.dart';
 import '../widgets/pill.dart';
+import '../widgets/video_page.dart';
 import '../theme.dart';
 import '../dates.dart';
 import '../session.dart';
@@ -186,16 +187,34 @@ class _PhotoViewerState extends State<PhotoViewer> {
             backgroundDecoration: const BoxDecoration(color: Colors.black),
             loadingBuilder: (context, event) =>
                 const Center(child: CircularProgressIndicator()),
-            builder: (ctx, i) => PhotoViewGalleryPageOptions(
-              imageProvider: NetworkImage(_full(_photos[i])),
-              // Bounded so a photo cannot be flung off screen and lost, and
-              // covered at 4x which is enough to read a document photographed
-              // on a phone.
-              minScale: PhotoViewComputedScale.contained,
-              maxScale: PhotoViewComputedScale.covered * 4,
-              heroAttributes: PhotoViewHeroAttributes(tag: _photos[i].id),
-              onTapUp: (context, details, value) => setState(() => _chrome = !_chrome),
-            ),
+            builder: (ctx, i) {
+              // A video gets a player instead of a zoomable image, in the same
+              // page of the same gallery — swiping still carries on into the
+              // photos either side of it. `customChild` rather than a separate
+              // screen, so a video is an item in the library rather than
+              // somewhere you get sent.
+              if (_photos[i].isVideo) {
+                return PhotoViewGalleryPageOptions.customChild(
+                  child: VideoPage(url: _full(_photos[i])),
+                  // Zoom off: the pinch belongs to the player's own frame, and
+                  // a scaled video surface is where playback stutters.
+                  minScale: PhotoViewComputedScale.contained,
+                  maxScale: PhotoViewComputedScale.contained,
+                  heroAttributes: PhotoViewHeroAttributes(tag: _photos[i].id),
+                );
+              }
+              return PhotoViewGalleryPageOptions(
+                imageProvider: NetworkImage(_full(_photos[i])),
+                // Bounded so a photo cannot be flung off screen and lost, and
+                // covered at 4x which is enough to read a document photographed
+                // on a phone.
+                minScale: PhotoViewComputedScale.contained,
+                maxScale: PhotoViewComputedScale.covered * 4,
+                heroAttributes: PhotoViewHeroAttributes(tag: _photos[i].id),
+                onTapUp: (context, details, value) =>
+                    setState(() => _chrome = !_chrome),
+              );
+            },
           ),
           if (_chrome)
             Positioned(

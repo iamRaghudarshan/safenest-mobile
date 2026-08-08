@@ -18,6 +18,7 @@ import 'package:safenest/session.dart';
 import 'package:safenest/theme.dart';
 
 void main() {
+  videoTests();
   group('Gallery must be reachable — it vanished for admins for nine versions',
       () {
     // ROOT CAUSE: home_screen.dart built its allow-everything set as
@@ -217,6 +218,68 @@ void main() {
       expect(spec.fields.any((f) => f.key == 'card_name'), isFalse,
           reason: 'card_name is not a column anywhere — it is what broke the '
               'server, and it must not reappear on a form either');
+    });
+  });
+}
+
+/// Videos are gallery items, not a second kind of thing.
+///
+/// The server marks them with kind:'video' and a duration, and gives a
+/// thumb_url that is a still frame taken FROM the video. A client that ignored
+/// `kind` would draw an .mp4 as an image and show a broken tile — which is what
+/// every video looked like until the poster lookup was fixed on the server.
+void videoTests() {
+  group('a video from the server', () {
+    test('parses as a video, with its duration', () {
+      final v = Photo.fromJson(const {
+        'id': 91,
+        'url': '/api/gallery/media/original/abc.mp4?t=1.sig',
+        'thumb_url': '/api/gallery/media/thumb/abc.jpg?t=1.sig',
+        'taken_at': '2026-08-08T21:00:00',
+        'is_favourite': 0,
+        'kind': 'video',
+        'duration_ms': 64000,
+      });
+      expect(v.isVideo, isTrue);
+      expect(v.durationLabel, '1:04');
+      // The thumbnail is the POSTER, a .jpg — never the .mp4.
+      expect(v.thumbUrl, contains('.jpg'));
+      expect(v.url, contains('.mp4'));
+    });
+
+    test('a photo is still a photo when kind is absent', () {
+      // Every row written before videos existed has no kind at all, and must
+      // not become a video by omission.
+      final p = Photo.fromJson(const {
+        'id': 1,
+        'url': '/a.jpg',
+        'thumb_url': '/t.jpg',
+        'taken_at': '2026-08-08T10:00:00',
+        'is_favourite': 1,
+      });
+      expect(p.isVideo, isFalse);
+      expect(p.durationLabel, '');
+    });
+
+    test('a duration the server could not read shows nothing, not 0:00', () {
+      final v = Photo.fromJson(const {
+        'id': 92, 'url': '/a.mp4', 'thumb_url': '/a.jpg',
+        'taken_at': '2026-08-08T10:00:00', 'is_favourite': 0,
+        'kind': 'video',
+      });
+      expect(v.isVideo, isTrue);
+      expect(v.durationLabel, '');
+    });
+
+    test('favouriting a video keeps it a video', () {
+      final v = Photo.fromJson(const {
+        'id': 93, 'url': '/a.mp4', 'thumb_url': '/a.jpg',
+        'taken_at': '2026-08-08T10:00:00', 'is_favourite': 0,
+        'kind': 'video', 'duration_ms': 5000,
+      }).copyWith(isFavourite: true);
+      expect(v.isVideo, isTrue);
+      expect(v.durationMs, 5000);
+      expect(v.isFavourite, isTrue);
     });
   });
 }

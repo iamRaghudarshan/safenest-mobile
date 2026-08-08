@@ -118,6 +118,33 @@ class BackupService extends ChangeNotifier {
     await prefs.setStringList(_sentKey, _sent.toList());
   }
 
+  /// Forget what has already been sent, so the next run offers everything again.
+  ///
+  /// WITHOUT THIS THERE IS NO WAY BACK from a deletion on the computer. This
+  /// list lives on the phone and says "already backed up"; the server knowing
+  /// nothing about a photo does not change it. So when photos are removed at
+  /// the computer — emptying the bin there, a restore gone wrong, a disk
+  /// replaced — running the backup again skips every one of them and reports a
+  /// clean success, and the photos are on the phone the whole time.
+  ///
+  /// That happened here: an empty-bin on the computer removed a whole library,
+  /// and "back up my photos" would have said "0 new, 20,000 already there".
+  ///
+  /// It costs a re-upload of everything, which the server de-duplicates by
+  /// content hash — so anything still on the computer is recognised and
+  /// nothing is stored twice. Slow, never destructive.
+  Future<void> forgetSent() async {
+    _sent.clear();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_sentKey);
+    _emit(const BackupProgress(
+        message: 'Ready to check every photo again. Nothing has been deleted '
+            'from this phone.'));
+  }
+
+  /// How many photos this phone believes are already on the computer.
+  int get rememberedCount => _sent.length;
+
   void stop() => _stop = true;
 
   /// Keep the screen on for the length of a run, and only that long.
@@ -189,13 +216,20 @@ class BackupService extends ChangeNotifier {
 
     await load();
 
+    // Photos AND videos. This said `RequestType.image` with the note "videos
+    // are not photos and the gallery cannot store them" — true when it was
+    // written, and no longer: the server takes video now, makes a still from it
+    // and files it beside the photos. A backup that silently skipped every clip
+    // somebody had ever taken was the largest hole in a thing called "back up
+    // my phone", and nothing on screen said it was happening.
     final albums = await PhotoManager.getAssetPathList(
       onlyAll: true,
-      type: RequestType.image,   // videos are not photos and the gallery cannot store them
+      type: RequestType.common,
     );
     if (albums.isEmpty) {
       _emit(const BackupProgress(
-          state: BackupState.done, message: 'No photos found on this phone.'));
+          state: BackupState.done,
+          message: 'No photos or videos found on this phone.'));
       return;
     }
 
