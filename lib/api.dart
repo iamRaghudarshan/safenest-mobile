@@ -189,6 +189,71 @@ class Api {
     throw ApiError(res.statusCode, detail);
   }
 
+  /// SEVERAL files under the SAME field name, plus form fields.
+  ///
+  /// `POST /api/documents/scan` takes `files: list[UploadFile]` — one part per
+  /// page, in order — and assembles them into a single multi-page PDF. A
+  /// scanned passport is one document, not a pile of loose photos, and nothing
+  /// here could send more than one file at a time.
+  ///
+  /// Order is the order of the list, and it matters: it becomes the page order
+  /// of the PDF.
+  Future<dynamic> postMultipartFiles(
+    String path, {
+    required String fileField,
+    required List<({String name, List<int> bytes})> files,
+    Map<String, String> fields = const {},
+  }) async {
+    final boundary = '----safenest${DateTime.now().microsecondsSinceEpoch}';
+    final buf = BytesBuilder(copy: false);
+    void add(String s) => buf.add(utf8.encode(s));
+
+    fields.forEach((k, v) {
+      add('--$boundary\r\nContent-Disposition: form-data; name="$k"\r\n\r\n$v\r\n');
+    });
+    for (final f in files) {
+      final safe = f.name
+          .replaceAll(RegExp(r'[\r\n"\\]'), '_')
+          .replaceAll(RegExp(r'[\x00-\x1f]'), '_');
+      add('--$boundary\r\n'
+          'Content-Disposition: form-data; name="$fileField"; filename="$safe"\r\n'
+          'Content-Type: image/jpeg\r\n\r\n');
+      buf.add(f.bytes);
+      add('\r\n');
+    }
+    add('--$boundary--\r\n');
+
+    http.Response res;
+    try {
+      res = await http
+          .post(_url(path),
+              headers: {
+                'Content-Type': 'multipart/form-data; boundary=$boundary',
+                if (token != null) 'Authorization': 'Bearer $token',
+              },
+              body: buf.takeBytes())
+          .timeout(const Duration(minutes: 5));
+    } on SocketException {
+      throw ApiError(0, _offlineMsg, offline: true);
+    } catch (_) {
+      throw ApiError(0, _unreachableMsg, offline: true);
+    }
+
+    dynamic data;
+    if (res.body.isNotEmpty) {
+      try {
+        data = jsonDecode(res.body);
+      } catch (_) {
+        data = res.body;
+      }
+    }
+    if (res.statusCode >= 200 && res.statusCode < 300) return data;
+    final detail = (data is Map && data['detail'] != null)
+        ? '${data['detail']}'
+        : 'That could not be saved (${res.statusCode}).';
+    throw ApiError(res.statusCode, detail);
+  }
+
   Future<bool> postMultipart(
     String path, {
     required String fileField,

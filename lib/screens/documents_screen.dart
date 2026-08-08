@@ -30,6 +30,7 @@ import 'package:provider/provider.dart';
 
 import '../api.dart';
 import '../session.dart';
+import 'scan_screen.dart';
 import '../masters.dart';
 import '../theme.dart';
 import '../widgets/brand_button.dart';
@@ -237,10 +238,33 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
           ),
         ],
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: _upload,
-        icon: const Icon(Icons.upload_file),
-        label: const Text('Add'),
+      // TWO buttons, and Scan is the big one.
+      //
+      // Photographing a piece of paper is the thing a phone is better at than
+      // the computer — the paper is where the person is. Uploading a file that
+      // is already on the phone is the rarer case, so it gets the small button.
+      floatingActionButton: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          FloatingActionButton.small(
+            heroTag: 'doc-upload',
+            onPressed: _upload,
+            tooltip: 'Upload a file from this phone',
+            child: const Icon(Icons.upload_file),
+          ),
+          const SizedBox(height: 10),
+          FloatingActionButton.extended(
+            heroTag: 'doc-scan',
+            onPressed: () async {
+              final saved = await Navigator.of(context).push<bool>(
+                  MaterialPageRoute(builder: (_) => const ScanScreen()));
+              if (saved == true) _load();
+            },
+            icon: const Icon(Icons.document_scanner_outlined),
+            label: const Text('Scan'),
+          ),
+        ],
       ),
       body: Column(
         children: [

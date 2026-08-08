@@ -15,6 +15,7 @@ import 'package:provider/provider.dart';
 import 'package:safenest/backup.dart';
 import 'package:safenest/screens/activity_screen.dart';
 import 'package:safenest/screens/backup_screen.dart';
+import 'package:safenest/screens/scan_screen.dart';
 import 'package:safenest/session.dart';
 import 'package:safenest/theme.dart';
 
@@ -269,6 +270,70 @@ void main() {
       await tester.pump();
       expect(tester.takeException(), isNull);
       expect(find.text('Nothing recorded yet'), findsOneWidget);
+    });
+  });
+
+  group('Scan a document', () {
+    // The server has had POST /api/documents/scan since the beginning — it
+    // takes one already-enhanced JPEG per page and assembles them into a single
+    // multi-page PDF (verified: 3 pages in, a real 3-page PDF out). Nothing on
+    // the phone had ever called it, so a photographed passport could only be
+    // filed as loose images through the file picker, if at all.
+    //
+    // The capture itself is the platform's own scanner — VisionKit on iOS, ML
+    // Kit on Android — so there is no camera to fake here. These lay out the
+    // part that is ours: the page manager and the details form.
+    testWidgets('pages, numbered and reorderable, fit an iPhone SE',
+        (tester) async {
+      tester.view.physicalSize = const Size(375, 667);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      await tester.pumpWidget(_wrap(const ScanScreen(
+          initialPages: ['/tmp/p1.jpg', '/tmp/p2.jpg', '/tmp/p3.jpg'])));
+      await tester.pump();
+
+      expect(tester.takeException(), isNull);
+      // Says plainly that three photographs become ONE document — otherwise it
+      // reads as three separate files about to be created.
+      expect(find.textContaining('3 pages'), findsOneWidget);
+      expect(find.textContaining('one PDF'), findsOneWidget);
+      // Numbered, because page order IS the document.
+      expect(find.text('1'), findsOneWidget);
+      expect(find.text('3'), findsOneWidget);
+    });
+
+    testWidgets('one page reads as a page, and the form is all there',
+        (tester) async {
+      tester.view.physicalSize = const Size(375, 900);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      await tester.pumpWidget(
+          _wrap(const ScanScreen(initialPages: ['/tmp/only.jpg'])));
+      await tester.pump();
+
+      expect(tester.takeException(), isNull);
+      expect(find.textContaining('1 page'), findsOneWidget);
+      expect(find.text('What is it?'), findsOneWidget);
+      // An expiry is what turns a filed passport into something the app can
+      // warn about before it lapses.
+      expect(find.text('Expires (optional)'), findsOneWidget);
+      expect(find.text('Save to my computer'), findsOneWidget);
+    });
+
+    testWidgets('a broken page path shows a placeholder, not a crash',
+        (tester) async {
+      tester.view.physicalSize = const Size(375, 667);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      // These paths do not exist — Image.file must fall back rather than throw,
+      // because a page the OS has already cleaned up is a real possibility.
+      await tester.pumpWidget(
+          _wrap(const ScanScreen(initialPages: ['/nope/a.jpg'])));
+      await tester.pump();
+      expect(tester.takeException(), isNull);
     });
   });
 }
