@@ -10,7 +10,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
 
 import 'package:safenest/modules.dart';
+import 'package:safenest/screens/collections_home.dart';
 import 'package:safenest/screens/gallery_screen.dart';
+import 'package:safenest/screens/library_tabs.dart';
 import 'package:safenest/screens/photos_home.dart';
 import 'package:safenest/session.dart';
 import 'package:safenest/theme.dart';
@@ -60,7 +62,7 @@ void main() {
   group('Gallery is not just reachable — the screen behind it works', () {
     // Reachability was the bug. This is the other half of "is it done": the
     // screen you now arrive at has to render, and its photos have to load.
-    testWidgets('PhotosHome lays out with all four views on an iPhone SE',
+    testWidgets('PhotosHome lays out both views on an iPhone SE',
         (tester) async {
       tester.view.physicalSize = const Size(375, 667);
       tester.view.devicePixelRatio = 1.0;
@@ -76,8 +78,38 @@ void main() {
       await tester.pump();
 
       expect(tester.takeException(), isNull);
-      for (final label in ['Photos', 'Albums', 'People', 'Memories']) {
+      // Was four segments — Photos, Albums, People, Memories. The last three
+      // moved inside Collections, so the row is two. They still have to render,
+      // which the next test asserts: losing a tab is exactly how a working
+      // screen becomes unreachable here, and that is the bug this file exists
+      // for.
+      for (final label in ['Photos', 'Collections']) {
         expect(find.text(label), findsOneWidget);
+      }
+    });
+
+    testWidgets('Albums, People and Memories still lay out on their own',
+        (tester) async {
+      tester.view.physicalSize = const Size(375, 667);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      for (final view in <Widget>[
+        const AlbumsTab(),
+        const PeopleTab(),
+        const MemoriesTab(),
+        const CollectionsHome(),
+      ]) {
+        await tester.pumpWidget(ChangeNotifierProvider<Session>(
+          create: (_) => Session(),
+          child: MaterialApp(
+            theme: buildTheme(const Brand(), Brightness.light),
+            home: Scaffold(body: view),
+          ),
+        ));
+        await tester.pump();
+        expect(tester.takeException(), isNull,
+            reason: '${view.runtimeType} did not lay out');
       }
     });
 

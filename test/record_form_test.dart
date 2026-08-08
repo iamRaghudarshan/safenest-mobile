@@ -202,15 +202,20 @@ void main() {
     expect(find.byIcon(Icons.check_circle), findsOneWidget);
   });
 
-  testWidgets('a row crowded with badges still fits the narrowest phone',
+  testWidgets('a credit card fits the narrowest phone, and says it is unpaid',
       (tester) async {
     tester.view.physicalSize = const Size(375, 667);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.reset);
 
-    // Worst case on purpose: a long bank name, a big amount, and every badge
-    // this row can show at once. Rows grew a 44px icon tile and a wrap of pills,
-    // and a row that only fits when it is nearly empty is not a row that fits.
+    // Worst case on purpose: a long bank name and a big amount on the smallest
+    // screen. A card that only fits when it is nearly empty is not a card that
+    // fits.
+    //
+    // This asserted the generic badge row's "Not paid" until cards grew a
+    // CardFace of their own, which renders none of those pills — so the test
+    // had been failing since that change, which is why nothing shipped after
+    // it. The pill path is still covered below by loans, which uses it.
     await tester.pumpWidget(_wrap(ModuleListScreen(
       spec: moduleByKey('cards')!,
       initialRows: const [
@@ -227,7 +232,37 @@ void main() {
     )));
     await tester.pump();
 
-    expect(tester.takeException(), isNull, reason: 'a full card row overflowed');
+    expect(tester.takeException(), isNull, reason: 'a full card face overflowed');
+    expect(find.text('Not paid this month'), findsOneWidget);
+    // The digits belong to the card, not to a label beside it.
+    expect(find.textContaining('4242'), findsWidgets);
+  });
+
+  testWidgets('a row crowded with badges still fits the narrowest phone',
+      (tester) async {
+    tester.view.physicalSize = const Size(375, 667);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+
+    // Loans keep the generic row: a 44px icon tile and a wrap of pills, with
+    // every badge it can show at once.
+    await tester.pumpWidget(_wrap(ModuleListScreen(
+      spec: moduleByKey('loans')!,
+      initialRows: const [
+        {
+          'id': 1,
+          'lender': 'Housing Development Finance Corporation Bank',
+          'principal': 2500000,
+          'emi_amount': 48500,
+          'next_due_fmt': '12-08-2026',
+          'paid_this_month': false,
+          'days': -6,
+        },
+      ],
+    )));
+    await tester.pump();
+
+    expect(tester.takeException(), isNull, reason: 'a full loan row overflowed');
     expect(find.text('Not paid'), findsOneWidget);
     expect(find.text('6d overdue'), findsOneWidget);
   });
