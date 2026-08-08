@@ -23,6 +23,8 @@ library;
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+// BoxHitTestResult and RenderMetaData, for finding which tile a drag is over.
+import 'package:flutter/rendering.dart';
 import 'package:provider/provider.dart';
 
 import '../api.dart';
@@ -115,6 +117,64 @@ class _GalleryScreenState extends State<GalleryScreen>
       });
 
   void _clearSelection() => setState(_selected.clear);
+
+  /// Whether this drag is selecting or clearing.
+  ///
+  /// Decided by the FIRST photo the finger lands on: start on an unselected
+  /// one and the drag selects; start on a selected one and it clears. Toggling
+  /// each tile as it is crossed instead would make a drag that wobbles back
+  /// over its own path undo itself, which feels broken and is easy to do.
+  bool? _dragMode;
+
+  /// The photo id under a point on screen, or null.
+  ///
+  /// Hit-tests for the MetaData wrapper each tile carries. The alternative —
+  /// working out a row and column from the offset — cannot survive this grid:
+  /// it is several slivers with date headers between them, so the arithmetic
+  /// is wrong at exactly the boundaries a drag crosses.
+  int? _photoIdAt(Offset globalPosition) {
+    final result = BoxHitTestResult();
+    WidgetsBinding.instance.renderViews.first
+        .hitTest(result, position: globalPosition);
+    for (final entry in result.path) {
+      final target = entry.target;
+      if (target is RenderMetaData) {
+        final data = target.metaData;
+        if (data is int) return data;
+      }
+    }
+    return null;
+  }
+
+  void _dragSelectStart(Offset at) {
+    final id = _photoIdAt(at);
+    if (id == null) return;
+    _dragMode = !_selected.contains(id);
+    setState(() {
+      if (_dragMode!) {
+        _selected.add(id);
+      } else {
+        _selected.remove(id);
+      }
+    });
+  }
+
+  void _dragSelectMove(Offset at) {
+    if (_dragMode == null) return;
+    final id = _photoIdAt(at);
+    if (id == null) return;
+    // Nothing to do if this tile is already in the state the drag is applying.
+    // Without this, every pointer move rebuilds the whole grid — several times
+    // a second, over thousands of tiles.
+    if (_dragMode! == _selected.contains(id)) return;
+    setState(() {
+      if (_dragMode!) {
+        _selected.add(id);
+      } else {
+        _selected.remove(id);
+      }
+    });
+  }
 
   /// Every photo currently LOADED. Deliberately not "every photo you own": the
   /// grid pages, and an action on ten thousand rows somebody has never laid
@@ -367,7 +427,24 @@ class _GalleryScreenState extends State<GalleryScreen>
               onShare: _shareSelected,
             )
           : null,
-      body: RefreshIndicator(
+      // PRESS AND DRAG TO SELECT, the way every photo app does it.
+      //
+      // Selecting a holiday meant tapping forty times. The long-press already
+      // started selection and then let go of the gesture, so the obvious next
+      // motion — keep holding, slide across the ones you want — did nothing.
+      //
+      // It is a LONG-press drag, not a plain drag, so an ordinary swipe still
+      // scrolls the grid. Which tile is under the finger is found by hit-testing
+      // for the MetaData wrapper on each tile rather than by computing grid
+      // arithmetic: the grid is several slivers with date headers between them,
+      // so any sum of row heights would be wrong at exactly the boundaries
+      // people drag across.
+      body: GestureDetector(
+        onLongPressStart: (d) => _dragSelectStart(d.globalPosition),
+        onLongPressMoveUpdate: (d) => _dragSelectMove(d.globalPosition),
+        onLongPressEnd: (_) => _dragMode = null,
+        onLongPressCancel: () => _dragMode = null,
+        child: RefreshIndicator(
         onRefresh: () => _load(reset: true),
         child: CustomScrollView(
           controller: _scroll,
@@ -461,7 +538,13 @@ class _GalleryScreenState extends State<GalleryScreen>
                       crossAxisSpacing: 2,
                     ),
                     delegate: SliverChildBuilderDelegate(
-                      (ctx, i) => PhotoTile(
+                      // MetaData carries the id into the render tree so a drag
+                      // can hit-test for it. `opaque` so the tile is found even
+                      // where its child would not itself be hit.
+                      (ctx, i) => MetaData(
+                        metaData: g.photos[i].id,
+                        behavior: HitTestBehavior.opaque,
+                        child: PhotoTile(
                         photo: g.photos[i],
                         selecting: _selecting,
                         selected: _selected.contains(g.photos[i].id),
@@ -487,7 +570,10 @@ class _GalleryScreenState extends State<GalleryScreen>
                             ),
                           );
                         },
-                        onLongPress: () => _toggle(g.photos[i]),
+                        // No onLongPress here: the grid's own long-press
+                        // handles it, and two long-press recognisers competing
+                        // for the same gesture means the drag never starts.
+                      ),
                       ),
                       childCount: g.photos.length,
                     ),
@@ -505,6 +591,7 @@ class _GalleryScreenState extends State<GalleryScreen>
             ],
           ],
         ),
+      ),
       ),
     );
   }

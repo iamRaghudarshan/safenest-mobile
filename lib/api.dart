@@ -296,6 +296,36 @@ class Api {
   ///
   /// Keeping the status is what separates "sign in again" from "your laptop is
   /// asleep", and the person can act on exactly one of those.
+  /// Status AND body. `postRawStatus` throws the body away, which was fine
+  /// until a caller needed to know WHAT the server did, not just that it
+  /// worked: /api/gallery/upload answers 200 for a photo it already had, with
+  /// `duplicate: true` in the body. Counting that as a new upload is how a
+  /// backup reported thousands sent while the gallery gained none.
+  Future<({int status, Map<String, dynamic> body})> postRawResult(
+      String path, List<int> body, String contentType) async {
+    try {
+      final res = await http
+          .post(_url(path),
+              headers: {
+                'Content-Type': contentType,
+                if (token != null) 'Authorization': 'Bearer $token',
+              },
+              body: body)
+          .timeout(const Duration(minutes: 5));
+      Map<String, dynamic> parsed = const {};
+      try {
+        final d = jsonDecode(res.body);
+        if (d is Map) parsed = d.cast<String, dynamic>();
+      } catch (_) {
+        // A body that is not JSON is not a reason to fail an upload that the
+        // status code says succeeded.
+      }
+      return (status: res.statusCode, body: parsed);
+    } catch (_) {
+      return (status: 0, body: const <String, dynamic>{});
+    }
+  }
+
   Future<int> postRawStatus(String path, List<int> body, String contentType) async {
     try {
       final res = await http

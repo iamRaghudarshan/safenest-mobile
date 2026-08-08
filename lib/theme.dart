@@ -285,14 +285,54 @@ ThemeData buildTheme(Brand brand, Brightness brightness) {
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(kRadius)),
     ),
 
+    // THE WHOLE SCALE, not six of fifteen.
+    //
+    // Only headlineSmall, titleMedium, titleSmall, bodyMedium, bodySmall and
+    // labelSmall were set. Everything else fell through to Material 3's own
+    // type scale, which is a different design: it puts letterSpacing of +0.5 on
+    // bodyLarge and the label styles, and uses w400 where this app's headings
+    // are bold. So a screen built from titleMedium looked like this app and the
+    // one beside it, built from titleLarge or labelLarge, looked like a stock
+    // Material demo — loosely spaced and a shade too light.
+    //
+    // Mixed type is the kind of wrong that is obvious and hard to name, which
+    // is why it reads as "the fonts look bad" rather than as any one bug.
+    //
+    // No font FAMILY is named, deliberately — see fontFamily above. This is
+    // about size, weight and spacing, which is where the difference actually
+    // was. Headings tighten (negative spacing) the way the web app's do; body
+    // and labels sit at 0 rather than Material's +0.5.
     textTheme: TextTheme(
+      displayLarge: TextStyle(
+          color: ink, fontSize: 34, fontWeight: FontWeight.w800, letterSpacing: -0.8),
+      displayMedium: TextStyle(
+          color: ink, fontSize: 30, fontWeight: FontWeight.w800, letterSpacing: -0.7),
+      displaySmall: TextStyle(
+          color: ink, fontSize: 26, fontWeight: FontWeight.w800, letterSpacing: -0.5),
+      headlineLarge: TextStyle(
+          color: ink, fontSize: 26, fontWeight: FontWeight.w700, letterSpacing: -0.5),
+      headlineMedium: TextStyle(
+          color: ink, fontSize: 24, fontWeight: FontWeight.w700, letterSpacing: -0.45),
       headlineSmall: TextStyle(
           color: ink, fontSize: 22, fontWeight: FontWeight.w700, letterSpacing: -0.4),
-      titleMedium: TextStyle(color: ink, fontSize: 16, fontWeight: FontWeight.w700),
-      titleSmall: TextStyle(color: ink, fontSize: 14.5, fontWeight: FontWeight.w600),
-      bodyMedium: TextStyle(color: ink, fontSize: 15),
-      bodySmall: TextStyle(color: inkSoft, fontSize: 13, height: 1.45),
-      labelSmall: TextStyle(color: inkFaint, fontSize: 12),
+      titleLarge: TextStyle(
+          color: ink, fontSize: 18, fontWeight: FontWeight.w700, letterSpacing: -0.3),
+      titleMedium: TextStyle(
+          color: ink, fontSize: 16, fontWeight: FontWeight.w700, letterSpacing: -0.2),
+      titleSmall: TextStyle(
+          color: ink, fontSize: 14.5, fontWeight: FontWeight.w600, letterSpacing: -0.1),
+      bodyLarge: TextStyle(
+          color: ink, fontSize: 16, height: 1.45, letterSpacing: 0),
+      bodyMedium: TextStyle(
+          color: ink, fontSize: 15, height: 1.45, letterSpacing: 0),
+      bodySmall: TextStyle(
+          color: inkSoft, fontSize: 13, height: 1.45, letterSpacing: 0),
+      labelLarge: TextStyle(
+          color: ink, fontSize: 15, fontWeight: FontWeight.w600, letterSpacing: 0),
+      labelMedium: TextStyle(
+          color: inkSoft, fontSize: 13, fontWeight: FontWeight.w600, letterSpacing: 0),
+      labelSmall: TextStyle(
+          color: inkFaint, fontSize: 12, fontWeight: FontWeight.w500, letterSpacing: 0),
     ),
   );
 }

@@ -23,6 +23,7 @@ import '../session.dart';
 import '../theme.dart';
 import '../widgets/avatar.dart';
 import '../widgets/brand_button.dart';
+import 'notifications_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({
@@ -52,6 +53,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Map<String, dynamic>? _brief;
   bool _loading = true;
 
+  /// Unread items in the bell.
+  ///
+  /// The inbox has always been there and always had things in it — reminders
+  /// that fired, the daily digest — and the only way to reach it was Profile →
+  /// My data → Notifications. Nobody digs three levels into settings to find
+  /// out whether something happened; a bell with a number on it is where
+  /// everyone looks, so that is where it goes.
+  int _unread = 0;
+
   @override
   void initState() {
     super.initState();
@@ -75,6 +85,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
       final b = await api.get('/api/briefing');
       if (b is Map) _brief = Map<String, dynamic>.from(b);
     } catch (_) {/* the briefing is a nicety; the dues are not */}
+    try {
+      final n = await api.get('/api/notifications/inbox');
+      final items = (n is Map ? n['items'] : null) as List? ?? const [];
+      _unread = items.where((x) => (x is Map) && x['read'] != true).length;
+    } catch (_) {/* a missing badge must not blank the home screen */}
     if (mounted) setState(() => _loading = false);
   }
 
@@ -153,6 +168,47 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 IconButton(
                   icon: const Icon(Icons.search),
                   onPressed: () => widget.onOpen('search'),
+                ),
+                // The bell, with the count on it. A reminder that fired at
+                // 4:14pm sat in the inbox with nothing anywhere on screen to
+                // say so.
+                IconButton(
+                  tooltip: 'Notifications',
+                  onPressed: () => Navigator.of(context)
+                      .push(MaterialPageRoute(
+                          builder: (_) => const NotificationsScreen()))
+                      // Coming back re-reads the count: marking things read in
+                      // there must clear the badge out here, or the number is a
+                      // lie until the next refresh.
+                      .then((_) => _load()),
+                  icon: Stack(clipBehavior: Clip.none, children: [
+                    const Icon(Icons.notifications_outlined),
+                    if (_unread > 0)
+                      Positioned(
+                        right: -3,
+                        top: -3,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 4, vertical: 1),
+                          constraints: const BoxConstraints(minWidth: 15),
+                          decoration: BoxDecoration(
+                            color: kDanger,
+                            borderRadius: BorderRadius.circular(9),
+                          ),
+                          child: Text(
+                            // Capped, because a three-digit badge is wider than
+                            // the icon it sits on.
+                            _unread > 99 ? '99+' : '$_unread',
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 9.5,
+                                height: 1.25,
+                                fontWeight: FontWeight.w800),
+                          ),
+                        ),
+                      ),
+                  ]),
                 ),
                 const SizedBox(width: 4),
                 // The web app's .avatar-btn — the one thing in this header that

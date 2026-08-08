@@ -38,6 +38,10 @@ import 'api.dart';
 
 enum BackupState { idle, scanning, running, paused, done, failed }
 
+/// What happened to one photo. `already` is the one the old bool could not
+/// express: the upload succeeded and yet nothing new exists on the server.
+enum _Sent { stored, already, failed }
+
 class BackupProgress {
   const BackupProgress({
     this.state = BackupState.idle,
@@ -244,12 +248,19 @@ class BackupService extends ChangeNotifier {
         final slice = todo.skip(i).take(_concurrency).toList();
         final results = await Future.wait(slice.map(_send));
         for (var k = 0; k < results.length; k++) {
-          if (results[k]) {
-            handledDone++;
-          } else {
-            handledFail++;
-            // Kept so "try these again" does not mean "walk the library again".
-            _failedAssets.add(slice[k]);
+          switch (results[k]) {
+            case _Sent.stored:
+              handledDone++;
+            case _Sent.already:
+              // Already on the server. Counted with the ones skipped locally,
+              // because to the person watching they are the same thing: not a
+              // new photo.
+              handledSkip++;
+            case _Sent.failed:
+              handledFail++;
+              // Kept so "try these again" does not mean "walk the library
+              // again".
+              _failedAssets.add(slice[k]);
           }
         }
         report();
@@ -335,11 +346,11 @@ class BackupService extends ChangeNotifier {
       final slice = queue.skip(i).take(_concurrency).toList();
       final results = await Future.wait(slice.map(_send));
       for (var k = 0; k < results.length; k++) {
-        if (results[k]) {
-          ok++;
-        } else {
+        if (results[k] == _Sent.failed) {
           bad++;
           _failedAssets.add(slice[k]);
+        } else {
+          ok++;
         }
       }
       report();
@@ -381,7 +392,9 @@ class BackupService extends ChangeNotifier {
     return [for (final x in e) '${x.value} photo${x.value == 1 ? '' : 's'}: ${x.key}'];
   }
 
-  Future<bool> _send(AssetEntity asset) async {
+  /// What became of one photo. `bool` could not tell "stored" from "the server
+  /// already had it", and the difference is the whole of the count mismatch.
+  Future<_Sent> _send(AssetEntity asset) async {
     try {
       // originFile, not file: `file` hands back a transcoded copy on iOS, which
       // is slower and loses the original. The server decodes HEIC itself.
@@ -389,22 +402,27 @@ class BackupService extends ChangeNotifier {
       if (f == null || !await f.exists()) {
         _blame('stored in iCloud rather than on this phone. Open them in '
             'Photos once, or turn off "Optimise Storage".');
-        return false;
+        return _Sent.failed;
       }
       final bytes = await f.readAsBytes();
       if (bytes.isEmpty) {
         _blame('in iCloud rather than on the phone.');
-        return false;
+        return _Sent.failed;
       }
 
-      final status = await _upload(bytes, asset.title ?? '${asset.id}.jpg');
-      if (status >= 200 && status < 300) {
+      final r = await _upload(bytes, asset.title ?? '${asset.id}.jpg');
+      if (r.status >= 200 && r.status < 300) {
         await _remember(asset.id);
-        return true;
+        // The server answers 200 for a photo it already holds, saying so in
+        // the body. Counted as new, that is a backup claiming to have sent
+        // thousands while the gallery gains none — which is exactly what a
+        // reinstall looked like, because the phone's "already sent" memory is
+        // local and starts empty.
+        return r.body['duplicate'] == true ? _Sent.already : _Sent.stored;
       }
       // Naming the cause is the entire difference between a person fixing this
       // in ten seconds and reporting "backup does not work".
-      _blame(switch (status) {
+      _blame(switch (r.status) {
         0 => 'your computer could not be reached. Check it is awake and that '
             'the address in Profile is right.',
         401 => 'your session has expired. Sign out and back in.',
@@ -412,19 +430,20 @@ class BackupService extends ChangeNotifier {
             'be added until it does.',
         403 => 'this account is not allowed to add photos.',
         413 => 'they are larger than your computer will accept.',
-        >= 500 => 'your computer answered with an error ($status). Its own '
+        >= 500 => 'your computer answered with an error (${r.status}). Its own '
             'console may say more.',
-        _ => 'your computer refused the upload ($status).',
+        _ => 'your computer refused the upload (${r.status}).',
       });
-      return false;
+      return _Sent.failed;
     } catch (_) {
       _blame('could not be read from this phone.');
-      return false;
+      return _Sent.failed;
     }
   }
 
   /// Returns the HTTP status: 2xx is a success, 0 means it never arrived.
-  Future<int> _upload(Uint8List bytes, String name) async {
+  Future<({int status, Map<String, dynamic> body})> _upload(
+      Uint8List bytes, String name) async {
     // Multipart by hand rather than pulling in a client: one field, one file, and
     // the server's /api/gallery/upload has been driven with exactly this shape.
     final boundary = '----safenest${DateTime.now().microsecondsSinceEpoch}';
@@ -455,13 +474,13 @@ class BackupService extends ChangeNotifier {
       ..add(tail);
 
     try {
-      return await _api.postRawStatus(
+      return await _api.postRawResult(
         '/api/gallery/upload?faces=0',
         buf.takeBytes(),
         'multipart/form-data; boundary=$boundary',
       );
     } catch (_) {
-      return 0;
+      return (status: 0, body: const <String, dynamic>{});
     }
   }
 }

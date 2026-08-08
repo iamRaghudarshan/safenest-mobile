@@ -27,6 +27,7 @@ import 'package:provider/provider.dart';
 import '../backup.dart';
 import '../session.dart';
 import '../theme.dart';
+import '../widgets/backup_flight.dart';
 import '../widgets/brand_button.dart';
 import '../widgets/pill.dart';
 
@@ -131,7 +132,18 @@ class _BackupScreenState extends State<BackupScreen> {
                 height: 1.55,
                 color: theme.colorScheme.onSurfaceVariant),
           ),
-          const SizedBox(height: 22),
+
+          // Two named devices with photos travelling between them. The bar says
+          // how far along it is; this says where the photos are going, which is
+          // the thing people actually wanted reassuring about — the whole point
+          // of this app is that they go to YOUR computer and nowhere else, and
+          // a progress bar cannot say that.
+          //
+          // Only animates while something is moving. A loop that carries on
+          // after a finished run tells someone to keep waiting.
+          BackupFlight(running: running),
+
+          const SizedBox(height: 10),
 
           if (running) ...[
             _card(
