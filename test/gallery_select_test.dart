@@ -13,6 +13,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
 
 import 'package:safenest/screens/gallery_screen.dart';
+import 'package:safenest/screens/cleanup_screen.dart';
 import 'package:safenest/screens/trash_screen.dart';
 import 'package:safenest/session.dart';
 import 'package:safenest/theme.dart';
@@ -277,6 +278,65 @@ void main() {
       // the reversible action should be the easy one to hit.
       expect(find.text('Put back'), findsOneWidget);
       expect(find.text('Delete'), findsOneWidget);
+    });
+  });
+
+  group('Free up space', () {
+    // Exact duplicates essentially cannot happen: the upload endpoint dedupes
+    // on content_hash — three identical uploads return the SAME photo and the
+    // library grows by one, which was verified against the server. So the
+    // screen opens on "Look alike", where the space actually goes.
+    testWidgets('opens on Look alike, not Exact copies', (tester) async {
+      tester.view.physicalSize = const Size(375, 812);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      await tester.pumpWidget(_wrap(const CleanupScreen(initialGroups: [])));
+      await tester.pump();
+      expect(tester.takeException(), isNull);
+      expect(find.textContaining('NOT identical'), findsOneWidget);
+    });
+
+    testWidgets('a group keeps one and marks the rest', (tester) async {
+      tester.view.physicalSize = const Size(375, 812);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      await tester.pumpWidget(_wrap(CleanupScreen(initialMode: 1, initialGroups: [
+        {
+          'hash': 'e88eaa0f173b86e8',
+          'count': 3,
+          'keep_id': 2,
+          'items': [
+            {'id': 1, 'thumb_url': '/t/1.jpg?t=1.a', 'url': '/o/1.jpg?t=1.a'},
+            {'id': 2, 'thumb_url': '/t/2.jpg?t=1.a', 'url': '/o/2.jpg?t=1.a'},
+            {'id': 3, 'thumb_url': '/t/3.jpg?t=1.a', 'url': '/o/3.jpg?t=1.a'},
+          ],
+        },
+      ])));
+      await tester.pump();
+
+      expect(tester.takeException(), isNull);
+      // The server's suggestion is honoured, and the maths is stated on the
+      // button rather than left to be counted.
+      expect(find.text('Keep'), findsOneWidget);
+      expect(find.text('Remove'), findsNWidgets(2));
+      expect(find.text('Remove 2 and keep 1'), findsOneWidget);
+      expect(find.text('3 copies'), findsOneWidget);
+    });
+
+    testWidgets('nothing to clean says so without alarming anybody',
+        (tester) async {
+      tester.view.physicalSize = const Size(375, 812);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      await tester.pumpWidget(
+          _wrap(const CleanupScreen(initialMode: 1, initialGroups: [])));
+      await tester.pump();
+      expect(find.text('Nothing looks duplicated'), findsOneWidget);
+      // No action bar when there is nothing to do.
+      expect(find.textContaining('Remove '), findsNothing);
     });
   });
 }
