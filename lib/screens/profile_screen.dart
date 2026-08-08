@@ -40,7 +40,8 @@ import '../theme.dart';
 import '../widgets/notification_settings.dart';
 import 'masters_screen.dart';
 import '../widgets/brand_button.dart';
-import '../widgets/brand_logo.dart';
+import '../widgets/avatar.dart';
+import '../widgets/edit_profile_sheet.dart';
 import 'activity_screen.dart';
 import 'backup_screen.dart';
 import 'notifications_screen.dart';
@@ -107,8 +108,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
         children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(0, 10, 0, 20),
+            // The PERSON's photo, not the app's logo.
+            //
+            // The web app's hero is `<Avatar size={58} />` and tapping it opens
+            // Edit profile. This showed BrandLogo — the app icon — which is the
+            // same on every account and tells the person nothing about
+            // themselves, on the one screen that is entirely about them.
             child: Column(children: [
-              const BrandLogo(size: 68),
+              Avatar(size: 84, onTap: () => _editProfile(context)),
               const SizedBox(height: 12),
               Text('${user?['name'] ?? 'Signed in'}',
                   style: theme.textTheme.titleMedium),
@@ -136,7 +143,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
               icon: Icons.edit_outlined,
               tint: kBrand,
               label: 'Edit profile',
-              onTap: () => _editName(context, '${user?['name'] ?? ''}'),
+              value: 'Name and photo',
+              onTap: () => _editProfile(context),
             ),
             SettingsRow(
               icon: Icons.lock_outline,
@@ -360,38 +368,22 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
-  Future<void> _editName(BuildContext context, String current) async {
-    final controller = TextEditingController(text: current);
-    final session = context.read<Session>();
+  /// The full sheet: photo AND name.
+  ///
+  /// This used to be a single text field. The web app's row has always said
+  /// "Change your name or photo", POST/DELETE /api/auth/avatar have always
+  /// existed, and the Avatar widget here already renders avatar_url — so the
+  /// phone could show a profile picture and had no way to set one.
+  Future<void> _editProfile(BuildContext context) async {
     final messenger = ScaffoldMessenger.of(context);
-
-    final save = await showModalBottomSheet<bool>(
+    final saved = await showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
       showDragHandle: true,
-      builder: (ctx) => Padding(
-        padding: EdgeInsets.fromLTRB(
-            22, 0, 22, MediaQuery.of(ctx).viewInsets.bottom + 24),
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          Text('Edit profile', style: Theme.of(ctx).textTheme.titleMedium),
-          const SizedBox(height: 16),
-          TextField(
-            controller: controller,
-            autofocus: true,
-            decoration: const InputDecoration(labelText: 'Your name'),
-          ),
-          const SizedBox(height: 18),
-          BrandButton(label: 'Save', onPressed: () => Navigator.pop(ctx, true)),
-        ]),
-      ),
+      builder: (_) => const EditProfileSheet(),
     );
-    if (save != true) return;
-    try {
-      await session.api.put('/api/auth/profile', {'name': controller.text.trim()});
-      await session.refreshUser();
+    if (saved == true) {
       messenger.showSnackBar(const SnackBar(content: Text('Saved')));
-    } on ApiError catch (e) {
-      messenger.showSnackBar(SnackBar(content: Text(e.message)));
     }
   }
 

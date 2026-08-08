@@ -9,6 +9,15 @@
 /// and this product's whole argument is that it is not that. The owner presses
 /// the button, or schedules it, and can stop it at any point — stopping loses
 /// nothing, because what has already been sent is remembered.
+///
+/// WHAT THIS SCREEN OWES THE PERSON, and did not pay
+/// The engine can now say WHY a run failed — an expired session, a lapsed
+/// licence, a sleeping laptop, photos still in iCloud. This screen showed one
+/// undifferentiated line of grey text, and a bare "N could not be read" that was
+/// wrong twice over: the photos read perfectly, and the upload was what failed.
+/// A backup screen that cannot distinguish "done" from "nothing worked" is
+/// worse than no screen, because it is the one thing here that says your photos
+/// are safe.
 library;
 
 import 'package:flutter/material.dart';
@@ -17,107 +26,239 @@ import 'package:provider/provider.dart';
 
 import '../backup.dart';
 import '../session.dart';
+import '../theme.dart';
+import '../widgets/brand_button.dart';
+import '../widgets/pill.dart';
 
 class BackupScreen extends StatefulWidget {
-  const BackupScreen({super.key});
+  const BackupScreen({super.key, this.debugProgress});
+
+  /// For tests — render a given state without a photo library or a server.
+  final BackupProgress? debugProgress;
+
   @override
   State<BackupScreen> createState() => _BackupScreenState();
 }
 
 class _BackupScreenState extends State<BackupScreen> {
-  late final BackupService _service;
+  BackupService? _service;
 
   @override
   void initState() {
     super.initState();
-    _service = BackupService(context.read<Session>().api);
-    _service.addListener(_onChange);
-    _service.load();
+    if (widget.debugProgress != null) return;
+    final s = BackupService(context.read<Session>().api);
+    s.addListener(_onChange);
+    s.load();
+    _service = s;
   }
 
   void _onChange() => setState(() {});
 
   @override
   void dispose() {
-    _service.removeListener(_onChange);
-    _service.stop();
+    _service?.removeListener(_onChange);
+    _service?.stop();
     super.dispose();
   }
 
+  BackupProgress get _p => widget.debugProgress ?? _service!.progress;
+
   @override
   Widget build(BuildContext context) {
-    final p = _service.progress;
-    final running = p.state == BackupState.running || p.state == BackupState.scanning;
+    final theme = Theme.of(context);
+    final dark = theme.brightness == Brightness.dark;
+    final p = _p;
+    final running =
+        p.state == BackupState.running || p.state == BackupState.scanning;
+    final failed = p.state == BackupState.failed;
+    final done = p.state == BackupState.done;
+
+    // The hero colour IS the status. Gallery pink at rest, green when a run
+    // finished, red when one did not — readable across the room, which is where
+    // a phone sits while it uploads twenty thousand photos.
+    final accent = failed
+        ? kDanger
+        : done
+            ? kOk
+            : kModuleColours['gallery']!;
 
     return Scaffold(
       appBar: AppBar(title: const Text('Back up this phone')),
       body: ListView(
-        padding: const EdgeInsets.all(24),
+        padding: const EdgeInsets.fromLTRB(18, 8, 18, 32),
         children: [
-          Icon(Icons.cloud_upload_outlined,
-              size: 64, color: Theme.of(context).colorScheme.primary),
+          Center(
+            child: Container(
+              width: 92,
+              height: 92,
+              decoration: BoxDecoration(
+                color: accent,
+                borderRadius: BorderRadius.circular(28),
+                boxShadow: [
+                  BoxShadow(
+                    color: accent.withValues(alpha: 0.40),
+                    blurRadius: 32,
+                    offset: const Offset(0, 14),
+                  ),
+                ],
+              ),
+              child: Icon(
+                failed
+                    ? Icons.error_outline
+                    : done
+                        ? Icons.cloud_done_outlined
+                        : Icons.cloud_upload_outlined,
+                size: 44,
+                color: Colors.white,
+              ),
+            ),
+          ),
           const SizedBox(height: 20),
           Text(
             'Every photo on this phone, copied to your own computer.',
             textAlign: TextAlign.center,
-            style: Theme.of(context).textTheme.titleMedium,
+            style: const TextStyle(
+                fontSize: 19, fontWeight: FontWeight.w800, letterSpacing: -0.38),
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 8),
           Text(
             'No choosing, no batches. Photos already there are skipped, so you '
             'can run this as often as you like.',
             textAlign: TextAlign.center,
-            style: Theme.of(context).textTheme.bodySmall,
+            style: TextStyle(
+                fontSize: 13.5,
+                height: 1.55,
+                color: theme.colorScheme.onSurfaceVariant),
           ),
-          const SizedBox(height: 30),
+          const SizedBox(height: 22),
 
           if (running) ...[
-            LinearProgressIndicator(value: p.total == 0 ? null : p.fraction),
+            _card(
+              theme,
+              dark,
+              child: Column(children: [
+                // A determinate bar the moment a total is known. An indefinite
+                // sweep for twenty minutes tells somebody nothing except that
+                // the app has not crashed.
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(999),
+                  child: LinearProgressIndicator(
+                    value: p.total == 0 ? null : p.fraction,
+                    minHeight: 10,
+                    backgroundColor: theme.colorScheme.surfaceContainerHighest,
+                    valueColor: AlwaysStoppedAnimation(accent),
+                  ),
+                ),
+                const SizedBox(height: 14),
+                Text(
+                  p.state == BackupState.scanning
+                      ? p.message
+                      : '${p.handled} of ${p.total}',
+                  style: const TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.w800,
+                      fontFeatures: [FontFeature.tabularFigures()]),
+                ),
+                if (p.total > 0) ...[
+                  const SizedBox(height: 2),
+                  Text('${(p.fraction * 100).clamp(0, 100).toStringAsFixed(0)}%',
+                      style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          color: theme.colorScheme.onSurfaceVariant)),
+                ],
+                const SizedBox(height: 14),
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  alignment: WrapAlignment.center,
+                  children: _counts(p),
+                ),
+              ]),
+            ),
             const SizedBox(height: 14),
-            Text(
-              p.state == BackupState.scanning
-                  ? p.message
-                  : '${p.handled} of ${p.total}',
-              textAlign: TextAlign.center,
-              style: Theme.of(context).textTheme.titleSmall,
+            OutlinedButton.icon(
+              onPressed: _service?.stop,
+              icon: const Icon(Icons.stop_circle_outlined, size: 19),
+              label: const Text('Stop'),
             ),
-            const SizedBox(height: 6),
+            const SizedBox(height: 10),
             Text(
-              '${p.done} sent · ${p.skipped} already there'
-              '${p.failed > 0 ? ' · ${p.failed} could not be read' : ''}',
+              'Keep this screen open while it runs. Stopping loses nothing — it '
+              'carries on from here next time.',
               textAlign: TextAlign.center,
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
-            const SizedBox(height: 24),
-            OutlinedButton(
-              onPressed: _service.stop,
-              child: const Text('Stop'),
-            ),
-            const SizedBox(height: 12),
-            Text(
-              'Keep this screen open while it runs.',
-              textAlign: TextAlign.center,
-              style: Theme.of(context).textTheme.bodySmall,
+              style: TextStyle(
+                  fontSize: 12.5,
+                  height: 1.5,
+                  color: theme.colorScheme.outline),
             ),
           ] else ...[
-            FilledButton.icon(
-              onPressed: () => _service.runFullBackup(),
-              icon: const Icon(Icons.backup),
-              label: Text(p.state == BackupState.paused
+            // The outcome of the last run, before the button — it is what
+            // somebody opening this screen wants to know first.
+            if (p.message.isNotEmpty)
+              _card(
+                theme,
+                dark,
+                border: failed ? kDanger : (done ? kOk : null),
+                child: Column(children: [
+                  Row(children: [
+                    Icon(
+                        failed
+                            ? Icons.error_outline
+                            : p.state == BackupState.paused
+                                ? Icons.pause_circle_outline
+                                : Icons.check_circle_outline,
+                        size: 20,
+                        color: accent),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                          failed
+                              ? 'That did not work'
+                              : p.state == BackupState.paused
+                                  ? 'Stopped'
+                                  : 'Backed up',
+                          style: const TextStyle(
+                              fontSize: 15, fontWeight: FontWeight.w800)),
+                    ),
+                  ]),
+                  const SizedBox(height: 8),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(p.message,
+                        style: TextStyle(
+                            fontSize: 13.5,
+                            height: 1.5,
+                            color: theme.colorScheme.onSurfaceVariant)),
+                  ),
+                  if (p.total > 0) ...[
+                    const SizedBox(height: 12),
+                    Wrap(spacing: 6, runSpacing: 6, children: _counts(p)),
+                  ],
+                ]),
+              ),
+            if (p.message.isNotEmpty) const SizedBox(height: 16),
+
+            BrandButton(
+              label: p.state == BackupState.paused
                   ? 'Carry on backing up'
-                  : 'Back up all my photos'),
+                  : failed
+                      ? 'Try again'
+                      : 'Back up my photos',
+              icon: Icons.backup_outlined,
+              block: true,
+              onPressed: () => _service?.runFullBackup(),
             ),
-            if (p.message.isNotEmpty) ...[
-              const SizedBox(height: 18),
-              Text(p.message,
-                  textAlign: TextAlign.center,
-                  style: Theme.of(context).textTheme.bodyMedium),
-            ],
-            if (p.state == BackupState.failed) ...[
-              const SizedBox(height: 12),
-              OutlinedButton(
+
+            // Only for a permission refusal, which is the one failure a person
+            // fixes somewhere other than in this app.
+            if (failed && _looksLikePermission(p.message)) ...[
+              const SizedBox(height: 10),
+              OutlinedButton.icon(
                 onPressed: PhotoManager.openSetting,
-                child: const Text('Open photo settings'),
+                icon: const Icon(Icons.settings_outlined, size: 19),
+                label: const Text('Open photo settings'),
               ),
             ],
           ],
@@ -125,4 +266,37 @@ class _BackupScreenState extends State<BackupScreen> {
       ),
     );
   }
+
+  bool _looksLikePermission(String m) =>
+      m.contains('allowed to see') || m.contains('All Photos');
+
+  /// done / already there / could not be sent, as tinted pills.
+  ///
+  /// "could not be READ" was the old wording and it was wrong: the photo read
+  /// perfectly and the upload failed. Naming the right half is the difference
+  /// between somebody checking their laptop and somebody checking their phone.
+  List<Widget> _counts(BackupProgress p) => [
+        if (p.done > 0)
+          Pill('${p.done} sent', tone: PillTone.ok, icon: Icons.check),
+        if (p.skipped > 0)
+          Pill('${p.skipped} already there',
+              tone: PillTone.muted, icon: Icons.done_all),
+        if (p.failed > 0)
+          Pill('${p.failed} not sent',
+              tone: PillTone.danger, icon: Icons.priority_high),
+      ];
+
+  Widget _card(ThemeData theme, bool dark,
+          {required Widget child, Color? border}) =>
+      Container(
+        padding: const EdgeInsets.all(18),
+        decoration: BoxDecoration(
+          color: theme.colorScheme.surface,
+          borderRadius: BorderRadius.circular(kRadius),
+          boxShadow: softShadow(dark),
+          border:
+              border == null ? null : Border.all(color: border.withValues(alpha: 0.45), width: 1.5),
+        ),
+        child: child,
+      );
 }

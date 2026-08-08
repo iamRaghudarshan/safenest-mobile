@@ -17,6 +17,7 @@
 library;
 
 import 'dart:convert';
+import 'dart:typed_data' show BytesBuilder;
 import 'dart:io';
 
 import 'package:http/http.dart' as http;
@@ -106,6 +107,88 @@ class Api {
   /// By hand rather than with a client package because the framing has to match
   /// what the server's UploadFile expects exactly, and that shape has already
   /// been driven end to end against these endpoints.
+  /// Builds the multipart body. Shared so the two callers cannot drift.
+  ///
+  /// A BytesBuilder rather than `<int>[]` + addAll: that builds a growable list
+  /// of BOXED integers, which for an 8 MB image is eight million heap objects
+  /// instead of an eight-megabyte buffer.
+  List<int> _multipart(
+    String boundary, {
+    required String fileField,
+    required String filename,
+    required List<int> bytes,
+    Map<String, String> fields = const {},
+  }) {
+    // A filename is a header VALUE — a quote or a newline in it breaks the
+    // Content-Disposition line, and a newline can inject headers of its own.
+    final safe = filename
+        .replaceAll(RegExp(r'[\r\n"\\]'), '_')
+        .replaceAll(RegExp(r'[\x00-\x1f]'), '_');
+
+    final buf = BytesBuilder(copy: false);
+    void add(String s) => buf.add(utf8.encode(s));
+
+    fields.forEach((k, v) {
+      add('--$boundary\r\nContent-Disposition: form-data; name="$k"\r\n\r\n$v\r\n');
+    });
+    add('--$boundary\r\n'
+        'Content-Disposition: form-data; name="$fileField"; filename="$safe"\r\n'
+        'Content-Type: application/octet-stream\r\n\r\n');
+    buf.add(bytes);
+    add('\r\n--$boundary--\r\n');
+    return buf.takeBytes();
+  }
+
+  /// Upload and return the parsed reply, THROWING ApiError with whatever the
+  /// server said.
+  ///
+  /// `postMultipart` returns a bool, which throws away the one useful thing:
+  /// this endpoint answers "Image too large (max 8 MB)" and "That file isn't a
+  /// readable image", and a person can act on either. A bare false leaves them
+  /// pressing the same button again.
+  Future<dynamic> postMultipartJson(
+    String path, {
+    required String fileField,
+    required String filename,
+    required List<int> bytes,
+    Map<String, String> fields = const {},
+  }) async {
+    final boundary = '----safenest${DateTime.now().microsecondsSinceEpoch}';
+    final body = _multipart(boundary,
+        fileField: fileField, filename: filename, bytes: bytes, fields: fields);
+
+    http.Response res;
+    try {
+      res = await http
+          .post(_url(path),
+              headers: {
+                'Content-Type': 'multipart/form-data; boundary=$boundary',
+                if (token != null) 'Authorization': 'Bearer $token',
+              },
+              body: body)
+          .timeout(const Duration(minutes: 5));
+    } on SocketException {
+      throw ApiError(0, _offlineMsg, offline: true);
+    } catch (_) {
+      throw ApiError(0, _unreachableMsg, offline: true);
+    }
+
+    dynamic data;
+    if (res.body.isNotEmpty) {
+      try {
+        data = jsonDecode(res.body);
+      } catch (_) {
+        data = res.body;
+      }
+    }
+    if (res.statusCode >= 200 && res.statusCode < 300) return data;
+
+    final detail = (data is Map && data['detail'] != null)
+        ? '${data['detail']}'
+        : 'That could not be uploaded (${res.statusCode}).';
+    throw ApiError(res.statusCode, detail);
+  }
+
   Future<bool> postMultipart(
     String path, {
     required String fileField,
@@ -114,18 +197,8 @@ class Api {
     Map<String, String> fields = const {},
   }) async {
     final boundary = '----safenest${DateTime.now().microsecondsSinceEpoch}';
-    final body = <int>[];
-    void add(String s) => body.addAll(utf8.encode(s));
-
-    fields.forEach((k, v) {
-      add('--$boundary\r\nContent-Disposition: form-data; name="$k"\r\n\r\n$v\r\n');
-    });
-    add('--$boundary\r\n'
-        'Content-Disposition: form-data; name="$fileField"; filename="$filename"\r\n'
-        'Content-Type: application/octet-stream\r\n\r\n');
-    body.addAll(bytes);
-    add('\r\n--$boundary--\r\n');
-
+    final body = _multipart(boundary,
+        fileField: fileField, filename: filename, bytes: bytes, fields: fields);
     try {
       final res = await http
           .post(_url(path),

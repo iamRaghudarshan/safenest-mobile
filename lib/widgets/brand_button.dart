@@ -95,12 +95,28 @@ class BrandButton extends StatelessWidget {
                       Icon(icon, size: 19, color: Colors.white),
                       const SizedBox(width: 8),
                     ],
-                    Text(
-                      label,
-                      style: theme.textTheme.titleSmall?.copyWith(
-                        color: Colors.white,
-                        fontSize: 15,
-                        fontWeight: FontWeight.w700,
+                    // Flexible, and it has to be.
+                    //
+                    // A bare Text in a Row takes its natural width and overflows
+                    // rather than shrinking. "Back up all my photos" with an
+                    // icon is 41 pixels wider than an iPhone SE allows, and the
+                    // same is true of every long label anywhere in the app —
+                    // this is one widget, so it was one bug in all of them.
+                    //
+                    // Ellipsis rather than wrapping: a button that grows to two
+                    // lines pushes everything below it, and on a form the thing
+                    // below is usually what the person is reading.
+                    Flexible(
+                      child: Text(
+                        label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        textAlign: TextAlign.center,
+                        style: theme.textTheme.titleSmall?.copyWith(
+                          color: Colors.white,
+                          fontSize: 15,
+                          fontWeight: FontWeight.w700,
+                        ),
                       ),
                     ),
                   ],

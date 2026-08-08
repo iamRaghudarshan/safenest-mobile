@@ -70,9 +70,22 @@ class Pill extends StatelessWidget {
           Icon(icon, size: 12, color: fg),
           const SizedBox(width: 5),
         ],
-        Text(label,
-            style: TextStyle(
-                color: fg, fontSize: 12, fontWeight: FontWeight.w700, height: 1.2)),
+        // Flexible, for the same reason BrandButton's label is: a bare Text in
+        // a Row takes its natural width and OVERFLOWS rather than shrinking.
+        // A pill is usually short, so this rarely shows — which is exactly why
+        // it went unnoticed until one said "20431 could not be sent" and ran 19
+        // pixels off an iPhone SE. One widget, so it was one bug everywhere a
+        // pill is used.
+        Flexible(
+          child: Text(label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                  color: fg,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  height: 1.2)),
+        ),
       ]),
     );
   }

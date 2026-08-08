@@ -30,6 +30,11 @@ import 'package:provider/provider.dart';
 
 import '../api.dart';
 import '../session.dart';
+import '../masters.dart';
+import '../theme.dart';
+import '../widgets/brand_button.dart';
+import '../widgets/pill.dart';
+import '../widgets/skeleton.dart';
 
 class DocumentsScreen extends StatefulWidget {
   const DocumentsScreen({super.key});
@@ -46,6 +51,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
   String? _error;
   final _search = TextEditingController();
 
+  /// Fallback only. The real list comes from /api/masters — see _catLabel.
   static const _categories = <String, String>{
     'all': 'All',
     'id': 'ID',
@@ -57,10 +63,70 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
     'other': 'Other',
   };
 
+  /// The user's own document categories, with their emoji.
+  List<MasterItem> _masters = const [];
+
+  Future<void> _loadCategories() async {
+    try {
+      final list = await context
+          .read<Session>()
+          .masters
+          .load('document_category');
+      if (mounted) setState(() => _masters = list);
+    } catch (_) {
+      // The fallback above covers it — a lookup failing must not cost somebody
+      // the ability to see their documents.
+    }
+  }
+
+  /// One filter chip, in the app's own pill shape rather than Material's.
+  Widget _catChip(String key, String label, String? emoji) {
+    final on = _category == key;
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.only(right: 8),
+      child: Material(
+        color: on ? kModuleColours['documents'] : theme.colorScheme.surface,
+        borderRadius: BorderRadius.circular(999),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(999),
+          onTap: () {
+            setState(() => _category = key);
+            _load();
+          },
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(999),
+              border: Border.all(
+                  color: on
+                      ? kModuleColours['documents']!
+                      : theme.colorScheme.outlineVariant,
+                  width: 1.5),
+            ),
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              if (emoji != null) ...[
+                Text(emoji, style: const TextStyle(fontSize: 13)),
+                const SizedBox(width: 6),
+              ],
+              Text(label,
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: on ? Colors.white : theme.colorScheme.onSurfaceVariant,
+                  )),
+            ]),
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   void initState() {
     super.initState();
     _load();
+    _loadCategories();
   }
 
   @override
@@ -203,29 +269,26 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
             ),
           ),
           SizedBox(
-            height: 52,
+            height: 54,
             child: ListView(
               scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              padding: const EdgeInsets.fromLTRB(14, 6, 14, 8),
               children: [
-                for (final e in _categories.entries)
-                  Padding(
-                    padding: const EdgeInsets.only(right: 8),
-                    child: ChoiceChip(
-                      label: Text(e.value),
-                      selected: _category == e.key,
-                      onSelected: (_) {
-                        setState(() => _category = e.key);
-                        _load();
-                      },
-                    ),
-                  ),
+                // "All" is not a category the server knows — it is the absence
+                // of a filter, so it is not in the master list and is added here.
+                _catChip('all', 'All', null),
+                for (final m in _masters) _catChip(m.key, m.label, m.emoji),
+                // Only while the list is still loading, so the row is never
+                // empty and never jumps in width once it arrives.
+                if (_masters.isEmpty)
+                  for (final e in _categories.entries)
+                    if (e.key != 'all') _catChip(e.key, e.value, null),
               ],
             ),
           ),
           Expanded(
             child: _loading
-                ? const Center(child: CircularProgressIndicator())
+                ? const SkeletonList()
                 : _error != null
                     ? Center(
                         child: Padding(
@@ -313,20 +376,67 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
         },
       );
 
-  Widget _listView() => ListView.separated(
+  Widget _listView() => ListView.builder(
+        padding: const EdgeInsets.fromLTRB(14, 4, 14, 90),
         itemCount: _docs.length,
-        separatorBuilder: (_, i) => const Divider(height: 1),
         itemBuilder: (ctx, i) {
           final d = _docs[i];
-          return ListTile(
-            leading: Icon(_icon(d), size: 30),
-            title: Text('${d['title'] ?? 'Document'}',
-                maxLines: 1, overflow: TextOverflow.ellipsis),
-            subtitle: Text(_meta(d)),
-            trailing: (d['is_favourite'] ?? 0) == 1
-                ? const Icon(Icons.star, size: 18, color: Colors.amber)
-                : null,
-            onTap: () => _open(d),
+          final tint = _tint(d);
+          final cat = '${d['category'] ?? ''}';
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: BrandCard(
+              onTap: () => _open(d),
+              padding: const EdgeInsets.fromLTRB(14, 12, 12, 12),
+              child: Row(children: [
+                // A PDF and a photo are different things to open, so they are
+                // different colours. A column of identical grey file glyphs
+                // makes you read every filename to find anything.
+                Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    color: tint,
+                    borderRadius: BorderRadius.circular(13),
+                    boxShadow: [
+                      BoxShadow(
+                        color: tint.withValues(alpha: 0.30),
+                        blurRadius: 10,
+                        offset: const Offset(0, 4),
+                      ),
+                    ],
+                  ),
+                  child: Icon(_icon(d), size: 21, color: Colors.white),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('${d['title'] ?? 'Document'}',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                                fontSize: 15, fontWeight: FontWeight.w700)),
+                        const SizedBox(height: 2),
+                        Text(_meta(d),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: Theme.of(ctx).textTheme.bodySmall),
+                        if (cat.isNotEmpty && cat != 'other') ...[
+                          const SizedBox(height: 7),
+                          Pill(_catLabel(cat), colour: tint),
+                        ],
+                      ]),
+                ),
+                if ((d['is_favourite'] ?? 0) == 1)
+                  const Padding(
+                    padding: EdgeInsets.only(left: 6),
+                    child: Icon(Icons.star, size: 18, color: kWarn),
+                  ),
+              ]),
+            ),
           );
         },
       );
@@ -335,6 +445,29 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
     if (d['is_pdf'] == true) return Icons.picture_as_pdf_outlined;
     if (d['is_image'] == true) return Icons.image_outlined;
     return Icons.insert_drive_file_outlined;
+  }
+
+  /// Colour by what the file IS, not by its category — that is what decides how
+  /// it opens, and it is the thing being scanned for.
+  Color _tint(Map<String, dynamic> d) {
+    if (d['is_pdf'] == true) return kDanger;
+    if (d['is_image'] == true) return kModuleColours['gallery']!;
+    return kModuleColours['documents']!;
+  }
+
+  /// The category's own label, from the user's list — with its emoji.
+  ///
+  /// `_categories` below is a hardcoded eight and stays only as the fallback
+  /// for a category not in the list. The web app's Documents screen reads
+  /// /api/masters?type=document_category, so a renamed or added category
+  /// appeared there and never here.
+  String _catLabel(String key) {
+    for (final m in _masters) {
+      if (m.key == key) {
+        return m.emoji == null ? m.label : '${m.emoji} ${m.label}';
+      }
+    }
+    return _categories[key] ?? key;
   }
 
   String _meta(Map<String, dynamic> d) {
