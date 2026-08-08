@@ -1,4 +1,4 @@
-/// Photograph a document and file it — the thing a phone is genuinely better at.
+﻿/// Photograph a document and file it — the thing a phone is genuinely better at.
 ///
 /// WHY THE PLATFORM'S OWN SCANNER AND NOT OUR OWN
 /// The web app carries a 642-line scanner: live camera, real-time page
@@ -31,6 +31,7 @@ import 'package:provider/provider.dart';
 
 import '../api.dart';
 import '../masters.dart';
+import '../dates.dart';
 import '../session.dart';
 import '../theme.dart';
 import '../widgets/brand_button.dart';
@@ -263,7 +264,9 @@ class _ScanScreenState extends State<ScanScreen> {
                       style: TextStyle(fontSize: 14)),
                   subtitle: Text(_expiry == null
                       ? 'Set one and SafeNest reminds you before it lapses'
-                      : '${_expiry!.day}/${_expiry!.month}/${_expiry!.year}'),
+                      // Was "8/8/2026" — unpadded, and the only place in the
+                      // app using slashes.
+                      : fmtDate(_expiry)),
                   trailing: const Icon(Icons.event_outlined, size: 18),
                   onTap: () async {
                     final now = DateTime.now();
@@ -455,3 +458,4 @@ class _Waiting extends StatelessWidget {
         )
       ]);
 }
+

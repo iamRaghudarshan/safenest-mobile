@@ -191,9 +191,33 @@ class _StorageScreenState extends State<StorageScreen> {
           const SizedBox(height: 2),
           Text('$files file${files == 1 ? '' : 's'}',
               style: const TextStyle(color: Colors.white70, fontSize: 13)),
+          // The reassuring number, when the server offers it. Percentages below
+          // are shares of THIS total, not of the drive, and without the free
+          // space somewhere on screen a "100%" invites exactly the wrong
+          // conclusion.
+          if ((((_location?['free_bytes']) ?? 0) as int) > 0) ...[
+            const SizedBox(height: 8),
+            Text(
+                '${formatBytes((_location!['free_bytes']) as int)} still free '
+                'where these are kept',
+                style: const TextStyle(color: Colors.white70, fontSize: 12)),
+          ],
         ]),
       ),
     );
+  }
+
+  /// How many kinds of thing actually have anything in them.
+  ///
+  /// A share is only worth showing when there is something to share WITH. With
+  /// photos as the only stored thing the bar sat at 100%, which is true and
+  /// reads as "your disk is full" — the one meaning it does not have. It is a
+  /// share of your own records, not of the drive.
+  int get _kindsWithData {
+    final mods = ((_storage?['mine'] as Map?)?['modules'] as Map?) ?? {};
+    return mods.values
+        .where((m) => (((m as Map)['bytes'] ?? 0) as int) > 0)
+        .length;
   }
 
   Widget _moduleRow(String key, int bytes, int files, int total) {
@@ -239,7 +263,15 @@ class _StorageScreenState extends State<StorageScreen> {
           ),
         ),
         const SizedBox(height: 4),
-        Text('$files file${files == 1 ? '' : 's'} · ${(share * 100).round()}%',
+        Text(
+            // "45% of your records" — never a bare percentage. And when this is
+            // the only thing stored, say so in words: "100%" of a single
+            // category is arithmetic, not information, and it frightens people
+            // into thinking their drive is full.
+            _kindsWithData <= 1
+                ? '$files file${files == 1 ? '' : 's'} · all of your records'
+                : '$files file${files == 1 ? '' : 's'} · '
+                    '${(share * 100).round()}% of your records',
             style: Theme.of(context).textTheme.labelSmall),
       ]),
     );

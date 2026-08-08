@@ -14,6 +14,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../api.dart';
+import '../dates.dart';
 import '../session.dart';
 import '../theme.dart';
 import '../widgets/brand_button.dart';
@@ -84,19 +85,53 @@ class _ActivityScreenState extends State<ActivityScreen> {
     return (colour: kWarn, icon: Icons.edit_outlined);
   }
 
-  /// "2h ago", not the raw column. A log is read to answer "when", and an ISO
-  /// timestamp makes the person do the arithmetic themselves.
-  String _when(dynamic raw) {
-    final t = DateTime.tryParse('${raw ?? ''}');
-    if (t == null) return '${raw ?? ''}';
-    final d = DateTime.now().difference(t);
-    if (d.inMinutes < 1) return 'Just now';
-    if (d.inMinutes < 60) return '${d.inMinutes}m ago';
-    if (d.inHours < 24) return '${d.inHours}h ago';
-    if (d.inDays == 1) return 'Yesterday';
-    if (d.inDays < 7) return '${d.inDays}d ago';
-    return '${t.day.toString().padLeft(2, '0')}-'
-        '${t.month.toString().padLeft(2, '0')}-${t.year}';
+  /// BOTH: "2h ago" and the exact moment it happened.
+  ///
+  /// It used to be the relative form alone, which answers "was that recent"
+  /// and nothing else. The moment you need to tell somebody WHEN a record
+  /// changed — or check it against a bank statement, which is most of why this
+  /// log exists — "2h ago" is useless, and it gets worse every hour it sits
+  /// there. The relative reading is still first because it is what the eye
+  /// wants when scanning; the date and time sit under it.
+  DateTime? _at(Map<String, dynamic> r) =>
+      parseDate('${r['created_at'] ?? r['at'] ?? ''}');
+
+  /// Which part of the app an entry belongs to, in words a person uses.
+  ///
+  /// The server names the THING — 'photo', 'gallery', 'card' — and the modules
+  /// are named for the drawer they live in. `entity_label` is preferred when
+  /// the server sent one, because it already knows the difference between a
+  /// photo and a policy better than a lookup table here does.
+  static const _moduleNames = <String, String>{
+    'photo': 'Photos',
+    'gallery': 'Photos',
+    'album': 'Photos',
+    'person': 'Photos',
+    'document': 'Documents',
+    'vault': 'Vault',
+    'card': 'Cards',
+    'loan': 'Loans',
+    'expense': 'Expenses',
+    'insurance': 'Insurance',
+    'investment': 'Investments',
+    'reminder': 'Reminders',
+    'todo': 'To-dos',
+    'user': 'Account',
+    'licence': 'Licences',
+    'license': 'Licences',
+    'master': 'Lists',
+    'branding': 'Settings',
+    'system': 'System',
+  };
+
+  String _moduleName(Map<String, dynamic> r) {
+    final e = '${r['entity'] ?? ''}'.toLowerCase().trim();
+    if (e.isEmpty) return '';
+    final known = _moduleNames[e];
+    if (known != null) return known;
+    final given = '${r['entity_label'] ?? ''}'.trim();
+    if (given.isNotEmpty) return given;
+    return e[0].toUpperCase() + e.substring(1);
   }
 
   /// "card_paid" -> "Card paid".
@@ -123,9 +158,21 @@ class _ActivityScreenState extends State<ActivityScreen> {
                         itemBuilder: (ctx, i) {
                           final r = _rows[i];
                           final action = '${r['action'] ?? ''}';
-                          final label = '${r['label'] ?? r['entity'] ?? ''}';
+                          final label = '${r['label'] ?? ''}';
                           final k = _kind(action);
-                          final when = _when(r['created_at'] ?? r['at']);
+                          final at = _at(r);
+                          // The server writes a proper sentence — "Moved to
+                          // trash" — and this screen was deriving "Trash" from
+                          // the raw action column instead, ignoring it.
+                          final verb = '${r['verb'] ?? ''}'.trim().isEmpty
+                              ? _phrase(action)
+                              : '${r['verb']}';
+                          // WHICH MODULE. Without it a log of forty rows reads
+                          // as a list of verbs: "Updated", "Deleted",
+                          // "Updated" — with no way to tell a card from a photo
+                          // from an insurance policy.
+                          final module = _moduleName(r);
+                          final who = '${r['by'] ?? ''}'.trim();
 
                           return Padding(
                             padding: const EdgeInsets.only(bottom: 10),
@@ -148,12 +195,45 @@ class _ActivityScreenState extends State<ActivityScreen> {
                                       crossAxisAlignment:
                                           CrossAxisAlignment.start,
                                       children: [
-                                        Text(_phrase(action),
-                                            maxLines: 1,
-                                            overflow: TextOverflow.ellipsis,
-                                            style: const TextStyle(
-                                                fontSize: 14.5,
-                                                fontWeight: FontWeight.w700)),
+                                        Row(children: [
+                                          // The module, first and tinted in its
+                                          // own colour, so a log scanned
+                                          // quickly reads as "Photos … Cards …
+                                          // Reminders" rather than as a column
+                                          // of identical verbs.
+                                          if (module.isNotEmpty) ...[
+                                            Container(
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                      horizontal: 6,
+                                                      vertical: 2),
+                                              decoration: BoxDecoration(
+                                                color: k.colour
+                                                    .withValues(alpha: 0.15),
+                                                borderRadius:
+                                                    BorderRadius.circular(6),
+                                              ),
+                                              child: Text(module,
+                                                  style: TextStyle(
+                                                      fontSize: 10.5,
+                                                      fontWeight:
+                                                          FontWeight.w800,
+                                                      color: k.colour)),
+                                            ),
+                                            const SizedBox(width: 6),
+                                          ],
+                                          // Flexible, or a long verb beside the
+                                          // chip overflows the row.
+                                          Flexible(
+                                            child: Text(verb,
+                                                maxLines: 1,
+                                                overflow: TextOverflow.ellipsis,
+                                                style: const TextStyle(
+                                                    fontSize: 14.5,
+                                                    fontWeight:
+                                                        FontWeight.w700)),
+                                          ),
+                                        ]),
                                         if (label.isNotEmpty) ...[
                                           const SizedBox(height: 2),
                                           Text(label,
@@ -163,10 +243,23 @@ class _ActivityScreenState extends State<ActivityScreen> {
                                                   .textTheme
                                                   .bodySmall),
                                         ],
+                                        const SizedBox(height: 3),
+                                        // The exact moment, always — and who
+                                        // did it, which matters the instant a
+                                        // household has more than one sign-in.
+                                        Text(
+                                            who.isEmpty
+                                                ? fmtDateTime(at)
+                                                : '${fmtDateTime(at)} · $who',
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: Theme.of(ctx)
+                                                .textTheme
+                                                .labelSmall),
                                       ]),
                                 ),
                                 const SizedBox(width: 8),
-                                Pill(when, tone: PillTone.muted),
+                                Pill(relative(at), tone: PillTone.muted),
                               ]),
                             ),
                           );

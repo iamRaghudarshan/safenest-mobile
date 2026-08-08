@@ -1,4 +1,4 @@
-/// The full-screen photo, the way Google Photos does it.
+﻿/// The full-screen photo, the way Google Photos does it.
 ///
 /// This was the most-felt absence in the grid: tapping a photo did nothing at
 /// all, which reads as the app being broken rather than unfinished.
@@ -16,7 +16,6 @@
 library;
 
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 import 'package:photo_view/photo_view.dart';
 import 'package:photo_view/photo_view_gallery.dart';
 import 'package:provider/provider.dart';
@@ -25,6 +24,7 @@ import '../api.dart';
 import '../sharing.dart';
 import '../widgets/pill.dart';
 import '../theme.dart';
+import '../dates.dart';
 import '../session.dart';
 import 'gallery_screen.dart';
 
@@ -172,9 +172,7 @@ class _PhotoViewerState extends State<PhotoViewer> {
               foregroundColor: Colors.white,
               elevation: 0,
               title: Text(
-                p.takenAt == null
-                    ? ''
-                    : DateFormat('d MMMM y').format(p.takenAt!),
+                fmtDate(p.takenAt),
                 style: const TextStyle(fontSize: 15),
               ),
             )
@@ -314,8 +312,7 @@ class _InfoSheet extends StatelessWidget {
     final where = _coord(d['lat'], d['lon']);
     final rows = <List<String>>[
       if (d['orig_name'] != null) ['Name', '${d['orig_name']}'],
-      if (photo.takenAt != null)
-        ['Taken', DateFormat('d MMMM y').format(photo.takenAt!)],
+      if (photo.takenAt != null) ['Taken', fmtDate(photo.takenAt)],
       if (d['width'] != null && d['height'] != null)
         [
           'Dimensions',
@@ -326,12 +323,10 @@ class _InfoSheet extends StatelessWidget {
       if (d['camera'] != null) ['Camera', '${d['camera']}'],
       if (d['lens'] != null) ['Lens', '${d['lens']}'],
       if (where.isNotEmpty) ['Where', where],
+      // Date AND time: "when did this reach my computer" is a question about a
+      // moment, and it is usually asked right after a backup run.
       if (d['uploaded_at'] != null)
-        [
-          'Backed up',
-          DateFormat('d MMMM y')
-              .format(DateTime.tryParse('${d['uploaded_at']}') ?? DateTime.now())
-        ],
+        ['Backed up', fmtDateTime(parseDate('${d['uploaded_at']}'))],
     ];
 
     return ListView(
@@ -391,3 +386,5 @@ class _InfoSheet extends StatelessWidget {
     );
   }
 }
+
+

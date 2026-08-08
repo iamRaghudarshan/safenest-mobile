@@ -1,4 +1,4 @@
-/// Documents, shaped like Google Drive.
+﻿/// Documents, shaped like Google Drive.
 ///
 /// WHAT A PHONE IS ACTUALLY BETTER AT
 /// Photographing a bill and having it filed. The computer is better for reading
@@ -23,12 +23,12 @@ import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 import 'package:open_filex/open_filex.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
 
 import '../api.dart';
+import '../dates.dart';
 import '../session.dart';
 import '../sharing.dart';
 import 'scan_screen.dart';
@@ -544,7 +544,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
           : '${(size / 1048576).toStringAsFixed(1)} MB');
     }
     final made = DateTime.tryParse('${d['created_at'] ?? ''}');
-    if (made != null) bits.add(DateFormat('d MMM y').format(made));
+    if (made != null) bits.add(fmtDate(made));
     // An expiry that has passed, or is close, is the single most useful thing
     // to know about a document — so it wins the line if it is there.
     final status = d['expiry_status'];
@@ -555,3 +555,5 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
     return bits.join(' · ');
   }
 }
+
+

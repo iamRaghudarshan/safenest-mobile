@@ -1,4 +1,4 @@
-/// One list and one sheet, for all seven record modules.
+﻿/// One list and one sheet, for all seven record modules.
 ///
 /// WHAT WAS MISSING, and it was most of the screen: you could add a record and
 /// long-press to delete one, and that was all. There was no way to EDIT
@@ -19,6 +19,7 @@ import 'package:provider/provider.dart';
 
 import '../api.dart';
 import '../modules.dart';
+import '../dates.dart';
 import '../session.dart';
 import '../theme.dart';
 import '../widgets/brand_button.dart';
@@ -564,7 +565,7 @@ class _RecordSheetState extends State<_RecordSheet> {
           _values[f.key] = current == 1 || current == true;
         case FieldKind.date:
           _values[f.key] = current?.toString() ??
-              (f.required ? DateFormat('yyyy-MM-dd').format(DateTime.now()) : null);
+              (f.required ? wireDate(DateTime.now()) : null);
         case FieldKind.time:
           // Never defaulted, even on a required-looking field. A time nobody
           // chose is an alarm nobody asked for, and it would go off.
@@ -807,7 +808,11 @@ class _RecordSheetState extends State<_RecordSheet> {
               borderRadius: BorderRadius.circular(13),
               side: BorderSide(color: Theme.of(context).dividerColor)),
           title: Text(f.label, style: const TextStyle(fontSize: 14)),
-          subtitle: Text(v ?? 'Not set'),
+          // Shown as dd-mm-yyyy; STORED as yyyy-MM-dd below. The field used to
+          // print its own wire value, so a form asked people to read the date
+          // in the database's spelling rather than their own.
+          subtitle: Text(
+              (v ?? '').isEmpty ? 'Not set' : (fmtDate(parseDate(v)) ) ),
           trailing: const Icon(Icons.calendar_today, size: 18),
           onTap: () async {
             final picked = await showDatePicker(
@@ -817,8 +822,9 @@ class _RecordSheetState extends State<_RecordSheet> {
               lastDate: DateTime(2100),
             );
             if (picked != null) {
-              setState(() =>
-                  _values[f.key] = DateFormat('yyyy-MM-dd').format(picked));
+              // wireDate, not the display format. Sending dd-mm-yyyy here is
+              // how a date reaches the database meaning a different day.
+              setState(() => _values[f.key] = wireDate(picked));
             }
           },
         );
@@ -977,3 +983,4 @@ class _LoadError extends StatelessWidget {
     ]);
   }
 }
+
