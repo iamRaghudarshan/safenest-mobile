@@ -22,6 +22,8 @@ import 'package:photo_view/photo_view_gallery.dart';
 import 'package:provider/provider.dart';
 
 import '../api.dart';
+import '../widgets/pill.dart';
+import '../theme.dart';
 import '../session.dart';
 import 'gallery_screen.dart';
 
@@ -242,6 +244,16 @@ class _Action extends StatelessWidget {
   }
 }
 
+/// What the server knows about one photo.
+///
+/// THE BUG THIS REPLACES: /api/gallery/{id}/info answers
+/// `{photo: {...}, albums: [...], people: [...]}`, and this read `d['width']`,
+/// `d['orig_name']` and the rest straight off the TOP level — one level above
+/// where they live. Every lookup returned null, so `rows` was always empty and
+/// every photo in the app reported "Nothing recorded for this photo."
+///
+/// It also threw away the two things the endpoint returns that nothing else in
+/// the app can tell you: which albums a photo is in, and who is in it.
 class _InfoSheet extends StatelessWidget {
   const _InfoSheet({required this.detail, required this.photo});
   final Map<String, dynamic>? detail;
@@ -254,29 +266,56 @@ class _InfoSheet extends StatelessWidget {
     return '${(n / 1048576).toStringAsFixed(1)} MB';
   }
 
+  String _coord(dynamic lat, dynamic lon) {
+    final a = lat is num ? lat.toDouble() : double.tryParse('${lat ?? ''}');
+    final o = lon is num ? lon.toDouble() : double.tryParse('${lon ?? ''}');
+    if (a == null || o == null) return '';
+    final ns = a >= 0 ? 'N' : 'S';
+    final ew = o >= 0 ? 'E' : 'W';
+    return '${a.abs().toStringAsFixed(4)}° $ns, ${o.abs().toStringAsFixed(4)}° $ew';
+  }
+
   @override
   Widget build(BuildContext context) {
-    final d = detail ?? const <String, dynamic>{};
+    final theme = Theme.of(context);
+    final root = detail ?? const <String, dynamic>{};
+
+    // The photo's own fields are NESTED. Falling back to the root keeps this
+    // working if the endpoint is ever flattened.
+    final d = root['photo'] is Map
+        ? Map<String, dynamic>.from(root['photo'] as Map)
+        : root;
+    final albums = (root['albums'] as List?) ?? const [];
+    final people = (root['people'] as List?) ?? const [];
+
+    final where = _coord(d['lat'], d['lon']);
     final rows = <List<String>>[
       if (d['orig_name'] != null) ['Name', '${d['orig_name']}'],
       if (photo.takenAt != null)
         ['Taken', DateFormat('d MMMM y').format(photo.takenAt!)],
       if (d['width'] != null && d['height'] != null)
         [
-          'Size',
+          'Dimensions',
           '${d['width']} × ${d['height']}'
               '${d['megapixels'] != null ? '  (${d['megapixels']} MP)' : ''}'
         ],
       if (_size(d['size_bytes']).isNotEmpty) ['On disk', _size(d['size_bytes'])],
       if (d['camera'] != null) ['Camera', '${d['camera']}'],
       if (d['lens'] != null) ['Lens', '${d['lens']}'],
+      if (where.isNotEmpty) ['Where', where],
+      if (d['uploaded_at'] != null)
+        [
+          'Backed up',
+          DateFormat('d MMMM y')
+              .format(DateTime.tryParse('${d['uploaded_at']}') ?? DateTime.now())
+        ],
     ];
 
     return ListView(
       shrinkWrap: true,
       padding: const EdgeInsets.fromLTRB(20, 0, 20, 28),
       children: [
-        Text('Details', style: Theme.of(context).textTheme.titleMedium),
+        Text('Details', style: theme.textTheme.titleMedium),
         const SizedBox(height: 12),
         if (rows.isEmpty)
           const Text('Nothing recorded for this photo.')
@@ -289,16 +328,41 @@ class _InfoSheet extends StatelessWidget {
                 children: [
                   SizedBox(
                       width: 96,
-                      child: Text(r[0],
-                          style: Theme.of(context).textTheme.bodySmall)),
+                      child: Text(r[0], style: theme.textTheme.bodySmall)),
                   Expanded(child: Text(r[1])),
                 ],
               ),
             ),
-        const SizedBox(height: 14),
+
+        // Which albums it is in — nothing else in the app can answer this, and
+        // it is how you find out you already filed a photo somewhere.
+        if (albums.isNotEmpty) ...[
+          const SizedBox(height: 16),
+          Text('In albums', style: theme.textTheme.bodySmall),
+          const SizedBox(height: 8),
+          Wrap(spacing: 6, runSpacing: 6, children: [
+            for (final a in albums)
+              Pill('${(a as Map)['name'] ?? 'Album'}',
+                  colour: kModuleColours['gallery'],
+                  icon: Icons.photo_album_outlined),
+          ]),
+        ],
+
+        if (people.isNotEmpty) ...[
+          const SizedBox(height: 16),
+          Text('People', style: theme.textTheme.bodySmall),
+          const SizedBox(height: 8),
+          Wrap(spacing: 6, runSpacing: 6, children: [
+            for (final pr in people)
+              Pill('${(pr as Map)['name'] ?? 'Someone'}',
+                  colour: kBrand, icon: Icons.person_outline),
+          ]),
+        ],
+
+        const SizedBox(height: 16),
         Text(
           'This photo is stored on your own computer.',
-          style: Theme.of(context).textTheme.bodySmall,
+          style: theme.textTheme.bodySmall,
         ),
       ],
     );

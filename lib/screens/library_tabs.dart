@@ -18,6 +18,8 @@ import 'package:provider/provider.dart';
 
 import '../api.dart';
 import '../session.dart';
+import '../widgets/brand_button.dart';
+import '../widgets/photo_tile.dart';
 import 'gallery_screen.dart';
 import 'photo_viewer.dart';
 
@@ -97,9 +99,14 @@ class _AlbumsTabState extends State<AlbumsTab> {
             onTap: () => Navigator.of(ctx).push(MaterialPageRoute(
               builder: (_) => CollectionScreen(
                 title: '${a['name'] ?? 'Album'}',
-                path: '/api/gallery/albums/${a['id']}',
+                // /api/gallery/albums/{id} answers {id, name, count} and NO
+                // photos — so this screen fetched an album and rendered an
+                // empty grid. The photos come from the main index with an
+                // album filter, which is what the web app uses too.
+                path: '/api/gallery?album=${a['id']}',
+                albumId: a['id'] as int?,
               ),
-            )),
+            )).then((_) => _load()),
           );
         },
       ),
@@ -300,9 +307,22 @@ class _MemoriesTabState extends State<MemoriesTab> {
 
 /// The photos of one album or one person. Same grid, different source.
 class CollectionScreen extends StatefulWidget {
-  const CollectionScreen({super.key, required this.title, required this.path});
+  const CollectionScreen(
+      {super.key,
+      required this.title,
+      required this.path,
+      this.albumId,
+      this.initialPhotos});
   final String title;
   final String path;
+
+  /// Set when this IS an album, which unlocks managing it: rename, delete, and
+  /// taking photos back out. A person's photos are a computed collection and
+  /// have none of those — you cannot rename a face.
+  final int? albumId;
+
+  /// For tests — lay the screen out without a server.
+  final List<Photo>? initialPhotos;
 
   @override
   State<CollectionScreen> createState() => _CollectionScreenState();
@@ -312,11 +332,118 @@ class _CollectionScreenState extends State<CollectionScreen> {
   List<Photo> _photos = [];
   bool _loading = true;
   String? _error;
+  bool _busy = false;
+
+  /// Selecting inside an album, so photos can be taken back OUT of it. The
+  /// endpoint (/albums/{id}/remove) has always taken a batch and nothing here
+  /// could send one.
+  final Set<int> _selected = {};
+  bool get _selecting => _selected.isNotEmpty;
+  bool get _isAlbum => widget.albumId != null;
+
+  late String _title = widget.title;
 
   @override
   void initState() {
     super.initState();
+    if (widget.initialPhotos != null) {
+      _photos = widget.initialPhotos!;
+      _loading = false;
+      return;
+    }
     _load();
+  }
+
+  Future<void> _rename() async {
+    final c = TextEditingController(text: _title);
+    final name = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Rename album'),
+        content: TextField(
+          controller: c,
+          autofocus: true,
+          textCapitalization: TextCapitalization.sentences,
+          decoration: const InputDecoration(labelText: 'Name'),
+          onSubmitted: (v) => Navigator.pop(ctx, v.trim()),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, c.text.trim()),
+              child: const Text('Save')),
+        ],
+      ),
+    );
+    if (name == null || name.isEmpty || !mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await context
+          .read<Session>()
+          .api
+          .put('/api/gallery/albums/${widget.albumId}', {'name': name});
+      setState(() => _title = name);
+    } on ApiError catch (e) {
+      // 409 is the useful one: the server refuses a duplicate name, and saying
+      // so is better than the rename silently not happening.
+      messenger.showSnackBar(SnackBar(content: Text(e.message)));
+    }
+  }
+
+  Future<void> _deleteAlbum() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Delete "$_title"?'),
+        // Verified against the server: deleting an album leaves every photo
+        // exactly where it was. Saying so is what stops this reading as
+        // "delete these 214 photos".
+        content: const Text(
+            'The album goes; the photos stay in your gallery. Nothing is '
+            'deleted.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Keep')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Delete album')),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    final navigator = Navigator.of(context);
+    try {
+      await context
+          .read<Session>()
+          .api
+          .delete('/api/gallery/albums/${widget.albumId}');
+      navigator.pop(true);
+    } on ApiError catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text(e.message)));
+    }
+  }
+
+  Future<void> _removeSelected() async {
+    final ids = _selected.toList();
+    if (ids.isEmpty) return;
+    final messenger = ScaffoldMessenger.of(context);
+    setState(() => _busy = true);
+    try {
+      await context.read<Session>().api.post(
+          '/api/gallery/albums/${widget.albumId}/remove', {'photo_ids': ids});
+      _selected.clear();
+      await _load();
+      messenger.showSnackBar(SnackBar(
+          content: Text('Removed ${ids.length} from this album — '
+              'still in your gallery')));
+    } on ApiError catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text(e.message)));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   Future<void> _load() async {
@@ -348,7 +475,20 @@ class _CollectionScreenState extends State<CollectionScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text(widget.title),
+        title: Text(_title),
+        actions: [
+          // Only for an album. A person's photos are a computed collection —
+          // there is nothing to rename and nothing to take a photo out of.
+          if (_isAlbum && !_selecting)
+            PopupMenuButton<String>(
+              onSelected: (v) => v == 'rename' ? _rename() : _deleteAlbum(),
+              itemBuilder: (_) => const [
+                PopupMenuItem(value: 'rename', child: Text('Rename album')),
+                PopupMenuItem(
+                    value: 'delete', child: Text('Delete album')),
+              ],
+            ),
+        ],
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(18),
           child: Padding(
@@ -358,6 +498,45 @@ class _CollectionScreenState extends State<CollectionScreen> {
           ),
         ),
       ),
+      bottomNavigationBar: _selecting
+          ? SafeArea(
+              top: false,
+              child: Container(
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.surface,
+                  border: Border(
+                      top: BorderSide(
+                          color: Theme.of(context).colorScheme.outlineVariant)),
+                ),
+                padding: const EdgeInsets.fromLTRB(10, 6, 10, 6),
+                child: Column(mainAxisSize: MainAxisSize.min, children: [
+                  Row(children: [
+                    IconButton(
+                      tooltip: 'Cancel',
+                      onPressed: _busy ? null : () => setState(_selected.clear),
+                      icon: const Icon(Icons.close),
+                    ),
+                    Expanded(
+                      child: Text('${_selected.length} selected',
+                          style: const TextStyle(
+                              fontSize: 15, fontWeight: FontWeight.w700)),
+                    ),
+                  ]),
+                  if (_busy) const LinearProgressIndicator(minHeight: 2),
+                  const SizedBox(height: 4),
+                  // "Remove from album", never "Delete". Taking a photo out of
+                  // an album does not touch the photo, and the wording has to
+                  // make that obvious before the tap, not after it.
+                  BrandButton(
+                    label: 'Remove from this album',
+                    icon: Icons.playlist_remove,
+                    block: true,
+                    onPressed: _busy ? null : _removeSelected,
+                  ),
+                ]),
+              ),
+            )
+          : null,
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _error != null
@@ -376,23 +555,40 @@ class _CollectionScreenState extends State<CollectionScreen> {
                         crossAxisSpacing: 2,
                       ),
                       itemCount: _photos.length,
-                      itemBuilder: (ctx, i) => GestureDetector(
-                        onTap: () => Navigator.of(ctx).push(MaterialPageRoute(
-                          builder: (_) => PhotoViewer(
-                            photos: _photos,
-                            initialIndex: i,
-                            onChanged: _load,
-                          ),
-                        )),
-                        child: Image.network(
-                          _abs(ctx, _photos[i].thumbUrl),
-                          fit: BoxFit.cover,
-                          cacheWidth: 320,
-                          errorBuilder: (a, b, c) => ColoredBox(
-                              color: Theme.of(ctx)
-                                  .colorScheme
-                                  .surfaceContainerHighest),
-                        ),
+                      // PhotoTile rather than a bare Image: it already knows
+                      // how to be selected, caps its decode, and shows a
+                      // broken-image glyph instead of a grey square. Three
+                      // behaviours that were reimplemented worse here.
+                      itemBuilder: (ctx, i) => PhotoTile(
+                        photo: _photos[i],
+                        selecting: _selecting,
+                        selected: _selected.contains(_photos[i].id),
+                        onOpen: () {
+                          if (_selecting) {
+                            setState(() {
+                              if (!_selected.remove(_photos[i].id)) {
+                                _selected.add(_photos[i].id);
+                              }
+                            });
+                            return;
+                          }
+                          Navigator.of(ctx).push(MaterialPageRoute(
+                            builder: (_) => PhotoViewer(
+                              photos: _photos,
+                              initialIndex: i,
+                              onChanged: _load,
+                            ),
+                          ));
+                        },
+                        // Only an album can have photos taken out of it, so
+                        // only an album offers the long-press that starts it.
+                        onLongPress: _isAlbum
+                            ? () => setState(() {
+                                  if (!_selected.remove(_photos[i].id)) {
+                                    _selected.add(_photos[i].id);
+                                  }
+                                })
+                            : null,
                       ),
                     ),
     );

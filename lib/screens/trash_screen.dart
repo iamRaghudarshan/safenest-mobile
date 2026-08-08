@@ -99,6 +99,44 @@ class _TrashScreenState extends State<TrashScreen> {
     }
   }
 
+  /// Empty the whole bin in one call — /api/gallery/trash/empty exists for it,
+  /// and doing it photo by photo over a few thousand would be both slow and a
+  /// worse thing to interrupt halfway.
+  Future<void> _emptyAll() async {
+    final n = _photos.length;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Empty recently deleted?'),
+        content: Text(
+            'All $n ${n == 1 ? "photo" : "photos"} are removed from your '
+            'computer for good. This cannot be undone.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Keep')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Empty it',
+                  style: TextStyle(color: kDanger))),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    setState(() => _busy = true);
+    try {
+      await context.read<Session>().api.post('/api/gallery/trash/empty');
+      _selected.clear();
+      await _load();
+      messenger.showSnackBar(const SnackBar(content: Text('Emptied')));
+    } on ApiError catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text(e.message)));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   Future<void> _deleteForever() async {
     final n = _selected.length;
     final ok = await showDialog<bool>(
@@ -133,6 +171,11 @@ class _TrashScreenState extends State<TrashScreen> {
       appBar: AppBar(
         title: const Text('Recently deleted'),
         actions: [
+          if (_photos.isNotEmpty && !_selecting)
+            TextButton(
+              onPressed: _busy ? null : _emptyAll,
+              child: const Text('Empty', style: TextStyle(color: kDanger)),
+            ),
           if (_photos.isNotEmpty && !_selecting)
             TextButton(
               onPressed: _busy
