@@ -7,7 +7,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:provider/provider.dart';
+
 import 'package:safenest/modules.dart';
+import 'package:safenest/screens/gallery_screen.dart';
+import 'package:safenest/screens/photos_home.dart';
+import 'package:safenest/session.dart';
+import 'package:safenest/theme.dart';
 
 void main() {
   group('Gallery must be reachable — it vanished for admins for nine versions',
@@ -48,6 +54,60 @@ void main() {
       expect(moduleByKey('documents'), isNull);
       expect(moduleByKey('vault'), isNull);
       expect(moduleByKey('expenses'), isNotNull);
+    });
+  });
+
+  group('Gallery is not just reachable — the screen behind it works', () {
+    // Reachability was the bug. This is the other half of "is it done": the
+    // screen you now arrive at has to render, and its photos have to load.
+    testWidgets('PhotosHome lays out with all four views on an iPhone SE',
+        (tester) async {
+      tester.view.physicalSize = const Size(375, 667);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      await tester.pumpWidget(ChangeNotifierProvider<Session>(
+        create: (_) => Session(),
+        child: MaterialApp(
+          theme: buildTheme(const Brand(), Brightness.light),
+          home: const PhotosHome(),
+        ),
+      ));
+      await tester.pump();
+
+      expect(tester.takeException(), isNull);
+      for (final label in ['Photos', 'Albums', 'People', 'Memories']) {
+        expect(find.text(label), findsOneWidget);
+      }
+    });
+
+    test('a photo parses the signed URLs the server actually sends', () {
+      // Copied from a live /api/gallery response, signature and all.
+      final p = Photo.fromJson(const {
+        'id': 41,
+        'url': '/api/gallery/media/original/b9fb3444.jpg'
+            '?t=1786245088.4e941a1477056ea41c0e1564abd048b3',
+        'thumb_url': '/api/gallery/media/thumb/b9fb3444.jpg'
+            '?t=1786245088.905aacc4431bfe60ded3cf3201dbe1a1',
+        'taken_at': '2026-08-01T10:30:00',
+        'is_favourite': 1,
+      });
+      expect(p.id, 41);
+      expect(p.isFavourite, isTrue);
+      expect(p.takenAt, isNotNull);
+      // The signature must survive intact — rebuilding a media URL from the id
+      // would fetch nothing, because these are never statically served.
+      expect(p.thumbUrl, contains('?t='));
+      expect(p.thumbUrl, contains('/thumb/'));
+      expect(p.url, contains('/original/'));
+    });
+
+    test('is_favorite is accepted as well as is_favourite', () {
+      // Both spellings appear across this codebase; a star that silently never
+      // lights is the sort of thing nobody reports.
+      expect(Photo.fromJson(const {'id': 1, 'is_favorite': 1}).isFavourite, isTrue);
+      expect(Photo.fromJson(const {'id': 1, 'is_favourite': 1}).isFavourite, isTrue);
+      expect(Photo.fromJson(const {'id': 1}).isFavourite, isFalse);
     });
   });
 
