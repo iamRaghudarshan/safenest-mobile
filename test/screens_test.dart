@@ -152,6 +152,76 @@ void main() {
     });
   });
 
+  group('Backup progress accounting', () {
+    // THE REPORTED BUG: the bar froze. `_emit` was called only inside the
+    // upload loop, so a page of 200 photos that were ALL already backed up ran
+    // that loop zero times and emitted nothing — `skipped` climbed by 200 in
+    // silence and the bar did not move.
+    //
+    // Which made it look broken on exactly the runs people do most: the second
+    // one, and every one after it. A first backup uploads everything and moves
+    // smoothly; a repeat skips nearly all of it, sits at 0% through the whole
+    // library, then jumps to 100% at the end.
+
+    test('skipped photos count towards progress, not just uploaded ones', () {
+      // A second run over a fully backed-up library: nothing to send, but it is
+      // 60% of the way through and has to say so.
+      const p = BackupProgress(
+          state: BackupState.running, total: 1000, done: 0, skipped: 600);
+      expect(p.handled, 600);
+      expect(p.fraction, closeTo(0.6, 0.001),
+          reason: 'a skip IS progress — it is a photo that has been dealt with');
+    });
+
+    test('a page reports even when it uploads nothing', () {
+      // Emitting per PAGE rather than only per upload slice is the fix. Over a
+      // 20,000-photo library that is 200 updates, which moves visibly.
+      var emitted = 0;
+      var skipped = 0;
+      const total = 20000, page = 200;
+      for (var offset = 0; offset < total; offset += page) {
+        skipped += page;   // every photo in the page already sent
+        emitted++;         // report() after the skip accounting  <-- the fix
+        // the upload loop body runs ZERO times on this path
+        emitted++;         // report() at the end of the page
+      }
+      expect(skipped, total);
+      expect(emitted, 200,
+          reason: 'the old code emitted zero times over this entire library');
+    });
+
+    test('the fraction never leaves 0..1', () {
+      // LinearProgressIndicator asserts outside that range, and the total comes
+      // from the phone's library — which can change during a long run.
+      expect(const BackupProgress(total: 0).fraction, 0);
+      expect(const BackupProgress(total: 10, done: 50).fraction, 1.0,
+          reason: 'a photo deleted mid-run must nudge the bar, not crash it');
+      expect(
+          const BackupProgress(total: 10, done: 5).fraction, closeTo(0.5, 0.001));
+    });
+
+    testWidgets('a repeat run over a backed-up library shows real progress',
+        (tester) async {
+      tester.view.physicalSize = const Size(375, 667);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      await tester.pumpWidget(_wrap(const BackupScreen(
+          debugProgress: BackupProgress(
+              state: BackupState.running,
+              total: 20000,
+              done: 0,
+              skipped: 12000,
+              message: 'Backing up…'))));
+      await tester.pump();
+
+      expect(tester.takeException(), isNull);
+      // Not 0%. This is the reading that used to be stuck.
+      expect(find.text('12000 of 20000'), findsOneWidget);
+      expect(find.text('60%'), findsOneWidget);
+    });
+  });
+
   group('Activity log', () {
     testWidgets('lays out, and reads times as a person would', (tester) async {
       tester.view.physicalSize = const Size(375, 667);

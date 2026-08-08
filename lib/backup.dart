@@ -55,7 +55,13 @@ class BackupProgress {
   final String message;
 
   int get handled => done + skipped + failed;
-  double get fraction => total == 0 ? 0 : handled / total;
+
+  /// Clamped, because a LinearProgressIndicator asserts on a value outside
+  /// 0..1 and the count it is derived from comes from the phone's library —
+  /// which can change under a run that takes twenty minutes. A photo deleted
+  /// mid-backup would otherwise crash the screen rather than nudge the bar.
+  double get fraction =>
+      total == 0 ? 0 : (handled / total).clamp(0.0, 1.0).toDouble();
 }
 
 class BackupService extends ChangeNotifier {
@@ -155,11 +161,35 @@ class BackupService extends ChangeNotifier {
         total: count,
         message: 'Backing up $count photos'));
 
+    // Emitting the current counts. Hoisted out because it has to happen in
+    // THREE places, and only one of them used to do it.
+    void report() => _emit(BackupProgress(
+          state: BackupState.running,
+          total: count,
+          done: handledDone,
+          skipped: handledSkip,
+          failed: handledFail,
+          message: 'Backing up…',
+        ));
+
     for (var offset = 0; offset < count; offset += page) {
       if (_stop) break;
       final batch = await all.getAssetListRange(start: offset, end: offset + page);
       final todo = batch.where((a) => !_sent.contains(a.id)).toList();
       handledSkip += batch.length - todo.length;
+
+      // THE PROGRESS BAR FREEZING WAS THIS.
+      //
+      // The only report() used to be inside the upload loop below. A page whose
+      // photos are ALL already backed up has an empty `todo`, so that loop never
+      // runs and nothing was emitted — `skipped` climbed by 200 in silence and
+      // the bar did not move.
+      //
+      // Which means it looked broken on precisely the runs people do most: the
+      // second one, and every one after it. A first backup uploads everything
+      // and moves smoothly; a repeat backup skips nearly everything, sat at 0%
+      // through the whole library, then jumped to 100% at the end.
+      report();
 
       // Four at a time, matching what the server was measured to do best.
       for (var i = 0; i < todo.length; i += _concurrency) {
@@ -173,16 +203,10 @@ class BackupService extends ChangeNotifier {
             handledFail++;
           }
         }
-        _emit(BackupProgress(
-          state: BackupState.running,
-          total: count,
-          done: handledDone,
-          skipped: handledSkip,
-          failed: handledFail,
-          message: 'Backing up…',
-        ));
+        report();
       }
       await _flush();
+      report();
     }
 
     await _flush();
