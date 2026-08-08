@@ -25,6 +25,7 @@ import 'documents_screen.dart';
 import 'module_list_screen.dart';
 import 'modules_screen.dart';
 import 'photos_home.dart';
+import 'search_screen.dart';
 import 'vault_screen.dart';
 import 'profile_screen.dart';
 
@@ -146,6 +147,13 @@ class _HomeScreenState extends State<HomeScreen> {
       case 'vault':
         Navigator.of(context)
             .push(MaterialPageRoute(builder: (_) => const VaultScreen()));
+      case 'search':
+        // The Dashboard has had a search button since it was written and this
+        // switch had no case for it — no tab, no ModuleSpec, no branch — so it
+        // fell straight through and did NOTHING. The same shape as the Gallery
+        // tile: a control that is plainly there and silently inert.
+        Navigator.of(context).push(MaterialPageRoute(
+            builder: (_) => SearchScreen(onOpen: _open)));
     }
   }
 

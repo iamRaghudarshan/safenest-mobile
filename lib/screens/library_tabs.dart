@@ -18,6 +18,7 @@ import 'package:provider/provider.dart';
 
 import '../api.dart';
 import '../session.dart';
+import '../theme.dart';
 import '../widgets/brand_button.dart';
 import '../widgets/photo_tile.dart';
 import 'gallery_screen.dart';
@@ -133,6 +134,108 @@ class _PeopleTabState extends State<PeopleTab> {
     _load();
   }
 
+  /// A face the server has not been told a name for.
+  ///
+  /// It calls them "Person 3", "Person 12" and so on — a placeholder, not a
+  /// name. Treating those as named would bury the ones actually worth naming
+  /// among the ones already done.
+  bool _isUnnamed(Map<String, dynamic> p) {
+    final n = '${p['name'] ?? ''}'.trim();
+    return n.isEmpty || RegExp(r'^Person\s*\d+$', caseSensitive: false).hasMatch(n);
+  }
+
+  /// Name a face, or rename one. PUT /api/people/{id} has always taken this and
+  /// the phone had no way to send it — so every face stayed "Person 3" for ever
+  /// however many photos it appeared in.
+  Future<void> _name(Map<String, dynamic> p) async {
+    final unnamed = _isUnnamed(p);
+    final c = TextEditingController(text: unnamed ? '' : '${p['name']}');
+    final name = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(unnamed ? 'Who is this?' : 'Rename'),
+        content: TextField(
+          controller: c,
+          autofocus: true,
+          textCapitalization: TextCapitalization.words,
+          decoration: const InputDecoration(labelText: 'Name'),
+          onSubmitted: (v) => Navigator.pop(ctx, v.trim()),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, c.text.trim()),
+              child: const Text('Save')),
+        ],
+      ),
+    );
+    if (name == null || name.isEmpty || !mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await context
+          .read<Session>()
+          .api
+          .put('/api/people/${p['id']}', {'name': name});
+      await _load();
+    } on ApiError catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text(e.message)));
+    }
+  }
+
+  /// Long-press: name, or remove the grouping.
+  Future<void> _manage(Map<String, dynamic> p) async {
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          ListTile(
+            leading: const Icon(Icons.edit_outlined),
+            title: Text(_isUnnamed(p) ? 'Add a name' : 'Rename'),
+            onTap: () => Navigator.pop(ctx, 'name'),
+          ),
+          ListTile(
+            leading: const Icon(Icons.person_remove_outlined, color: kDanger),
+            title: const Text('Remove this person'),
+            // Says exactly what goes, because "remove person" beside a grid of
+            // faces reads as deleting their photographs.
+            subtitle: const Text('The grouping goes. The photos stay.'),
+            onTap: () => Navigator.pop(ctx, 'remove'),
+          ),
+        ]),
+      ),
+    );
+    if (choice == null || !mounted) return;
+    if (choice == 'name') return _name(p);
+
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Remove this person?'),
+        content: const Text(
+            'They stop being grouped as one person. Every photo they are in '
+            'stays exactly where it is.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Keep')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Remove')),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await context.read<Session>().api.delete('/api/people/${p['id']}');
+      await _load();
+    } on ApiError catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text(e.message)));
+    }
+  }
+
   Future<void> _load() async {
     setState(() => _loading = true);
     try {
@@ -166,30 +269,99 @@ class _PeopleTabState extends State<PeopleTab> {
             'after a big backup.',
       );
     }
+    // GOOGLE PHOTOS SHAPES A FACE AS A CIRCLE, and it is not decoration: a
+    // square crop of a face reads as a photograph of a person, a circle reads
+    // as a person. Four across rather than three, because the name matters more
+    // than the size of the crop.
+    //
+    // Unnamed faces come FIRST. The server names them "Person 3" and so on,
+    // which tells nobody anything — putting them at the top with "Add a name"
+    // is what turns face detection into something useful, and it is exactly
+    // what Google Photos does with them.
+    final named = _people.where((p) => !_isUnnamed(p)).toList();
+    final unnamed = _people.where(_isUnnamed).toList();
+    final ordered = [...unnamed, ...named];
+
     return RefreshIndicator(
       onRefresh: _load,
       child: GridView.builder(
-        padding: const EdgeInsets.all(12),
+        padding: const EdgeInsets.fromLTRB(14, 10, 14, 24),
         gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: 3,
-          crossAxisSpacing: 12,
-          mainAxisSpacing: 12,
-          childAspectRatio: 0.78,
+          crossAxisCount: 4,
+          crossAxisSpacing: 10,
+          mainAxisSpacing: 16,
+          childAspectRatio: 0.72,
         ),
-        itemCount: _people.length,
+        itemCount: ordered.length,
         itemBuilder: (ctx, i) {
-          final p = _people[i];
-          return _Cover(
-            title: '${p['name'] ?? 'Someone'}',
-            count: (p['count'] ?? 0) as int,
-            imageUrl: p['cover_url'] == null ? null : _abs(ctx, '${p['cover_url']}'),
-            square: true,
-            onTap: () => Navigator.of(ctx).push(MaterialPageRoute(
-              builder: (_) => CollectionScreen(
-                title: '${p['name'] ?? 'Someone'}',
-                path: '/api/people/${p['id']}/photos',
-              ),
-            )),
+          final p = ordered[i];
+          final unnamedOne = _isUnnamed(p);
+          final count = (p['count'] ?? 0) as int;
+          return GestureDetector(
+            // An unnamed face asks who it is; a named one opens their photos.
+            // Tapping "Add a name" and being shown a grid instead would be the
+            // one thing on this screen that ignores what it says.
+            onTap: () => unnamedOne
+                ? _name(p)
+                : Navigator.of(ctx)
+                    .push(MaterialPageRoute(
+                      builder: (_) => CollectionScreen(
+                        title: '${p['name'] ?? 'Someone'}',
+                        path: '/api/people/${p['id']}/photos',
+                      ),
+                    ))
+                    .then((_) => _load()),
+            onLongPress: () => _manage(p),
+            child: Column(children: [
+              Stack(children: [
+                Container(
+                  width: 72,
+                  height: 72,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: Theme.of(ctx).colorScheme.surfaceContainerHighest,
+                    border: Border.all(
+                        color: unnamedOne
+                            ? kBrand.withValues(alpha: 0.55)
+                            : Colors.transparent,
+                        width: 2),
+                  ),
+                  clipBehavior: Clip.antiAlias,
+                  child: p['cover_url'] == null
+                      ? Icon(Icons.person,
+                          color: Theme.of(ctx).colorScheme.outline)
+                      : Image.network(_abs(ctx, '${p['cover_url']}'),
+                          fit: BoxFit.cover,
+                          cacheWidth: 220,
+                          errorBuilder: (_, _, _) => Icon(Icons.person,
+                              color: Theme.of(ctx).colorScheme.outline)),
+                ),
+                if (unnamedOne)
+                  Positioned(
+                    right: 0,
+                    bottom: 0,
+                    child: Container(
+                      padding: const EdgeInsets.all(3),
+                      decoration: const BoxDecoration(
+                          color: kBrand, shape: BoxShape.circle),
+                      child: const Icon(Icons.add,
+                          size: 13, color: Colors.white),
+                    ),
+                  ),
+              ]),
+              const SizedBox(height: 6),
+              Text(
+                  unnamedOne ? 'Add a name' : '${p['name']}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w700,
+                      color: unnamedOne ? kBrand : null)),
+              Text('$count',
+                  style: Theme.of(ctx).textTheme.labelSmall),
+            ]),
           );
         },
       ),
