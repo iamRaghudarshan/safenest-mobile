@@ -26,23 +26,38 @@ import 'package:flutter/foundation.dart';
 
 import 'api.dart';
 
-/// Handed in at build time:
+/// Handed in at build time from firebase.env.
 ///
-///   flutter build apk --dart-define=FCM_PROJECT_ID=... \
-///                     --dart-define=FCM_APP_ID=... \
-///                     --dart-define=FCM_API_KEY=... \
-///                     --dart-define=FCM_SENDER_ID=...
+/// THE APP ID AND THE API KEY DIFFER PER PLATFORM; the project and sender do
+/// not. That is not a detail — Firebase issues one app id per registered app:
 ///
-/// All four come from the Firebase console. None is a secret in the sense the
-/// vault key is — they identify a project, they do not authorise sending; that
-/// is the service-account key, which stays on the owner's server.
+///     Android  1:527918334515:android:213378d0e5...
+///     iOS      1:527918334515:ios:3781144c604...
+///
+/// are two different apps inside one project. A single FCM_APP_ID — which is
+/// what this file had first — compiles the wrong one into one of the two
+/// builds, and Firebase rejects the registration with an error that names
+/// neither platform.
+///
+/// None of these is secret in the way the vault key is: they identify a
+/// project, they do not authorise sending. That is the service-account key,
+/// which never leaves the owner's server.
 const _projectId = String.fromEnvironment('FCM_PROJECT_ID');
-const _appId = String.fromEnvironment('FCM_APP_ID');
-const _apiKey = String.fromEnvironment('FCM_API_KEY');
 const _senderId = String.fromEnvironment('FCM_SENDER_ID');
+const _appIdAndroid = String.fromEnvironment('FCM_APP_ID_ANDROID');
+const _appIdIos = String.fromEnvironment('FCM_APP_ID_IOS');
+const _apiKeyAndroid = String.fromEnvironment('FCM_API_KEY_ANDROID');
+const _apiKeyIos = String.fromEnvironment('FCM_API_KEY_IOS');
 
+bool get _isIos => defaultTargetPlatform == TargetPlatform.iOS;
+String get _appId => _isIos ? _appIdIos : _appIdAndroid;
+String get _apiKey => _isIos ? _apiKeyIos : _apiKeyAndroid;
+
+/// True only when THIS platform's values are present. A build configured for
+/// Android alone must not try to start Firebase on an iPhone with an empty app
+/// id: it fails at initialize and logs a fault that reads like a bug.
 bool get pushCompiledIn =>
-    _projectId.isNotEmpty && _appId.isNotEmpty && _senderId.isNotEmpty;
+    _projectId.isNotEmpty && _senderId.isNotEmpty && _appId.isNotEmpty;
 
 class Push {
   Push._();
@@ -66,7 +81,8 @@ class Push {
 
     try {
       await Firebase.initializeApp(
-        options: const FirebaseOptions(
+        // Not const: the app id and key are chosen per platform above.
+        options: FirebaseOptions(
           apiKey: _apiKey,
           appId: _appId,
           messagingSenderId: _senderId,
