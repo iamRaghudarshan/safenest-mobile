@@ -106,7 +106,16 @@ jobs:
       - run: flutter test
 
       - name: Build the APK
-        run: flutter build apk --release --build-name=$(cat VERSION) --build-number=${{ github.run_number }}
+        # --dart-define-from-file, so the Firebase identifiers reach the
+        # build without being repeated here. They are not secrets: Google
+        # publishes them inside every shipped APK, and firebase.env says so at
+        # the top. The key that authorises SENDING is a service account on the
+        # owner's own server and is not in this repository.
+        run: |
+          flutter build apk --release \
+            --build-name=$(cat VERSION) \
+            --build-number=${{ github.run_number }} \
+            --dart-define-from-file=firebase.env
 
       - uses: actions/upload-artifact@v4
         with:
@@ -205,6 +214,7 @@ jobs:
           flutter build ipa --release \
             --build-name=$(cat VERSION) \
             --build-number=${{ github.run_number }} \
+            --dart-define-from-file=firebase.env \
             --export-options-plist=ios/ExportOptions.plist
 
       - name: Send it to TestFlight
