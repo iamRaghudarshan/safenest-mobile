@@ -119,6 +119,20 @@ class Session extends ChangeNotifier {
         // making them type their password again for that would be its own bug.
         if (e.status == 401) await signOut();
       }
+
+      // REGISTER FOR PUSH HERE TOO, not only in signIn().
+      //
+      // signIn() runs once, the first time somebody uses this phone. Every
+      // launch after that restores the saved session and never goes near it —
+      // so an existing user who UPDATED to a build with push would never
+      // register, and push would appear broken for exactly the people who
+      // already had the app. Which is everybody, after the first release.
+      //
+      // Safe to call repeatedly: Push.start() returns early once started, and
+      // the server upserts on the token rather than inserting.
+      if (signedIn) {
+        unawaited(Push.instance.start(api).catchError((_) => false));
+      }
     }
     _loading = false;
     notifyListeners();
