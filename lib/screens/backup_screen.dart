@@ -163,21 +163,40 @@ class _BackupScreenState extends State<BackupScreen> {
                   ),
                 ),
                 const SizedBox(height: 14),
+                // THE HEADLINE IS WHAT IS BEING UPLOADED, not the size of the
+                // library.
+                //
+                // It used to read "68 of 1048", which is arithmetically exact
+                // and says the wrong thing. 1048 is every photo on the phone —
+                // the number this run has to LOOK at — and almost all of them
+                // are usually skipped without a byte being sent. But it is also
+                // exactly the number somebody recognises as their whole
+                // library, so the screen read as "uploading all 1048 again",
+                // twice reported as a bug that was not there.
+                //
+                // Now the big number is the photos actually sent, and the
+                // library figure is demoted to the line that explains it. A
+                // repeat backup reads "0 uploaded / 900 of 1048 checked, 900
+                // already there", which is the truth and is reassuring instead
+                // of alarming.
                 Text(
                   p.state == BackupState.scanning
                       ? p.message
-                      : '${p.handled} of ${p.total}',
+                      : '${p.done} uploaded',
                   style: const TextStyle(
                       fontSize: 22,
                       fontWeight: FontWeight.w800,
                       fontFeatures: [FontFeature.tabularFigures()]),
                 ),
-                if (p.total > 0) ...[
-                  const SizedBox(height: 2),
-                  Text('${(p.fraction * 100).clamp(0, 100).toStringAsFixed(0)}%',
+                if (p.total > 0 && p.state != BackupState.scanning) ...[
+                  const SizedBox(height: 3),
+                  Text(
+                      '${p.handled} of ${p.total} checked'
+                      '${p.skipped > 0 ? ' · ${p.skipped} already there' : ''}',
+                      textAlign: TextAlign.center,
                       style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w700,
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w600,
                           color: theme.colorScheme.onSurfaceVariant)),
                 ],
                 const SizedBox(height: 14),
