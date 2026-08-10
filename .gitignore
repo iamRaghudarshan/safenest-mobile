@@ -9,3 +9,9 @@ android/.gradle/
 android/local.properties
 ios/Pods/
 ios/.symlinks/
+
+# The Firebase project's public identifiers, written by Set Up Phone Push.bat.
+# Not secret in the way the service-account key is — they identify a project,
+# they do not authorise sending — but they are one owner's project and have no
+# business in a repo anyone can clone.
+firebase.env
