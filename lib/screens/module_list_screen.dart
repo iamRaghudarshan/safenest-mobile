@@ -17,6 +17,9 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
+import 'dart:async';
+
+import '../alarms.dart';
 import '../api.dart';
 import '../modules.dart';
 import '../dates.dart';
@@ -93,6 +96,16 @@ class _ModuleListScreenState extends State<ModuleListScreen> {
         _loading = false;
         _err = null;
       });
+      // ALARMS FOLLOW THE SERVER. Re-scheduled from the rows just fetched, so
+      // a reminder deleted or re-timed on the computer stops ringing here —
+      // otherwise the phone keeps a schedule set days ago and goes off for
+      // something already done, which is how people learn to ignore it.
+      //
+      // Only for reminders, and never blocking the list: an alarm that could
+      // not be scheduled must not stop somebody seeing what is due.
+      if (widget.spec.key == 'reminders') {
+        unawaited(Alarms.instance.syncFrom(_rows).catchError((_) => 0));
+      }
     } on ApiError catch (e) {
       setState(() {
         _err = e;

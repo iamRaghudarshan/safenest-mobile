@@ -19,7 +19,9 @@ library;
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
+import '../alarms.dart';
 import '../api.dart';
 import '../session.dart';
 import '../theme.dart';
@@ -44,6 +46,9 @@ class _NotificationSettingsSectionState
   @override
   void initState() {
     super.initState();
+    // Read whatever this phone was last set to, always — a test that supplies
+    // `initial` still needs the alarm switch to show the right position.
+    _loadAlarmPref();
     if (widget.initial != null) {
       _s = widget.initial;
       return;
@@ -93,6 +98,44 @@ class _NotificationSettingsSectionState
     await _save({'sendHour': picked.hour, 'sendMinute': picked.minute});
   }
 
+  /// Whether reminders ring on this phone. Remembered here rather than on the
+  /// server: it is a property of THIS handset, and a household with three
+  /// phones should not have one of them turning the others' alarms off.
+  bool _alarms = false;
+
+  Future<void> _loadAlarmPref() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (mounted) setState(() => _alarms = prefs.getBool(_alarmKey) ?? false);
+  }
+
+  static const _alarmKey = 'reminders.alarm.enabled';
+
+  Future<void> _toggleAlarms(bool v) async {
+    final messenger = ScaffoldMessenger.of(context);
+    setState(() => _busy = true);
+    try {
+      if (v) {
+        // Asked for HERE, at the moment somebody says they want alarms —
+        // not on first launch, when a permission prompt before anyone has
+        // seen what the app does is the one most often refused.
+        final granted = await Alarms.instance.requestPermission();
+        if (!granted) {
+          messenger.showSnackBar(const SnackBar(
+              content: Text('Notifications are switched off for this app. '
+                  'Turn them on in Settings and try again.')));
+          return;
+        }
+      } else {
+        await Alarms.instance.cancelAll();
+      }
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(_alarmKey, v);
+      if (mounted) setState(() => _alarms = v);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final s = _s;
@@ -102,7 +145,33 @@ class _NotificationSettingsSectionState
     final available = s['available'] == true;
     final devices = (s['devices'] as num?)?.toInt() ?? 0;
 
-    return SettingsGroup(
+    return Column(children: [
+      // ALARMS FIRST, because they are the thing people mean by "remind me".
+      // Scheduled on this phone from reminders it already has, so they ring
+      // with no network and nothing about them is sent anywhere — see
+      // alarms.dart. The daily summary below is the push half, and needs the
+      // computer.
+      SettingsGroup(
+        title: 'Reminders on this phone',
+        footer: _alarms
+            ? 'Reminders ring at the time you set, and keep going until you '
+                'stop them. They work with no signal, and nothing about them '
+                'leaves this phone.'
+            : 'Turn this on and reminders will ring on this phone at the time '
+                'you set — like an alarm, not a quiet notification.',
+        children: [
+          SettingsRow(
+            icon: Icons.alarm,
+            tint: kModuleColours['reminders']!,
+            label: 'Ring like an alarm',
+            trailing: Switch(
+              value: _alarms,
+              onChanged: _busy ? null : _toggleAlarms,
+            ),
+          ),
+        ],
+      ),
+      SettingsGroup(
       title: 'Daily summary',
       footer: available
           ? 'One message a day listing what is coming due. A reminder you have '
@@ -166,6 +235,7 @@ class _NotificationSettingsSectionState
             ),
         ],
       ],
-    );
+      ),
+    ]);
   }
 }

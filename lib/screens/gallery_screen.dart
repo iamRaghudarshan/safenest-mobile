@@ -22,6 +22,8 @@ library;
 
 import 'dart:async';
 
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 // BoxHitTestResult and RenderMetaData, for finding which tile a drag is over.
 import 'package:flutter/rendering.dart';
@@ -30,6 +32,7 @@ import 'package:provider/provider.dart';
 import '../api.dart';
 import '../session.dart';
 import '../sharing.dart';
+import '../widgets/date_scrubber.dart';
 import '../widgets/selection_bar.dart';
 import '../widgets/photo_tile.dart';
 import 'photo_viewer.dart';
@@ -119,6 +122,54 @@ class _GalleryScreenState extends State<GalleryScreen>
   /// two checkboxes: "neither" and "both" mean the same thing and offering
   /// four states for two answers is how a filter row becomes a puzzle.
   String _mediaKind = '';
+
+  /// How many photos fit across. Changed by pinching.
+  ///
+  /// Three is the default because it is what a phone gallery looks like. Two
+  /// is for looking at pictures, five and seven are for finding one — at seven
+  /// a year of photographs is a few flicks rather than a few minutes.
+  static const _colChoices = [2, 3, 5, 7];
+  int _cols = 3;
+
+  /// The column count when the current pinch began, so the gesture is measured
+  /// from where it started rather than compounding each frame — without this a
+  /// slow spread races from seven to two and back.
+  int? _pinchFrom;
+
+  /// The month a given fraction down the grid lands in.
+  ///
+  /// Worked out from the LOADED photos rather than from pixel offsets: the grid
+  /// is many slivers of different heights with headers between them, so any
+  /// arithmetic on scroll extent is approximate — but the list of photos in
+  /// order is exact, and the fraction indexes straight into it.
+  ///
+  /// Only what has been fetched so far is in that list, which is honest: the
+  /// rail cannot travel to a month the app has not loaded yet either.
+  String _dateAtFraction(double f) {
+    if (_photos.isEmpty) return '';
+    final i = (f * (_photos.length - 1)).round().clamp(0, _photos.length - 1);
+    final d = _photos[i].takenAt;
+    if (d == null) return 'Undated';
+    const months = [
+      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+    ];
+    // The year is what people are aiming for over a long library, so it is
+    // always there — "Aug" alone is ambiguous across ten years of photos.
+    return '${months[d.month - 1]} ${d.year}';
+  }
+
+  void _pinch(ScaleUpdateDetails d) {
+    final from = _pinchFrom;
+    if (from == null || d.pointerCount < 2) return;
+    // Spreading (scale > 1) means fewer, bigger tiles.
+    final steps = (math.log(d.scale) / math.ln2 * 1.6).round();
+    final i = (_colChoices.indexOf(from) - steps)
+        .clamp(0, _colChoices.length - 1);
+    if (_colChoices[i] != _cols) {
+      setState(() => _cols = _colChoices[i]);
+    }
+  }
   Timer? _debounce;
 
   // ------------------------------------------------------------ selection ---
@@ -465,11 +516,26 @@ class _GalleryScreenState extends State<GalleryScreen>
       // arithmetic: the grid is several slivers with date headers between them,
       // so any sum of row heights would be wrong at exactly the boundaries
       // people drag across.
-      body: GestureDetector(
+      // The scrubber floats OVER the grid rather than beside it, so the photos
+      // keep the full width. It hides itself when there is not enough to
+      // scroll through — a rail next to forty photos is clutter over a problem
+      // nobody has.
+      body: Stack(children: [
+        GestureDetector(
         onLongPressStart: (d) => _dragSelectStart(d.globalPosition),
         onLongPressMoveUpdate: (d) => _dragSelectMove(d.globalPosition),
         onLongPressEnd: (_) => _dragMode = null,
         onLongPressCancel: () => _dragMode = null,
+        // PINCH TO CHANGE HOW MANY FIT ACROSS, the way every phone gallery
+        // does. Spreading two fingers makes the photos bigger, pinching them
+        // together fits more on screen — which is how you find one picture in
+        // four thousand without scrolling past all of them.
+        //
+        // Guarded on pointerCount >= 2: a single-finger drag is the scroll, and
+        // a scale recogniser that accepts one pointer eats it.
+        onScaleStart: (d) => _pinchFrom = d.pointerCount >= 2 ? _cols : null,
+        onScaleUpdate: _pinch,
+        onScaleEnd: (_) => _pinchFrom = null,
         child: RefreshIndicator(
         onRefresh: () => _load(reset: true),
         child: CustomScrollView(
@@ -577,9 +643,10 @@ class _GalleryScreenState extends State<GalleryScreen>
                 SliverPadding(
                   padding: const EdgeInsets.symmetric(horizontal: 2),
                   sliver: SliverGrid(
-                    gridDelegate:
-                        const SliverGridDelegateWithFixedCrossAxisCount(
-                      crossAxisCount: 3,
+                    // Not const — the column count is a pinch away from
+                    // changing, which is the whole point.
+                    gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                      crossAxisCount: _cols,
                       mainAxisSpacing: 2,
                       crossAxisSpacing: 2,
                     ),
@@ -639,6 +706,8 @@ class _GalleryScreenState extends State<GalleryScreen>
         ),
       ),
       ),
+        DateScrubber(controller: _scroll, labelAt: _dateAtFraction),
+      ]),
     );
   }
 }

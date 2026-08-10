@@ -24,6 +24,18 @@ dependencies:
   # backed up so a second run costs a comparison rather than 20,000 uploads.
   photo_manager: ^3.6.1
   photo_manager_image_provider: ^2.1.4
+  # Reminders that ring on the phone, scheduled ON the phone.
+  #
+  # NOT push. Push would mean routing the titles of somebody's reminders
+  # through Google's servers, which is the one thing this product promises not
+  # to do. These are scheduled locally from reminders already fetched, so they
+  # fire with the phone in flight mode and nothing about them leaves the
+  # device.
+  flutter_local_notifications: ^18.0.1
+  # The alarm sound, looped until it is dismissed. A single chime is what a
+  # reminder for a bill due today gets lost behind.
+  timezone: ^0.9.4
+
   # Holds the screen awake for the length of a backup, and only then.
   #
   # Both phone systems dim and then sleep an idle screen, and a sleeping screen
