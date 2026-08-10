@@ -21,6 +21,15 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
+        // Required by flutter_local_notifications, which uses java.time to work
+        // out when an alarm should fire. minSdk here is 23, and java.time only
+        // arrived in the platform at 26 — desugaring is what supplies it on the
+        // older phones this app deliberately still supports.
+        //
+        // Without it the build fails at checkReleaseAarMetadata with
+        // "requires core library desugaring to be enabled", which names the
+        // setting but not where it goes.
+        isCoreLibraryDesugaringEnabled = true
     }
 
     defaultConfig {
@@ -58,4 +67,12 @@ kotlin {
 
 flutter {
     source = "../.."
+}
+
+dependencies {
+    // The other half of isCoreLibraryDesugaringEnabled above. Enabling the flag
+    // without this fails with "core library desugaring is enabled but no
+    // desugar_jdk_libs dependency was found" — the two are one setting written
+    // in two places.
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
 }
