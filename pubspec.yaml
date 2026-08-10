@@ -24,6 +24,22 @@ dependencies:
   # backed up so a second run costs a comparison rather than 20,000 uploads.
   photo_manager: ^3.6.1
   photo_manager_image_provider: ^2.1.4
+  # Push from the owner's own server, by way of Firebase.
+  #
+  # There is no self-hosted route to an iPhone's lock screen: Apple and Google
+  # deliver to native apps only through APNs and FCM. So this is the one place
+  # something leaves the machine, and what leaves is a title and a line of
+  # body — never a record. An installation that would rather not can leave it
+  # unconfigured and rely on the local alarms below.
+  #
+  # CONFIGURED AT RUN TIME, not with google-services.json. The usual setup
+  # applies a Gradle plugin that FAILS THE BUILD when that file is absent —
+  # which would mean this app could not be compiled at all until somebody made
+  # a Firebase project. Passing FirebaseOptions in Dart instead keeps the build
+  # working for everyone and turns push on only where it is wanted.
+  firebase_core: ^3.8.0
+  firebase_messaging: ^15.1.5
+
   # Reminders that ring on the phone, scheduled ON the phone.
   #
   # NOT push. Push would mean routing the titles of somebody's reminders

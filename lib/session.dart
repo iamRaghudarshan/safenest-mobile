@@ -15,7 +15,10 @@ library;
 import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
+import 'dart:async';
+
 import 'api.dart';
+import 'push.dart';
 import 'masters.dart';
 
 class Session extends ChangeNotifier {
@@ -115,6 +118,16 @@ class Session extends ChangeNotifier {
       'email': email.trim(),
       'password': password,
     });
+    // The account asked for a second factor. The server is right to withhold a
+    // session here — but this app has no screen to type a code into yet, and
+    // "Signed in, but no session came back" would send somebody hunting for a
+    // fault that is not there. Say what actually happened.
+    if (out is Map && out['two_factor'] == true) {
+      throw ApiError(0,
+          'This account uses two-step sign-in. That is not supported in the '
+          'phone app yet — sign in on the computer, or turn it off there.');
+    }
+
     final token = (out is Map) ? (out['token'] ?? out['access_token']) : null;
     if (token is! String || token.isEmpty) {
       throw ApiError(0, 'Signed in, but no session came back.');
@@ -130,6 +143,12 @@ class Session extends ChangeNotifier {
         ? Map<String, dynamic>.from(me['user'] as Map)
         : (me is Map ? Map<String, dynamic>.from(me) : null);
     notifyListeners();
+
+    // Register for push, if this build was compiled with a Firebase project.
+    // Deliberately after the session exists and deliberately not awaited: it
+    // is a convenience on top of notifications the server already records, and
+    // nobody should watch a spinner for it.
+    unawaited(Push.instance.start(api).catchError((_) => false));
   }
 
   /// Re-read the signed-in user. Called after editing a profile so the name on
@@ -192,6 +211,11 @@ class Session extends ChangeNotifier {
   }
 
   Future<void> signOut() async {
+    // Unregister BEFORE the token goes — the call needs the session it is
+    // about to end. A handset that signs out without this keeps receiving the
+    // previous account's reminders, which on a shared family phone means one
+    // person's records announcing themselves to another.
+    await Push.instance.forget(api);
     _token = null;
     _user = null;
     // Whoever signs in next has their OWN categories and banks — masters are
