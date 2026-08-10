@@ -117,6 +117,14 @@
 	</dict>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
+	<key>UIBackgroundModes</key>
+	<array>
+		<!-- So a push that arrives while the app is closed is delivered to the
+		     app, not merely drawn on the lock screen. Reminders carry the record
+		     they refer to, and without this iOS hands over the alert and drops
+		     the payload. -->
+		<string>remote-notification</string>
+	</array>
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>
 	<key>UIMainStoryboardFile</key>

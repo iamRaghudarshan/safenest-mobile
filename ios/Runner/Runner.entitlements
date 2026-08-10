@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- WITHOUT THIS, PUSH ON IPHONE CANNOT WORK AT ALL.
+
+	     iOS issues an APNs device token only to an app that carries this
+	     entitlement. Firebase Messaging's getToken() is a wrapper around that
+	     token — no APNs token, no FCM token, nothing to send to, and the whole
+	     chain fails silently at the first link.
+
+	     It failed exactly that way here. The Firebase identifiers were right,
+	     the service account on the server was right, the person granted
+	     notification permission when asked, and push_subscriptions held two
+	     rows — both 'web', from Safari, from July. Not one token from the
+	     phone app in three releases. Nothing logged an error, because nothing
+	     had gone wrong: the app asked a system that had no token to give.
+
+	     'production' because every build that reaches a phone here is signed
+	     with the App Store profile and goes out through TestFlight. A debug
+	     build run from Xcode needs 'development' and a development profile;
+	     that path is not used by this project and adding a second entitlements
+	     file for it would be two things to keep in step instead of one. -->
+	<key>aps-environment</key>
+	<string>production</string>
+</dict>
+</plist>
