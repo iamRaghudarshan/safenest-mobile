@@ -24,6 +24,10 @@ dependencies:
   # backed up so a second run costs a comparison rather than 20,000 uploads.
   photo_manager: ^3.6.1
   photo_manager_image_provider: ^2.1.4
+  # sha256, so the backup can ask the computer "which of these have you got?"
+  # before uploading a library it already holds.
+  crypto: ^3.0.6
+
   # Push from the owner's own server, by way of Firebase.
   #
   # There is no self-hosted route to an iPhone's lock screen: Apple and Google

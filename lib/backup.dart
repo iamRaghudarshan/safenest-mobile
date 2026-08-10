@@ -31,6 +31,7 @@ import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:photo_manager/photo_manager.dart';
+import 'package:crypto/crypto.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
@@ -144,6 +145,42 @@ class BackupService extends ChangeNotifier {
 
   /// How many photos this phone believes are already on the computer.
   int get rememberedCount => _sent.length;
+
+
+  /// Ask the server which of these it already holds, by content.
+  ///
+  /// Returns the asset ids to skip. Failure returns EMPTY, never throws: this
+  /// is an optimisation, and a backup must still work against a server too old
+  /// to answer — or one that is simply having a bad moment.
+  Future<Set<String>> _serverAlreadyHas(List<AssetEntity> assets) async {
+    final byHash = <String, String>{};   // hash -> asset id
+    for (final a in assets) {
+      try {
+        final f = await a.originFile;
+        if (f == null || !await f.exists()) continue;
+        // Streamed rather than readAsBytes: a 4K video is hundreds of
+        // megabytes and holding one in memory to hash it is how a phone runs
+        // out, which is the thing this whole file keeps having to avoid.
+        final digest = await sha256.bind(f.openRead()).first;
+        byHash[digest.toString()] = a.id;
+      } catch (_) {
+        // Unreadable here means unreadable at upload time too, and _send will
+        // report it properly with a reason.
+      }
+    }
+    if (byHash.isEmpty) return const {};
+    try {
+      final r = await _api.post('/api/gallery/have',
+          {'hashes': byHash.keys.toList()});
+      final have = (r is Map ? r['have'] as List? : null) ?? const [];
+      return {
+        for (final h in have)
+          if (byHash.containsKey('$h')) byHash['$h']!
+      };
+    } catch (_) {
+      return const {};
+    }
+  }
 
   void stop() => _stop = true;
 
@@ -260,8 +297,33 @@ class BackupService extends ChangeNotifier {
     for (var offset = 0; offset < count; offset += page) {
       if (_stop) break;
       final batch = await all.getAssetListRange(start: offset, end: offset + page);
-      final todo = batch.where((a) => !_sent.contains(a.id)).toList();
+      var todo = batch.where((a) => !_sent.contains(a.id)).toList();
       handledSkip += batch.length - todo.length;
+
+      // ASK THE COMPUTER WHAT IT ALREADY HAS, before sending anything.
+      //
+      // The skip above uses a list kept on THIS phone. That list is local: a
+      // reinstall, cleared app data, or the "photos missing on the computer"
+      // reset all leave it empty, and the phone then has to assume it has sent
+      // nothing. It would upload the entire library — gigabytes over a home
+      // connection — for the computer to recognise nearly all of it and store
+      // none of it. The work was always avoidable; there was simply no way to
+      // ask.
+      //
+      // Hashing costs a read of a file that was about to be uploaded anyway,
+      // and the answer is a few hundred bytes. On a library already backed up
+      // this turns hours into seconds.
+      if (todo.isNotEmpty) {
+        final known = await _serverAlreadyHas(todo);
+        if (known.isNotEmpty) {
+          for (final a in todo) {
+            if (known.contains(a.id)) await _remember(a.id);
+          }
+          final before = todo.length;
+          todo = todo.where((a) => !known.contains(a.id)).toList();
+          handledSkip += before - todo.length;
+        }
+      }
 
       // THE PROGRESS BAR FREEZING WAS THIS.
       //

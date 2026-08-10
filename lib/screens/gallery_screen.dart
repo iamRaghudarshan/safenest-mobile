@@ -123,6 +123,23 @@ class _GalleryScreenState extends State<GalleryScreen>
   /// four states for two answers is how a filter row becomes a puzzle.
   String _mediaKind = '';
 
+  /// Which face the grid is narrowed to, and their name for the chip.
+  ///
+  /// WHY A FACE AND NOT A NAME. The text search already matches a person's
+  /// name — and the clustering names nobody. It calls them "Person 3",
+  /// "Person 12", and those are most of them, so "search by person" was
+  /// reachable only for faces somebody had already gone and named. Tapping a
+  /// face needs no name to exist.
+  int _personId = 0;
+  String _personName = '';
+  List<Map<String, dynamic>> _people = [];
+  bool _peopleTried = false;
+
+  /// Newest BACKED UP first rather than newest taken. A genuinely different
+  /// order: a photo scanned in years later sorts by its EXIF date everywhere
+  /// else, deliberately, so the default ordering cannot answer this at all.
+  bool _recent = false;
+
   /// How many photos fit across. Changed by pinching.
   ///
   /// Three is the default because it is what a phone gallery looks like. Two
@@ -416,6 +433,7 @@ class _GalleryScreenState extends State<GalleryScreen>
       }
     });
     _load(reset: true);
+    _loadPeople();
   }
 
   @override
@@ -426,8 +444,24 @@ class _GalleryScreenState extends State<GalleryScreen>
     super.dispose();
   }
 
+  /// Which request is the current one.
+  ///
+  /// Bumped on every load. A response whose number is no longer current is
+  /// thrown away — without it, changing a filter while a page is in flight lets
+  /// the OLD page arrive after the list has been cleared and append photos the
+  /// new filter excludes.
+  int _loadSeq = 0;
+
   Future<void> _load({bool reset = false}) async {
-    if (_more || (_done && !reset)) return;
+    // A RESET IS NEVER DROPPED. This read `if (_more || ...)`, so a filter tap
+    // that landed while a page was being fetched returned immediately and did
+    // nothing at all — no request, no error, the chip simply lit up and the
+    // grid stayed as it was.
+    //
+    // With eight hundred photos the grid is fetching almost constantly, so that
+    // was most taps. It looked exactly like the filter not being implemented.
+    if (!reset && (_more || _done)) return;
+    final seq = ++_loadSeq;
     setState(() {
       _more = true;
       if (reset) {
@@ -448,10 +482,15 @@ class _GalleryScreenState extends State<GalleryScreen>
         if (_query.isNotEmpty && _smart) 'smart': '1',
         if (_favesOnly) 'fav': '1',
         if (_mediaKind.isNotEmpty) 'kind': _mediaKind,
+        if (_personId != 0) 'person': '$_personId',
+        if (_recent) 'sort': 'added',
       });
       final items = ((d as Map)['items'] as List)
           .map((e) => Photo.fromJson(Map<String, dynamic>.from(e as Map)))
           .toList();
+      // A response from a filter the person has already moved on from must not
+      // be shown. Checked after the await, which is the only place it can be.
+      if (seq != _loadSeq) return;
       setState(() {
         if (reset) _photos.clear();
         _photos.addAll(items);
@@ -462,6 +501,7 @@ class _GalleryScreenState extends State<GalleryScreen>
         _more = false;
       });
     } on ApiError catch (e) {
+      if (seq != _loadSeq) return;
       setState(() {
         _error = e.message;
         _loading = false;
@@ -470,14 +510,48 @@ class _GalleryScreenState extends State<GalleryScreen>
     }
   }
 
+  /// The faces to offer along the top, most-photographed first.
+  ///
+  /// Loaded once and separately from the grid: it is a different endpoint and
+  /// a slow or empty answer must not hold up the photos. A library that has
+  /// not been indexed yet has no people at all, and the strip simply does not
+  /// appear — an empty row of circles reads as broken.
+  Future<void> _loadPeople() async {
+    if (_peopleTried) return;
+    _peopleTried = true;
+    try {
+      final r = await context.read<Session>().api.get('/api/people?limit=40');
+      final list = (r is Map ? r['people'] as List? : null) ?? const [];
+      if (!mounted) return;
+      setState(() => _people = [
+            for (final e in list)
+              if (e is Map) Map<String, dynamic>.from(e)
+          ]);
+    } catch (_) {
+      // Faces are an extra. The gallery works without them.
+    }
+  }
+
   /// Photos into days. Anything without a date goes under "Undated" rather than
   /// being dropped — a photo you cannot see is worse than one filed oddly.
+  /// Zoomed out, the grouping widens to the MONTH.
+  ///
+  /// Day headers are right at two or three across, where a day is a row or
+  /// two. At seven across a day is often a single half-empty row, so the
+  /// screen becomes more header than photograph and scrolling a year takes
+  /// hundreds of them. Pinching out is a request to see more at once, and
+  /// keeping day headers is the one thing that stops it delivering that.
+  bool get _byMonth => _cols >= 5;
+
   List<DayGroup> get _grouped {
     final map = <DateTime, List<Photo>>{};
     for (final p in _photos) {
-      final d = p.takenAt == null
+      final t = p.takenAt;
+      final d = t == null
           ? DateTime.fromMillisecondsSinceEpoch(0)
-          : DateTime(p.takenAt!.year, p.takenAt!.month, p.takenAt!.day);
+          : _byMonth
+              ? DateTime(t.year, t.month)
+              : DateTime(t.year, t.month, t.day);
       map.putIfAbsent(d, () => []).add(p);
     }
     final keys = map.keys.toList()..sort((a, b) => b.compareTo(a));
@@ -572,8 +646,55 @@ class _GalleryScreenState extends State<GalleryScreen>
                               ),
                       ),
                     ),
+                    // WHO IS IN THIS LIBRARY — the answer the search box
+                    // could not give. Tap a face to narrow the grid to them.
+                    if (_people.isNotEmpty) ...[
+                      const SizedBox(height: 10),
+                      SizedBox(
+                        height: 78,
+                        child: ListView.separated(
+                          scrollDirection: Axis.horizontal,
+                          itemCount: _people.length,
+                          separatorBuilder: (_, _) => const SizedBox(width: 10),
+                          itemBuilder: (ctx, i) {
+                            final person = _people[i];
+                            final id = (person['id'] as num?)?.toInt() ?? 0;
+                            return _FaceChip(
+                              person: person,
+                              selected: _personId == id,
+                              onTap: () {
+                                setState(() {
+                                  // Tapping the selected face clears it, so the
+                                  // way out is the same control as the way in.
+                                  if (_personId == id) {
+                                    _personId = 0;
+                                    _personName = '';
+                                  } else {
+                                    _personId = id;
+                                    _personName = '${person['name'] ?? ''}'.trim();
+                                  }
+                                });
+                                _load(reset: true);
+                              },
+                            );
+                          },
+                        ),
+                      ),
+                    ],
                     const SizedBox(height: 8),
                     Wrap(spacing: 8, children: [
+                      if (_personId != 0)
+                        InputChip(
+                          avatar: const Icon(Icons.person, size: 18),
+                          label: Text(_personName.isEmpty ? 'This person' : _personName),
+                          onDeleted: () {
+                            setState(() {
+                              _personId = 0;
+                              _personName = '';
+                            });
+                            _load(reset: true);
+                          },
+                        ),
                       FilterChip(
                         label: const Text('★ Favourites'),
                         selected: _favesOnly,
@@ -599,6 +720,27 @@ class _GalleryScreenState extends State<GalleryScreen>
                         selected: _mediaKind == 'videos',
                         onSelected: (v) {
                           setState(() => _mediaKind = v ? 'videos' : '');
+                          _load(reset: true);
+                        },
+                      ),
+                      // Both of these the server has always answered and
+                      // only the Collections screen ever asked for. Somebody
+                      // standing in the gallery wanting just their screenshots
+                      // had to leave it, find the collection, and lose every
+                      // other filter they had set.
+                      FilterChip(
+                        label: const Text('📱 Screenshots'),
+                        selected: _mediaKind == 'screenshots',
+                        onSelected: (v) {
+                          setState(() => _mediaKind = v ? 'screenshots' : '');
+                          _load(reset: true);
+                        },
+                      ),
+                      FilterChip(
+                        label: const Text('🕑 Recently added'),
+                        selected: _recent,
+                        onSelected: (v) {
+                          setState(() => _recent = v);
                           _load(reset: true);
                         },
                       ),
@@ -639,7 +781,8 @@ class _GalleryScreenState extends State<GalleryScreen>
                 ),
               ),
               for (final g in groups) ...[
-                SliverToBoxAdapter(child: _DayHeader(day: g.day)),
+                SliverToBoxAdapter(
+                    child: _DayHeader(day: g.day, monthOnly: _byMonth)),
                 SliverPadding(
                   padding: const EdgeInsets.symmetric(horizontal: 2),
                   sliver: SliverGrid(
@@ -713,8 +856,9 @@ class _GalleryScreenState extends State<GalleryScreen>
 }
 
 class _DayHeader extends StatelessWidget {
-  const _DayHeader({required this.day});
+  const _DayHeader({required this.day, this.monthOnly = false});
   final DateTime day;
+  final bool monthOnly;
 
   @override
   Widget build(BuildContext context) {
@@ -726,6 +870,10 @@ class _DayHeader extends StatelessWidget {
     final today = DateTime(now.year, now.month, now.day);
     final label = day.millisecondsSinceEpoch == 0
         ? 'Undated'
+        : monthOnly
+        ? (day.year == now.year
+            ? months[day.month - 1]
+            : '${months[day.month - 1]} ${day.year}')
         : day == today
             ? 'Today'
             : day == today.subtract(const Duration(days: 1))
@@ -740,6 +888,73 @@ class _DayHeader extends StatelessWidget {
               .textTheme
               .titleMedium
               ?.copyWith(fontWeight: FontWeight.w600)),
+    );
+  }
+}
+
+/// One face along the top of the gallery.
+///
+/// The name is shown when there is one. The clustering calls unnamed faces
+/// "Person 3", which is not a name and is worth nothing under a picture of
+/// somebody — the count is the thing that helps you recognise which face you
+/// are looking for, so that is what goes there instead.
+class _FaceChip extends StatelessWidget {
+  const _FaceChip({required this.person, required this.selected, required this.onTap});
+  final Map<String, dynamic> person;
+  final bool selected;
+  final VoidCallback onTap;
+
+  bool get _unnamed {
+    final n = '${person['name'] ?? ''}'.trim();
+    return n.isEmpty || RegExp(r'^Person\s*\d+$', caseSensitive: false).hasMatch(n);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final url = person['cover_url'] as String?;
+    final count = (person['count'] as num?)?.toInt() ?? 0;
+    return GestureDetector(
+      onTap: onTap,
+      child: SizedBox(
+        width: 58,
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Container(
+            width: 52,
+            height: 52,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              border: Border.all(
+                color: selected ? theme.colorScheme.primary : Colors.transparent,
+                width: 2.5,
+              ),
+            ),
+            child: ClipOval(
+              child: url == null
+                  ? Container(
+                      color: theme.colorScheme.surfaceContainerHighest,
+                      child: const Icon(Icons.person, size: 26))
+                  : Image.network(url,
+                      fit: BoxFit.cover,
+                      // A face that will not load must not leave a broken-image
+                      // glyph where somebody's photograph should be.
+                      errorBuilder: (_, _, _) => Container(
+                          color: theme.colorScheme.surfaceContainerHighest,
+                          child: const Icon(Icons.person, size: 26))),
+            ),
+          ),
+          const SizedBox(height: 3),
+          Text(
+            _unnamed ? '$count' : '${person['name']}',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            textAlign: TextAlign.center,
+            style: theme.textTheme.labelSmall?.copyWith(
+              fontWeight: selected ? FontWeight.w700 : FontWeight.w400,
+            ),
+          ),
+        ]),
+      ),
     );
   }
 }
