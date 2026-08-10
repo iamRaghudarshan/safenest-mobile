@@ -12,6 +12,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../api.dart';
+import '../discover.dart';
 import '../session.dart';
 import '../theme.dart';
 import '../widgets/brand_logo.dart';
@@ -34,12 +35,49 @@ class _SignInScreenState extends State<SignInScreen> {
   bool _show = false;
   String? _error;
 
+  /// Addresses this phone has signed in with before.
+  ///
+  /// The SAME computer usually has two — a home address on the wifi and a
+  /// domain from anywhere else — and which one works depends on where you are
+  /// standing. Remembering both and offering them as taps is the difference
+  /// between moving between them freely and retyping an IP address from memory
+  /// every time you get home.
+  List<String> _known = const [];
+  bool _finding = false;
+
   @override
   void initState() {
     super.initState();
     // Signing out keeps the address, so someone coming back does not have to
     // remember which computer is theirs.
     _address.text = context.read<Session>().baseUrl ?? '';
+    _loadKnown();
+  }
+
+  Future<void> _loadKnown() async {
+    final list = await Session.knownAddresses();
+    if (mounted) setState(() => _known = list);
+  }
+
+  /// Sweep the wifi for the computer, so nobody has to know its IP.
+  Future<void> _find() async {
+    setState(() {
+      _finding = true;
+      _error = null;
+    });
+    try {
+      final found = await Discover.onThisWifi();
+      if (!mounted) return;
+      if (found.isEmpty) {
+        setState(() => _error =
+            'Nothing found on this wifi. Check the computer is awake and on '
+            'the same network — or type the address if you know it.');
+      } else {
+        setState(() => _address.text = found.first.url);
+      }
+    } finally {
+      if (mounted) setState(() => _finding = false);
+    }
   }
 
   @override
@@ -97,8 +135,55 @@ class _SignInScreenState extends State<SignInScreen> {
                     autocorrect: false,
                     decoration: const InputDecoration(
                       labelText: 'Address of your SafeNest',
-                      hintText: 'safenest.example.com',
+                      hintText: 'safenest.example.com, or 192.168.0.170:8080',
                       prefixIcon: Icon(Icons.dns_outlined),
+                    ),
+                  ),
+
+                  // The addresses this phone has used before, as taps. Home and
+                  // away are usually two entries for one computer, and which
+                  // works depends on where you are — so both are offered rather
+                  // than the last one winning.
+                  if (_known.isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 4,
+                      children: [
+                        for (final a in _known)
+                          ActionChip(
+                            avatar: Icon(
+                                a.contains('://192.168.') ||
+                                        a.contains('://10.') ||
+                                        a.contains('://172.')
+                                    ? Icons.home_outlined
+                                    : Icons.public,
+                                size: 16),
+                            label: Text(
+                              a.replaceFirst(RegExp(r'^https?://'), ''),
+                              style: const TextStyle(fontSize: 12.5),
+                            ),
+                            onPressed: () =>
+                                setState(() => _address.text = a),
+                          ),
+                      ],
+                    ),
+                  ],
+
+                  const SizedBox(height: 6),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton.icon(
+                      onPressed: _busy || _finding ? null : _find,
+                      icon: _finding
+                          ? const SizedBox(
+                              width: 15,
+                              height: 15,
+                              child: CircularProgressIndicator(strokeWidth: 2))
+                          : const Icon(Icons.wifi_find, size: 19),
+                      label: Text(_finding
+                          ? 'Looking on this wifi...'
+                          : 'Find my computer on this wifi'),
                     ),
                   ),
                   const SizedBox(height: 12),

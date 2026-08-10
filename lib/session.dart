@@ -14,6 +14,7 @@ library;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'dart:async';
 
@@ -28,6 +29,13 @@ class Session extends ChangeNotifier {
   );
   static const _kUrl = 'server.url';
   static const _kToken = 'server.token';
+  /// Every address that has actually WORKED, most recent first.
+  ///
+  /// In plain preferences rather than the secure store: these are addresses,
+  /// not credentials, and the token beside them is what needs protecting. Kept
+  /// because one computer usually has two — a home address and a domain — and
+  /// which one works depends on where the phone is.
+  static const _kKnown = 'server.known';
 
   String? _baseUrl;
   String? _token;
@@ -71,6 +79,27 @@ class Session extends ChangeNotifier {
   /// because these lists are per USER: a household member signing in after
   /// somebody else would otherwise be offered the previous person's categories.
   late final MasterCache masters = MasterCache(() => api);
+
+  /// Addresses that have signed in successfully before.
+  static Future<List<String>> knownAddresses() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getStringList(_kKnown) ?? const [];
+  }
+
+  /// Remember one, newest first, without duplicates.
+  ///
+  /// Recorded only AFTER a sign-in succeeds. Remembering what was typed would
+  /// fill the list with the typos and half-guesses somebody made on the way to
+  /// the address that worked.
+  static Future<void> _remember(String url) async {
+    final prefs = await SharedPreferences.getInstance();
+    final list = prefs.getStringList(_kKnown) ?? <String>[];
+    list.remove(url);
+    list.insert(0, url);
+    // Three is enough for home, away, and one more; a longer list is a wall of
+    // chips nobody reads.
+    await prefs.setStringList(_kKnown, list.take(3).toList());
+  }
 
   Future<void> restore() async {
     _baseUrl = await _store.read(key: _kUrl);
@@ -137,6 +166,7 @@ class Session extends ChangeNotifier {
     _token = token;
     await _store.write(key: _kUrl, value: url);
     await _store.write(key: _kToken, value: token);
+    await _remember(url);
 
     final me = await api.get('/api/auth/me');
     _user = (me is Map && me['user'] is Map)
@@ -201,6 +231,7 @@ class Session extends ChangeNotifier {
 
     _baseUrl = url;
     await _store.write(key: _kUrl, value: url);
+    if (stillSignedIn) await _remember(url);
     if (!stillSignedIn) {
       _token = null;
       _user = null;
@@ -236,7 +267,11 @@ class Session extends ChangeNotifier {
   /// the app unusable for someone who has not set up a domain, which is most
   /// people on the day they install it.
   static String normaliseAddress(String raw) {
-    var s = raw.trim().replaceAll(RegExp(r'/+$'), '');
+    // Lower case, because host names are case-insensitive and the remembered
+    // address list is not: without this, "SafeNest.example.com" and
+    // "safenest.example.com" are the same computer and two separate chips on
+    // the sign-in screen.
+    var s = raw.trim().toLowerCase().replaceAll(RegExp(r'/+$'), '');
     if (s.isEmpty) throw ApiError(0, 'Type the address of your SafeNest.');
     if (!s.startsWith('http://') && !s.startsWith('https://')) {
       final host = s.split(':').first;
