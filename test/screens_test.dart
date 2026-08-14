@@ -189,8 +189,12 @@ void main() {
           _wrap(BackupScreen(debugProgress: states['running']!)));
       await tester.pump();
 
-      expect(find.text('12136 of 20431'), findsOneWidget);
-      expect(find.text('59%'), findsOneWidget);
+      // The headline is what was UPLOADED; the library figure moved to the line
+      // beneath it (see backup_screen.dart). The '59%' text is gone on purpose —
+      // the percentage only ever lived inside that old headline.
+      expect(find.text('8123 uploaded'), findsOneWidget);
+      expect(find.text('12136 of 20431 checked · 4001 already there'),
+          findsOneWidget);
       expect(find.text('8123 sent'), findsOneWidget);
       expect(find.text('4001 already there'), findsOneWidget);
       expect(find.text('12 not sent'), findsOneWidget);
@@ -273,9 +277,15 @@ void main() {
       await tester.pump();
 
       expect(tester.takeException(), isNull);
-      // Not 0%. This is the reading that used to be stuck.
-      expect(find.text('12000 of 20000'), findsOneWidget);
-      expect(find.text('60%'), findsOneWidget);
+      // Not stuck. Nothing was uploaded, so the headline honestly reads
+      // "0 uploaded" — but the run has LOOKED at 12000 of 20000, and the bar
+      // moves with it. That reading is what used to sit frozen at zero.
+      expect(find.text('0 uploaded'), findsOneWidget);
+      expect(find.text('12000 of 20000 checked · 12000 already there'),
+          findsOneWidget);
+      final bar = tester.widget<LinearProgressIndicator>(
+          find.byType(LinearProgressIndicator));
+      expect(bar.value, closeTo(0.6, 0.001));
     });
   });
 
