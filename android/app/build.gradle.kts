@@ -1,7 +1,22 @@
+import java.util.Properties
+import java.io.FileInputStream
+
 plugins {
     id("com.android.application")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
+}
+
+// Release signing is loaded from android/key.properties for local builds, or from
+// environment variables in CI. Absent both, the release build falls back to debug
+// so `flutter run --release` still works on a machine with no keystore — but that
+// APK is NOT distributable: the debug key is public, and Android refuses an
+// in-place update whose signature changed, so shipping a debug APK once would lock
+// every install out of every real update afterwards.
+val keystoreProperties = Properties()
+val keystorePropertiesFile = rootProject.file("key.properties")
+if (keystorePropertiesFile.exists()) {
+    keystoreProperties.load(FileInputStream(keystorePropertiesFile))
 }
 
 android {
@@ -50,11 +65,32 @@ android {
         versionName = flutter.versionName
     }
 
+    signingConfigs {
+        create("release") {
+            // key.properties wins locally; env vars are how CI supplies it.
+            val storePath = keystoreProperties.getProperty("storeFile")
+                ?: System.getenv("ANDROID_KEYSTORE_PATH")
+            if (storePath != null) {
+                storeFile = file(storePath)
+                storePassword = keystoreProperties.getProperty("storePassword")
+                    ?: System.getenv("ANDROID_KEYSTORE_PASSWORD")
+                keyAlias = keystoreProperties.getProperty("keyAlias")
+                    ?: System.getenv("ANDROID_KEY_ALIAS")
+                keyPassword = keystoreProperties.getProperty("keyPassword")
+                    ?: System.getenv("ANDROID_KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            // The release keystore when it is available (a machine with
+            // key.properties, or CI with the secrets), debug otherwise so a
+            // keyless dev build still runs. See the keystoreProperties note above
+            // for why a debug-signed release must never be distributed.
+            val rel = signingConfigs.getByName("release")
+            signingConfig = if (rel.storeFile != null) rel
+                            else signingConfigs.getByName("debug")
         }
     }
 }

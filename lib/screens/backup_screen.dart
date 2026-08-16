@@ -32,10 +32,14 @@ import '../widgets/brand_button.dart';
 import '../widgets/pill.dart';
 
 class BackupScreen extends StatefulWidget {
-  const BackupScreen({super.key, this.debugProgress});
+  const BackupScreen({super.key, this.debugProgress, this.service});
 
   /// For tests — render a given state without a photo library or a server.
   final BackupProgress? debugProgress;
+
+  /// A shared service (owned by the gallery) so its status strip and this screen
+  /// show ONE run. When null this screen owns its own service, exactly as before.
+  final BackupService? service;
 
   @override
   State<BackupScreen> createState() => _BackupScreenState();
@@ -43,23 +47,25 @@ class BackupScreen extends StatefulWidget {
 
 class _BackupScreenState extends State<BackupScreen> {
   BackupService? _service;
+  bool _owns = false;   // only stop a service we created — a shared one keeps going
 
   @override
   void initState() {
     super.initState();
     if (widget.debugProgress != null) return;
-    final s = BackupService(context.read<Session>().api);
+    final s = widget.service ?? BackupService(context.read<Session>().api);
+    _owns = widget.service == null;
     s.addListener(_onChange);
-    s.load();
+    if (_owns) s.load();
     _service = s;
   }
 
-  void _onChange() => setState(() {});
+  void _onChange() { if (mounted) setState(() {}); }
 
   @override
   void dispose() {
     _service?.removeListener(_onChange);
-    _service?.stop();
+    if (_owns) _service?.stop();   // a shared service must survive for the gallery
     super.dispose();
   }
 

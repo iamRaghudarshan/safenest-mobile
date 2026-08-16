@@ -98,6 +98,14 @@ class BackupService extends ChangeNotifier {
   Set<String> _sent = {};
   bool _stop = false;
 
+  /// A run is in progress. Guards against a second loop starting over the same
+  /// _sent/_failed state — the backup path's version of the gallery's "a reset
+  /// is never dropped" rule. Set synchronously before the first await, because
+  /// runFullBackup awaits _keepAwake() before the UI flips to running, and a
+  /// fast double-tap in that gap would otherwise launch two concurrent backups.
+  bool _busy = false;
+  bool get busy => _busy;
+
   void _emit(BackupProgress p) {
     _p = p;
     notifyListeners();
@@ -135,6 +143,16 @@ class BackupService extends ChangeNotifier {
   /// content hash — so anything still on the computer is recognised and
   /// nothing is stored twice. Slow, never destructive.
   Future<void> forgetSent() async {
+    // Not while a backup is running. The running loop keeps its own copy of
+    // this list in memory and re-persists it every page (_flush), so clearing
+    // it here would look done and then silently undo itself on the next page —
+    // the "reset dropped while a page is in flight" trap the gallery already
+    // fixed. Stop first, reset then; never pretend to reset.
+    if (_busy) {
+      _emit(const BackupProgress(
+          message: 'Stop the backup that is running, then reset.'));
+      return;
+    }
     _sent.clear();
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_sentKey);
@@ -182,6 +200,21 @@ class BackupService extends ChangeNotifier {
     }
   }
 
+  /// How many items the computer actually holds for this account. A cheap way to
+  /// notice a stale "already sent" list — ask for one item and read the true total.
+  /// Returns null if it cannot ask (offline, old server); the caller then keeps
+  /// trusting its local list, exactly as before.
+  Future<int?> _serverItemCount() async {
+    try {
+      final r = await _api.get('/api/gallery', {'limit': '1'});
+      final t = (r is Map) ? r['total'] : null;
+      if (t is int) return t;
+      return int.tryParse('$t');
+    } catch (_) {
+      return null;
+    }
+  }
+
   void stop() => _stop = true;
 
   /// Keep the screen on for the length of a run, and only that long.
@@ -211,11 +244,14 @@ class BackupService extends ChangeNotifier {
       PhotoManager.requestPermissionExtend();
 
   Future<void> runFullBackup() async {
+    if (_busy) return;   // a double-tap must not launch a second loop
+    _busy = true;
     await _keepAwake(true);
     try {
       await _runFullBackup();
     } finally {
       await _keepAwake(false);
+      _busy = false;
     }
   }
 
@@ -252,6 +288,24 @@ class BackupService extends ChangeNotifier {
     }
 
     await load();
+
+    // Catch a STALE "already sent" list before trusting it to skip anything.
+    //
+    // That list lives on this phone and says "already backed up". If the computer
+    // now holds FEWER items than the list claims to have sent, photos were removed
+    // there (its bin emptied, a disk swapped, a restore gone wrong) — and every one
+    // of them would be skipped for ever, reported as a clean success, while sitting
+    // unprotected on the phone the whole time. It is the exact failure forgetSent()
+    // exists to undo, done automatically. Trust the computer over our memory: clear
+    // the list and re-check everything against the server, which de-duplicates by
+    // hash so nothing still there is stored twice. Safe in one direction only — the
+    // worst case is a needless re-check, never a skipped photo.
+    final serverCount = await _serverItemCount();
+    if (serverCount != null && serverCount < _sent.length) {
+      _sent.clear();
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_sentKey);
+    }
 
     // Photos AND videos. This said `RequestType.image` with the note "videos
     // are not photos and the gallery cannot store them" — true when it was
@@ -412,11 +466,14 @@ class BackupService extends ChangeNotifier {
   /// as long as the fix took.
   Future<void> retryFailed() async {
     if (_failedAssets.isEmpty) return;
+    if (_busy) return;   // shares _failedAssets/_sent with a live run
+    _busy = true;
     await _keepAwake(true);
     try {
       await _retryFailed();
     } finally {
       await _keepAwake(false);
+      _busy = false;
     }
   }
 

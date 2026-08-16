@@ -20,6 +20,7 @@ import '../api.dart';
 import '../modules.dart';
 import '../session.dart';
 import '../theme.dart';
+import '../update.dart';
 import 'dashboard_screen.dart';
 import 'documents_screen.dart';
 import 'module_list_screen.dart';
@@ -75,6 +76,12 @@ class _HomeScreenState extends State<HomeScreen> {
   void initState() {
     super.initState();
     _loadPermissions();
+    // Offer a newer Android build from the customer's own server, if there is
+    // one. Post-frame so there is a Navigator to show the prompt on and so it
+    // never delays the home screen appearing; Android-only and silent on error.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) checkForUpdate(context, context.read<Session>());
+    });
   }
 
   Future<void> _loadPermissions() async {

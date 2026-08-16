@@ -15,6 +15,13 @@
     <!-- Notably NOT requested: WRITE_EXTERNAL_STORAGE, location, contacts or
          anything else. The app reads photos and sends them to one address. -->
 
+    <!-- Installing a downloaded update APK from inside the app. Android 8+ gates
+         this per-source: the user is sent to Settings once to allow "install
+         unknown apps" for SafeNest, then the package installer takes over. The
+         app is distributed as a direct download (no store), so this is how it
+         updates itself. Without it the install intent is silently refused. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+
     <!-- networkSecurityConfig permits plain http to a home address only, never to
          the internet. A computer at 192.168.1.5 has no certificate and cannot get
          one; the app itself refuses http for any public address, in

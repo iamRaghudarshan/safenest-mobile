@@ -106,6 +106,10 @@ class _GalleryScreenState extends State<GalleryScreen>
   final _search = TextEditingController();
   final List<Photo> _photos = [];
   int _total = 0;
+  // How many of the library are videos — so the header can say "N photos · M
+  // videos" instead of labelling a grid full of clips "photos". Only meaningful
+  // (and only fetched) on the plain library view.
+  int _videoTotal = 0;
   int _offset = 0;
   bool _loading = true;
   bool _more = false;
@@ -452,6 +456,26 @@ class _GalleryScreenState extends State<GalleryScreen>
   /// new filter excludes.
   int _loadSeq = 0;
 
+  /// The plain library view — no filter, search, favourites, person or "recently
+  /// added". Only here does the "photos · videos" split make sense; a filtered
+  /// view shows a single count for what it is showing.
+  bool get _plainView =>
+      _mediaKind.isEmpty && _query.isEmpty && !_favesOnly && _personId == 0 && !_recent;
+
+  String _plural(int n, String w) => '$n $w${n == 1 ? '' : 's'}';
+
+  /// The header count. A grid full of clips must not be called "photos".
+  String _countLabel() {
+    if (_mediaKind == 'videos') return _plural(_total, 'video');
+    if (_mediaKind == 'photos') return _plural(_total, 'photo');
+    if (_mediaKind == 'screenshots') return _plural(_total, 'screenshot');
+    if (_plainView && _videoTotal > 0) {
+      final photos = (_total - _videoTotal).clamp(0, _total);
+      return '${_plural(photos, 'photo')} · ${_plural(_videoTotal, 'video')}';
+    }
+    return _plural(_total, _plainView ? 'photo' : 'item');
+  }
+
   Future<void> _load({bool reset = false}) async {
     // A RESET IS NEVER DROPPED. This read `if (_more || ...)`, so a filter tap
     // that landed while a page was being fetched returned immediately and did
@@ -500,6 +524,19 @@ class _GalleryScreenState extends State<GalleryScreen>
         _loading = false;
         _more = false;
       });
+      // On the plain library view, also count the videos so the header can split
+      // "photos · videos". Cosmetic and best-effort — a failure just leaves the
+      // header on the combined count.
+      if (reset && _plainView) {
+        try {
+          final vd = await api.get('/api/gallery', {'limit': '1', 'kind': 'videos'});
+          if (seq == _loadSeq && mounted) {
+            setState(() => _videoTotal = ((vd as Map)['total'] ?? 0) as int);
+          }
+        } catch (_) {/* header count is cosmetic */}
+      } else if (reset) {
+        _videoTotal = 0;
+      }
     } on ApiError catch (e) {
       if (seq != _loadSeq) return;
       setState(() {
@@ -776,7 +813,7 @@ class _GalleryScreenState extends State<GalleryScreen>
               SliverToBoxAdapter(
                 child: Padding(
                   padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-                  child: Text('$_total photos',
+                  child: Text(_countLabel(),
                       style: Theme.of(context).textTheme.bodySmall),
                 ),
               ),

@@ -10,6 +10,14 @@ android/local.properties
 ios/Pods/
 ios/.symlinks/
 
+# The Android release keystore and its passwords never enter the repository. The
+# keystore file itself lives OUTSIDE both repos (D:\AI PRO\safenest-keystore\).
+# Lose it and every existing install must uninstall/reinstall — Android refuses an
+# update whose signing key changed. Back it up offline.
+android/key.properties
+*.jks
+*.keystore
+
 # NOTE: firebase.env is deliberately NOT ignored — see the file itself. It holds
 # only the identifiers that Google publishes inside every shipped APK anyway.
 # The thing that must never be committed is the SERVICE ACCOUNT key, which lives

@@ -105,12 +105,30 @@ jobs:
       - run: flutter analyze
       - run: flutter test
 
+      # The release keystore, decoded from a secret into a throwaway file the
+      # gradle signing config reads via ANDROID_KEYSTORE_PATH below. The keystore
+      # never lives in the repo; losing it would force every install to reinstall,
+      # because Android refuses an update signed by a different key.
+      - name: Restore the release keystore
+        env:
+          KS: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: echo "$KS" | base64 --decode > "$RUNNER_TEMP/safenest-release.jks"
+
       - name: Build the APK
         # --dart-define-from-file, so the Firebase identifiers reach the
         # build without being repeated here. They are not secrets: Google
         # publishes them inside every shipped APK, and firebase.env says so at
         # the top. The key that authorises SENDING is a service account on the
         # owner's own server and is not in this repository.
+        #
+        # The signing secrets are read by android/app/build.gradle.kts. Absent
+        # them the release would fall back to the debug key — which is why they
+        # are supplied here rather than left to chance.
+        env:
+          ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/safenest-release.jks
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           flutter build apk --release \
             --build-name=$(cat VERSION) \
