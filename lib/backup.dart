@@ -563,7 +563,11 @@ class BackupService extends ChangeNotifier {
         return _Sent.failed;
       }
 
-      final r = await _upload(bytes, asset.title ?? '${asset.id}.jpg');
+      // Send the real duration: the computer reads it off the video with OpenCV,
+      // which is unreliable on iPhone HEVC and left every clip showing "0:01".
+      // `asset.duration` is seconds (0 for a photo).
+      final r = await _upload(bytes, asset.title ?? '${asset.id}.jpg',
+          durationMs: asset.duration > 0 ? asset.duration * 1000 : 0);
       if (r.status >= 200 && r.status < 300) {
         await _remember(asset.id);
         // The server answers 200 for a photo it already holds, saying so in
@@ -596,7 +600,7 @@ class BackupService extends ChangeNotifier {
 
   /// Returns the HTTP status: 2xx is a success, 0 means it never arrived.
   Future<({int status, Map<String, dynamic> body})> _upload(
-      Uint8List bytes, String name) async {
+      Uint8List bytes, String name, {int durationMs = 0}) async {
     // Multipart by hand rather than pulling in a client: one field, one file, and
     // the server's /api/gallery/upload has been driven with exactly this shape.
     final boundary = '----safenest${DateTime.now().microsecondsSinceEpoch}';
@@ -628,7 +632,7 @@ class BackupService extends ChangeNotifier {
 
     try {
       return await _api.postRawResult(
-        '/api/gallery/upload?faces=0',
+        '/api/gallery/upload?faces=0${durationMs > 0 ? '&duration_ms=$durationMs' : ''}',
         buf.takeBytes(),
         'multipart/form-data; boundary=$boundary',
       );
