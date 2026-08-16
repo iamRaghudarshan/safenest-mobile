@@ -45,6 +45,12 @@
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>So this phone can reach the computer running SafeNest when they are on the same Wi-Fi, without going out to the internet at all.</string>
 
+	<!-- Required by Apple (ITMS-90683) because the photo library plugin references
+	     location APIs to read where a photo was taken — SafeNest never asks for the
+	     device's live location, but Apple requires the string regardless. -->
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>SafeNest reads the place a photo was taken from the photo itself, so you can browse your library by location. It never tracks where you are, and nothing leaves your own computer.</string>
+
 	<!-- App Transport Security refuses plain http, which is right for the
 	     internet and wrong for a home network: a computer at 192.168.1.5 has no
 	     certificate and cannot get one. NSAllowsLocalNetworking permits http for
