@@ -88,6 +88,9 @@ class BackupService extends ChangeNotifier {
 
   final Api _api;
   static const _sentKey = 'backup.sent.ids';
+  // Set once the one-time "fill in durations for already-uploaded videos" pass has
+  // run, so it never repeats its extra hashing on later backups.
+  static const _backfillKey = 'backup.durations.backfilled';
   static const _concurrency = 4;
 
   BackupProgress _p = const BackupProgress();
@@ -249,10 +252,49 @@ class BackupService extends ChangeNotifier {
     await _keepAwake(true);
     try {
       await _runFullBackup();
+      // One-time: fill in real durations for videos already on the computer that
+      // were uploaded before the phone sent duration (they show "0:01"). Best
+      // effort, after the real work, and never repeats.
+      await _backfillDurations();
     } finally {
       await _keepAwake(false);
       _busy = false;
     }
+  }
+
+  /// Send the true duration of every video to the computer, once, so clips already
+  /// backed up without one stop showing "0:01". The server only fills a MISSING
+  /// duration, so this can never change a video that already has the right one.
+  Future<void> _backfillDurations() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (prefs.getBool(_backfillKey) == true) return;
+    try {
+      final albums = await PhotoManager.getAssetPathList(
+          onlyAll: true, type: RequestType.video);
+      if (albums.isEmpty) { await prefs.setBool(_backfillKey, true); return; }
+      final all = albums.first;
+      final count = await all.assetCountAsync;
+      const page = 200;
+      for (var off = 0; off < count && !_stop; off += page) {
+        final batch = await all.getAssetListRange(start: off, end: off + page);
+        final map = <String, int>{};
+        for (final a in batch) {
+          if (a.duration <= 0) continue;
+          try {
+            final f = await a.originFile;
+            if (f == null || !await f.exists()) continue;
+            final digest = await sha256.bind(f.openRead()).first;
+            map[digest.toString()] = a.duration * 1000;
+          } catch (_) {/* unreadable — skip */}
+        }
+        if (map.isNotEmpty) {
+          try {
+            await _api.post('/api/gallery/backfill-durations', {'durations': map});
+          } catch (_) {/* older server or offline — try next run */}
+        }
+      }
+      if (!_stop) await prefs.setBool(_backfillKey, true);
+    } catch (_) {/* best effort; a failure just means it runs again next time */}
   }
 
   Future<void> _runFullBackup() async {
