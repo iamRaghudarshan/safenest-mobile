@@ -95,7 +95,7 @@ class _HabitsScreenState extends State<HabitsScreen> {
       showDragHandle: true,
       builder: (_) => _HabitEditor(existing: existing),
     );
-    if (body == null) return;
+    if (body == null || !mounted) return;
     try {
       final api = context.read<Session>().api;
       if (existing != null) {
@@ -131,7 +131,7 @@ class _HabitsScreenState extends State<HabitsScreen> {
         ],
       ),
     );
-    if (ok != true) return;
+    if (ok != true || !mounted) return;
     await context.read<Session>().api.delete('/api/habits/${h['id']}');
     await _load();
   }
