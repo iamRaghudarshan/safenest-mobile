@@ -257,8 +257,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
           if (_licence != null && _licence!['licensed'] == true)
             SettingsGroup(
               title: 'Your licence',
+              // Read-only on the phone, and it says so: the key lives on the
+              // customer's computer and can only be changed there (Profile →
+              // Licence → Update licence key on the desktop). A phone that could
+              // change the licence would be a second place to get it wrong.
               footer: 'Issued for the copy on your computer. It covers this app '
-                  'too — there is no separate licence for the phone.',
+                  'too — there is no separate licence for the phone. To change '
+                  'the licence key, use ${widget.brand.name} on your computer; '
+                  'it cannot be changed from the phone.',
               children: [
                 SettingsRow(
                   icon: Icons.card_membership_outlined,
@@ -266,6 +272,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   label: '${_licence!['name'] ?? 'Licensed copy'}',
                   value: _licenceState(),
                 ),
+                if (_licence!['email'] != null &&
+                    '${_licence!['email']}'.isNotEmpty)
+                  SettingsRow(
+                    icon: Icons.person_outline,
+                    tint: theme.colorScheme.outline,
+                    label: 'Registered to',
+                    value: '${_licence!['email']}',
+                  ),
                 SettingsRow(
                   icon: Icons.event_outlined,
                   tint: theme.colorScheme.outline,
@@ -278,6 +292,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       ? 'Never expires'
                       : fmtDate(parseDate('${_licence!['expires_on']}')),
                 ),
+                // Days left only makes sense for a dated licence; a perpetual one
+                // has none, and the server sends no meaningful count.
+                if (_licence!['perpetual'] != true &&
+                    _licence!['days_left'] != null &&
+                    (_licence!['days_left'] as num) >= 0)
+                  SettingsRow(
+                    icon: Icons.hourglass_bottom_outlined,
+                    tint: _licenceTint(),
+                    label: 'Days remaining',
+                    value: '${_licence!['days_left']}',
+                  ),
                 if (_licence!['key_id'] != null)
                   SettingsRow(
                     icon: Icons.tag,
