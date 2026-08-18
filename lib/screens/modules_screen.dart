@@ -59,6 +59,13 @@ class _ModulesScreenState extends State<ModulesScreen> {
             for (final m in kModules)
               (key: m.key, label: m.label, icon: m.icon, colour: m.colour, blurb: m.blurb),
             (
+              key: 'habits',
+              label: 'Habits',
+              icon: Icons.local_fire_department_outlined,
+              colour: kModuleColours['habits']!,
+              blurb: 'Build a routine, keep the streak'
+            ),
+            (
               key: 'gallery',
               label: 'Gallery',
               icon: Icons.photo_library_outlined,

@@ -8,17 +8,17 @@
 /// ONE THING WORTH KNOWING ABOUT THE BRAND COLOUR
 /// `theme_color` from /api/branding is NOT the interface colour. It sets the
 /// browser tab and the phone status bar; the CSS `--brand` is a fixed
-/// #5b3df5 → #7c5cff purple and never changes. Driving the whole UI from the
-/// branding colour would have made the phone app a different colour from the web
-/// app on the same installation — which is precisely the mismatch this file
-/// exists to remove.
+/// #0176D3 → #1B96FF Salesforce-style blue and never changes. Driving the whole
+/// UI from the branding colour would have made the phone app a different colour
+/// from the web app on the same installation — which is precisely the mismatch
+/// this file exists to remove. Kept in step with the web `--brand`/`--brand-2`.
 library;
 
 import 'package:flutter/material.dart';
 
 /// --brand and --brand-2. Buttons are a gradient of the two, not a flat fill.
-const kBrand = Color(0xFF5B3DF5);
-const kBrand2 = Color(0xFF7C5CFF);
+const kBrand = Color(0xFF0176D3);
+const kBrand2 = Color(0xFF1B96FF);
 
 /// Light — :root
 const _lightBg = Color(0xFFF4F5FB);       // --bg
@@ -55,6 +55,7 @@ const kModuleColours = <String, Color>{
   'expenses': Color(0xFFF59E0B),
   'reminders': Color(0xFF8B5CF6),
   'todos': Color(0xFF14B8A6),
+  'habits': Color(0xFFF97316),
   'gallery': Color(0xFFF43F5E),
   'vault': Color(0xFF64748B),
   'documents': Color(0xFF0D9488),
@@ -135,7 +136,10 @@ ThemeData buildTheme(Brand brand, Brightness brightness) {
     useMaterial3: true,
     brightness: brightness,
     colorScheme: scheme,
-    scaffoldBackgroundColor: bg,
+    // Transparent so the app-wide NatureBackdrop (mounted in main.dart via
+    // MaterialApp.builder) shows behind every screen. Cards, app bars and sheets
+    // keep their own opaque surfaces, so content stays legible over the scene.
+    scaffoldBackgroundColor: Colors.transparent,
 
     // -apple-system on iOS, Roboto on Android — which is what the CSS asks for
     // by naming the system stack. Flutter uses each platform's default already,

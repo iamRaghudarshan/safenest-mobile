@@ -115,7 +115,7 @@ class _FlightPainter extends CustomPainter {
   /// are the module colours the rest of the app already uses, so it is more
   /// colour without becoming a different palette.
   static const _hues = <Color>[
-    Color(0xFF5B3DF5), // brand
+    Color(0xFF0176D3), // brand
     Color(0xFF16A06A), // ok green
     Color(0xFFE8A413), // warn amber
     Color(0xFF0EA5E9), // sky
@@ -137,7 +137,7 @@ class _FlightPainter extends CustomPainter {
     // strip has a direction even in a still screenshot.
     final strip = Rect.fromLTRB(from, midY - 2, to, midY + 2);
     final shader = const LinearGradient(
-      colors: [Color(0xFF5B3DF5), Color(0xFF0EA5E9), Color(0xFF16A06A)],
+      colors: [Color(0xFF0176D3), Color(0xFF0EA5E9), Color(0xFF16A06A)],
     ).createShader(strip);
     final dash = Paint()
       ..shader = shader
@@ -154,7 +154,7 @@ class _FlightPainter extends CustomPainter {
     // Each in its own colour rather than both grey: the phone is where the
     // photos are, the computer is where they are going, and colour is what
     // makes that read at a glance.
-    _phone(canvas, Offset(leftX, midY), const Color(0xFF5B3DF5));
+    _phone(canvas, Offset(leftX, midY), const Color(0xFF0176D3));
     _computer(canvas, Offset(rightX, midY), const Color(0xFF16A06A));
 
     // ---- the photos in flight ---------------------------------------------

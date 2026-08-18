@@ -23,6 +23,7 @@ import '../theme.dart';
 import '../update.dart';
 import 'dashboard_screen.dart';
 import 'documents_screen.dart';
+import 'habits_screen.dart';
 import 'module_list_screen.dart';
 import 'modules_screen.dart';
 import 'photos_home.dart';
@@ -145,6 +146,9 @@ class _HomeScreenState extends State<HomeScreen> {
     // method and did nothing at all. A tap that produces no result and no error
     // is the hardest kind of broken to report.
     switch (key) {
+      case 'habits':
+        Navigator.of(context)
+            .push(MaterialPageRoute(builder: (_) => const HabitsScreen()));
       case 'documents':
         Navigator.of(context)
             .push(MaterialPageRoute(builder: (_) => const DocumentsScreen()));

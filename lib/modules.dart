@@ -305,6 +305,7 @@ ModuleSpec? moduleByKey(String key) {
 /// answer from this one.
 final kAllModuleKeys = <String>{
   for (final m in kModules) m.key,
+  'habits',
   'gallery',
   'documents',
   'vault',

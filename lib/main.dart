@@ -24,6 +24,7 @@ import 'theme.dart';
 import 'screens/sign_in_screen.dart';
 import 'screens/home_screen.dart';
 import 'widgets/licence_notice.dart';
+import 'widgets/nature_backdrop.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -97,6 +98,14 @@ class _SafeNestAppState extends State<SafeNestApp> {
           theme: buildTheme(_brand, Brightness.light),
           darkTheme: buildTheme(_brand, Brightness.dark),
           themeMode: _themeMode,
+          // A single nature backdrop behind every route. Scaffolds are transparent
+          // (see theme.dart) so it shows through the whole app and the sign-in page.
+          builder: (context, child) => Stack(
+            children: [
+              const Positioned.fill(child: NatureBackdrop()),
+              if (child != null) Positioned.fill(child: child),
+            ],
+          ),
           home: session.loading
               ? const _Splash()
               // A blocked licence takes over the whole app rather than failing
