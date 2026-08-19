@@ -30,6 +30,7 @@ import 'package:flutter/rendering.dart';
 import 'package:provider/provider.dart';
 
 import '../api.dart';
+import '../dates.dart';
 import '../session.dart';
 import '../sharing.dart';
 import '../widgets/date_scrubber.dart';
@@ -152,6 +153,10 @@ class _GalleryScreenState extends State<GalleryScreen>
   static const _colChoices = [2, 3, 5, 7];
   int _cols = 3;
 
+  /// A one-per-row list instead of the grid — the "List" view. Pinch still works
+  /// on the grid; this is the explicit alternative the view switcher offers.
+  bool _listView = false;
+
   /// The column count when the current pinch began, so the gesture is measured
   /// from where it started rather than compounding each frame — without this a
   /// slow spread races from seven to two and back.
@@ -191,6 +196,114 @@ class _GalleryScreenState extends State<GalleryScreen>
       setState(() => _cols = _colChoices[i]);
     }
   }
+
+  /// List / small / medium / large — an explicit alternative to the pinch gesture.
+  Widget _viewSwitcher() {
+    final cs = Theme.of(context).colorScheme;
+    final grid = !_listView;
+    Widget btn(IconData ic, bool on, VoidCallback onTap) => Expanded(
+          child: InkWell(
+            onTap: onTap,
+            borderRadius: BorderRadius.circular(9),
+            child: Container(
+              padding: const EdgeInsets.symmetric(vertical: 7),
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: on ? cs.primary : Colors.transparent,
+                borderRadius: BorderRadius.circular(9),
+              ),
+              child: Icon(ic, size: 18, color: on ? Colors.white : cs.onSurfaceVariant),
+            ),
+          ),
+        );
+    return Container(
+      padding: const EdgeInsets.all(3),
+      decoration: BoxDecoration(
+        color: cs.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(children: [
+        btn(Icons.view_list, _listView, () => setState(() => _listView = true)),
+        btn(Icons.grid_on, grid && _cols >= 5, () => setState(() { _listView = false; _cols = 5; })),
+        btn(Icons.grid_view, grid && _cols == 3, () => setState(() { _listView = false; _cols = 3; })),
+        btn(Icons.crop_square, grid && _cols == 2, () => setState(() { _listView = false; _cols = 2; })),
+      ]),
+    );
+  }
+
+  /// One day's photos as a list of rows (used when _listView is on).
+  Widget _daySliverList(List<Photo> photos) {
+    // Same URL rule PhotoTile uses: an absolute thumb URL as-is, a relative one
+    // prefixed with the server address. The signed token rides in the query
+    // string, so no auth header is needed.
+    final base = context.read<Session>().baseUrl ?? '';
+    return SliverList(
+      delegate: SliverChildBuilderDelegate(
+        (ctx, i) {
+          final p = photos[i];
+          final url = p.thumbUrl.startsWith('http') ? p.thumbUrl : '$base${p.thumbUrl}';
+          final sub = [
+            if (p.takenAt != null) fmtDate(p.takenAt),
+            if (p.isVideo && p.durationLabel.isNotEmpty) p.durationLabel,
+          ].join(' · ');
+          return InkWell(
+            onTap: () {
+              if (_selecting) {
+                _toggle(p);
+                return;
+              }
+              Navigator.of(context).push(MaterialPageRoute(
+                builder: (_) => PhotoViewer(
+                  photos: _photos,
+                  initialIndex: _photos.indexOf(p),
+                  onChanged: () => _load(reset: true),
+                ),
+              ));
+            },
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+              child: Row(children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(9),
+                  child: Stack(alignment: Alignment.bottomRight, children: [
+                    Image.network(url,
+                        width: 56, height: 56, fit: BoxFit.cover,
+                        errorBuilder: (_, _, _) => Container(
+                            width: 56,
+                            height: 56,
+                            color: Colors.black26,
+                            child: Icon(p.isVideo ? Icons.videocam : Icons.image,
+                                color: Colors.white38))),
+                    if (p.isVideo)
+                      const Padding(
+                          padding: EdgeInsets.all(3),
+                          child: Icon(Icons.play_circle_fill, size: 16, color: Colors.white)),
+                  ]),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Text(p.isVideo ? 'Video' : 'Photo',
+                        style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+                    if (sub.isNotEmpty) ...[
+                      const SizedBox(height: 2),
+                      Text(sub, style: Theme.of(ctx).textTheme.bodySmall),
+                    ],
+                  ]),
+                ),
+                if (_selected.contains(p.id))
+                  Icon(Icons.check_circle, size: 20, color: Theme.of(ctx).colorScheme.primary)
+                else if (p.isFavourite)
+                  const Icon(Icons.star, size: 16, color: Color(0xFFFFCF4D)),
+              ]),
+            ),
+          );
+        },
+        childCount: photos.length,
+      ),
+    );
+  }
+
   Timer? _debounce;
 
   // ------------------------------------------------------------ selection ---
@@ -683,6 +796,8 @@ class _GalleryScreenState extends State<GalleryScreen>
                               ),
                       ),
                     ),
+                    const SizedBox(height: 8),
+                    _viewSwitcher(),
                     // WHO IS IN THIS LIBRARY — the answer the search box
                     // could not give. Tap a face to narrow the grid to them.
                     if (_people.isNotEmpty) ...[
@@ -822,7 +937,9 @@ class _GalleryScreenState extends State<GalleryScreen>
                     child: _DayHeader(day: g.day, monthOnly: _byMonth)),
                 SliverPadding(
                   padding: const EdgeInsets.symmetric(horizontal: 2),
-                  sliver: SliverGrid(
+                  sliver: _listView
+                      ? _daySliverList(g.photos)
+                      : SliverGrid(
                     // Not const — the column count is a pinch away from
                     // changing, which is the whole point.
                     gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
