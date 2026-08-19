@@ -796,8 +796,13 @@ class _GalleryScreenState extends State<GalleryScreen>
                               ),
                       ),
                     ),
-                    const SizedBox(height: 8),
-                    _viewSwitcher(),
+                    // Only when there is something to view — no point offering
+                    // list/grid on an empty gallery, and keeping it out of the
+                    // empty layout is what lets the header fit an iPhone SE.
+                    if (_photos.isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      _viewSwitcher(),
+                    ],
                     // WHO IS IN THIS LIBRARY — the answer the search box
                     // could not give. Tap a face to narrow the grid to them.
                     if (_people.isNotEmpty) ...[
