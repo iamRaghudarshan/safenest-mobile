@@ -20,6 +20,8 @@
 /// are safe.
 library;
 
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:photo_manager/photo_manager.dart';
 import 'package:provider/provider.dart';
@@ -319,6 +321,16 @@ class _BackupScreenState extends State<BackupScreen> {
               const SizedBox(height: 12),
             ],
 
+            // WHICH files, not just how many. "2 not sent" is a number to worry
+            // about; two thumbnails you recognise — "oh, those two clips still
+            // in iCloud" — is a thing you can act on. Tapping one says why it
+            // stuck. Only where there is a real service behind it: the test
+            // path renders a state with no photo library to draw from.
+            if (_service != null && _service!.failedAssets.isNotEmpty) ...[
+              _notSentGrid(theme),
+              const SizedBox(height: 12),
+            ],
+
             // Retry only what failed. Nearly every cause here is one thing
             // affecting many photos and is fixed in seconds — a sleeping
             // computer, an expired session. Making someone re-walk twenty
@@ -427,6 +439,56 @@ class _BackupScreenState extends State<BackupScreen> {
   bool _looksLikePermission(String m) =>
       m.contains('allowed to see') || m.contains('All Photos');
 
+  /// The actual files that did not go, as thumbnails read straight from the
+  /// phone's library — these never reached the computer, so there is nowhere
+  /// else a picture of them could come from. Capped: a backup that failed
+  /// wholesale (offline, expired session) can have thousands, and a Wrap of
+  /// thousands of image futures would jank the screen it is meant to explain.
+  Widget _notSentGrid(ThemeData theme) {
+    final assets = _service!.failedAssets;
+    const cap = 48;
+    final shown = assets.take(cap).toList();
+    final extra = assets.length - shown.length;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(13),
+      decoration: BoxDecoration(
+        color: kDanger.withValues(alpha: 0.06),
+        borderRadius: BorderRadius.circular(kRadiusSm),
+        border: Border.all(color: kDanger.withValues(alpha: 0.30)),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text('The ${assets.length} not sent',
+            style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13.5)),
+        const SizedBox(height: 3),
+        Text(
+            'Tap one to see why. They are still on this phone — they just have '
+            'not reached your computer yet.',
+            style: TextStyle(
+                fontSize: 12,
+                height: 1.4,
+                color: theme.colorScheme.onSurfaceVariant)),
+        const SizedBox(height: 10),
+        Wrap(spacing: 7, runSpacing: 7, children: [
+          for (final a in shown)
+            _FailedThumb(a, reason: _service!.reasonFor(a.id)),
+          if (extra > 0)
+            Container(
+              width: 72,
+              height: 72,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: theme.colorScheme.surfaceContainerHighest,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Text('+$extra',
+                  style: const TextStyle(fontWeight: FontWeight.w800)),
+            ),
+        ]),
+      ]),
+    );
+  }
+
   /// done / already there / could not be sent, as tinted pills.
   ///
   /// "could not be READ" was the old wording and it was wrong: the photo read
@@ -456,4 +518,92 @@ class _BackupScreenState extends State<BackupScreen> {
         ),
         child: child,
       );
+}
+
+/// One not-sent file as a small square, tapped for the reason it stuck.
+///
+/// The picture comes from `photo_manager`, not the server: the whole point is
+/// that these files never reached the computer, so the library is the only
+/// place a thumbnail of them exists. A video carries a small marker so a stuck
+/// clip is not mistaken for a photo.
+class _FailedThumb extends StatelessWidget {
+  const _FailedThumb(this.asset, {required this.reason});
+
+  final AssetEntity asset;
+  final String reason;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return GestureDetector(
+      onTap: () => showModalBottomSheet<void>(
+        context: context,
+        showDragHandle: true,
+        builder: (ctx) => Padding(
+          padding: const EdgeInsets.fromLTRB(20, 0, 20, 28),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Row(children: [
+              Icon(asset.type == AssetType.video
+                  ? Icons.videocam_outlined
+                  : Icons.image_outlined),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(asset.title?.isNotEmpty == true
+                    ? asset.title!
+                    : 'This ${asset.type == AssetType.video ? 'video' : 'photo'}',
+                    style: const TextStyle(fontWeight: FontWeight.w800)),
+              ),
+            ]),
+            const SizedBox(height: 12),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                  reason.isEmpty ? 'It could not be sent this time.' : reason,
+                  style: TextStyle(
+                      height: 1.5, color: theme.colorScheme.onSurfaceVariant)),
+            ),
+          ]),
+        ),
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(10),
+        child: SizedBox(
+          width: 72,
+          height: 72,
+          child: Stack(fit: StackFit.expand, children: [
+            FutureBuilder<Uint8List?>(
+              future:
+                  asset.thumbnailDataWithSize(const ThumbnailSize.square(200)),
+              builder: (ctx, snap) => snap.data == null
+                  ? Container(
+                      color: theme.colorScheme.surfaceContainerHighest,
+                      child: Icon(Icons.photo_outlined,
+                          color: theme.colorScheme.outline, size: 20))
+                  : Image.memory(snap.data!,
+                      fit: BoxFit.cover, gaplessPlayback: true),
+            ),
+            // A red corner so a stuck file reads as stuck at a glance, not just
+            // as another thumbnail in a grid.
+            Positioned(
+              right: 3,
+              top: 3,
+              child: Icon(Icons.cloud_off,
+                  size: 14, color: kDanger, shadows: const [
+                    Shadow(color: Colors.black54, blurRadius: 3)
+                  ]),
+            ),
+            if (asset.type == AssetType.video)
+              const Positioned(
+                left: 3,
+                bottom: 3,
+                child: Icon(Icons.play_circle_fill,
+                    size: 16, color: Colors.white, shadows: [
+                      Shadow(color: Colors.black54, blurRadius: 3)
+                    ]),
+              ),
+          ]),
+        ),
+      ),
+    );
+  }
 }

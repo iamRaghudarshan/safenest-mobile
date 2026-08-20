@@ -361,6 +361,7 @@ class BackupService extends ChangeNotifier {
     // over would report a problem that has just been fixed.
     _problems.clear();
     _failedAssets.clear();
+    _failReason.clear();
     _emit(const BackupProgress(
         state: BackupState.scanning, message: 'Looking through your photos…'));
 
@@ -582,6 +583,7 @@ class BackupService extends ChangeNotifier {
     final queue = List<AssetEntity>.from(_failedAssets);
     _failedAssets.clear();
     _problems.clear();
+    _failReason.clear();
 
     final total = queue.length;
     var ok = 0, bad = 0;
@@ -636,7 +638,23 @@ class BackupService extends ChangeNotifier {
   /// scan of twenty thousand photos.
   final List<AssetEntity> _failedAssets = [];
 
-  void _blame(String reason) => _problems[reason] = (_problems[reason] ?? 0) + 1;
+  /// The reason each failed asset did not go, keyed by asset id. `_problems`
+  /// counts causes for the summary; this ties one cause to one photo so the
+  /// screen can show the person WHICH files are stuck, not merely how many.
+  final Map<String, String> _failReason = {};
+
+  /// The actual photos that did not go, newest struggle first, so the screen can
+  /// show them as thumbnails. Unmodifiable — the list is owned by the run.
+  List<AssetEntity> get failedAssets => List.unmodifiable(_failedAssets);
+
+  /// Why this specific photo did not go, in the server's own terms; '' if it
+  /// was not one of the failures.
+  String reasonFor(String assetId) => _failReason[assetId] ?? '';
+
+  void _blame(AssetEntity asset, String reason) {
+    _problems[reason] = (_problems[reason] ?? 0) + 1;
+    _failReason[asset.id] = reason;
+  }
 
   /// The causes, worst first, as sentences a person can act on.
   List<String> get problemLines {
@@ -653,13 +671,13 @@ class BackupService extends ChangeNotifier {
       // is slower and loses the original. The server decodes HEIC itself.
       final f = await asset.originFile;
       if (f == null || !await f.exists()) {
-        _blame('stored in iCloud rather than on this phone. Open them in '
+        _blame(asset, 'stored in iCloud rather than on this phone. Open them in '
             'Photos once, or turn off "Optimise Storage".');
         return _Sent.failed;
       }
       final bytes = await f.readAsBytes();
       if (bytes.isEmpty) {
-        _blame('in iCloud rather than on the phone.');
+        _blame(asset, 'in iCloud rather than on the phone.');
         return _Sent.failed;
       }
 
@@ -686,7 +704,7 @@ class BackupService extends ChangeNotifier {
       }
       // Naming the cause is the entire difference between a person fixing this
       // in ten seconds and reporting "backup does not work".
-      _blame(switch (r.status) {
+      _blame(asset, switch (r.status) {
         0 => 'your computer could not be reached. Check it is awake and that '
             'the address in Profile is right.',
         401 => 'your session has expired. Sign out and back in.',
@@ -700,7 +718,7 @@ class BackupService extends ChangeNotifier {
       });
       return _Sent.failed;
     } catch (_) {
-      _blame('could not be read from this phone.');
+      _blame(asset, 'could not be read from this phone.');
       return _Sent.failed;
     }
   }
