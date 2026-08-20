@@ -71,6 +71,9 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   int _index = 0;
+  // Bumped when a pushed module returns, so the Home and Modules count tiles
+  // re-read the dashboard instead of showing a number that is now stale.
+  int _refreshTick = 0;
   Set<String>? _allowed;
 
   @override
@@ -128,7 +131,14 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   /// Jump to a tab by key, or push a module that has no tab of its own.
-  void _open(String key) {
+  ///
+  /// Anything PUSHED (Habits, Documents, Gallery, Vault, a record list) can
+  /// change a count while it is open — add a habit and the Home and Modules
+  /// tiles were left showing the old number, because an IndexedStack keeps those
+  /// tabs alive and they had loaded once. Bumping `_refreshTick` on return makes
+  /// both re-read /api/dashboard, so a habit added on its own screen shows up the
+  /// moment you come back.
+  Future<void> _open(String key) async {
     final i = _visible.indexWhere((t) => t.key == key);
     if (i >= 0) {
       setState(() => _index = i);
@@ -136,8 +146,9 @@ class _HomeScreenState extends State<HomeScreen> {
     }
     final spec = moduleByKey(key);
     if (spec != null) {
-      Navigator.of(context)
+      await Navigator.of(context)
           .push(MaterialPageRoute(builder: (_) => ModuleListScreen(spec: spec)));
+      if (mounted) setState(() => _refreshTick++);
       return;
     }
     // The screens that are not record modules. Gallery was missing here as well
@@ -147,11 +158,13 @@ class _HomeScreenState extends State<HomeScreen> {
     // is the hardest kind of broken to report.
     switch (key) {
       case 'habits':
-        Navigator.of(context)
+        await Navigator.of(context)
             .push(MaterialPageRoute(builder: (_) => const HabitsScreen()));
+        if (mounted) setState(() => _refreshTick++);
       case 'documents':
-        Navigator.of(context)
+        await Navigator.of(context)
             .push(MaterialPageRoute(builder: (_) => const DocumentsScreen()));
+        if (mounted) setState(() => _refreshTick++);
       case 'gallery':
         Navigator.of(context)
             .push(MaterialPageRoute(builder: (_) => const PhotosHome()));
@@ -171,9 +184,10 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget _screenFor(_Tab t) {
     switch (t.key) {
       case 'home':
-        return DashboardScreen(onOpen: _open);
+        return DashboardScreen(onOpen: _open, refreshTick: _refreshTick);
       case 'modules':
-        return ModulesScreen(onOpen: _open, allowed: _allowed);
+        return ModulesScreen(
+            onOpen: _open, allowed: _allowed, refreshTick: _refreshTick);
       case 'expenses':
         return ModuleListScreen(spec: moduleByKey('expenses')!, embedded: true);
       case 'reminders':

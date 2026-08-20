@@ -18,9 +18,14 @@ import '../session.dart';
 import '../theme.dart';
 
 class ModulesScreen extends StatefulWidget {
-  const ModulesScreen({super.key, required this.onOpen, this.allowed});
+  const ModulesScreen(
+      {super.key, required this.onOpen, this.allowed, this.refreshTick = 0});
   final void Function(String key) onOpen;
   final Set<String>? allowed;
+
+  /// Home bumps this when a pushed module returns, so a newly added habit's
+  /// count is re-read instead of the tile keeping the number it loaded once.
+  final int refreshTick;
 
   @override
   State<ModulesScreen> createState() => _ModulesScreenState();
@@ -35,6 +40,12 @@ class _ModulesScreenState extends State<ModulesScreen> {
   void initState() {
     super.initState();
     _load();
+  }
+
+  @override
+  void didUpdateWidget(ModulesScreen old) {
+    super.didUpdateWidget(old);
+    if (widget.refreshTick != old.refreshTick) _load();
   }
 
   Future<void> _load() async {

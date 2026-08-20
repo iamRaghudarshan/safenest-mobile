@@ -231,6 +231,87 @@ class _GalleryScreenState extends State<GalleryScreen>
     );
   }
 
+  /// Every quick filter behind ONE menu, instead of a wrapping row of chips that
+  /// filled half the screen. The button shows how many filters are on; the person
+  /// chip stays separate because it is a filter you remove, not one you pick.
+  Widget _filterBar() {
+    final cs = Theme.of(context).colorScheme;
+    final active = (_favesOnly ? 1 : 0) +
+        (_mediaKind.isNotEmpty ? 1 : 0) +
+        (_recent ? 1 : 0);
+    return Row(children: [
+      if (_personId != 0) ...[
+        InputChip(
+          avatar: const Icon(Icons.person, size: 18),
+          label: Text(_personName.isEmpty ? 'This person' : _personName),
+          onDeleted: () {
+            setState(() {
+              _personId = 0;
+              _personName = '';
+            });
+            _load(reset: true);
+          },
+        ),
+        const SizedBox(width: 8),
+      ],
+      PopupMenuButton<String>(
+        tooltip: 'Filter photos',
+        onSelected: (v) {
+          setState(() {
+            switch (v) {
+              case 'fav':
+                _favesOnly = !_favesOnly;
+              case 'photos':
+                _mediaKind = _mediaKind == 'photos' ? '' : 'photos';
+              case 'videos':
+                _mediaKind = _mediaKind == 'videos' ? '' : 'videos';
+              case 'screenshots':
+                _mediaKind = _mediaKind == 'screenshots' ? '' : 'screenshots';
+              case 'recent':
+                _recent = !_recent;
+              case 'clear':
+                _favesOnly = false;
+                _mediaKind = '';
+                _recent = false;
+            }
+          });
+          _load(reset: true);
+        },
+        itemBuilder: (_) => [
+          CheckedPopupMenuItem(value: 'fav', checked: _favesOnly, child: const Text('Favourites')),
+          CheckedPopupMenuItem(value: 'photos', checked: _mediaKind == 'photos', child: const Text('Photos only')),
+          CheckedPopupMenuItem(value: 'videos', checked: _mediaKind == 'videos', child: const Text('Videos only')),
+          CheckedPopupMenuItem(value: 'screenshots', checked: _mediaKind == 'screenshots', child: const Text('Screenshots')),
+          CheckedPopupMenuItem(value: 'recent', checked: _recent, child: const Text('Recently added')),
+          if (active > 0) const PopupMenuDivider(),
+          if (active > 0) const PopupMenuItem(value: 'clear', child: Text('Clear filters')),
+        ],
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+          decoration: BoxDecoration(
+            color: active > 0 ? cs.primary : cs.surfaceContainerHighest,
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Icon(Icons.tune, size: 18, color: active > 0 ? Colors.white : cs.onSurfaceVariant),
+            const SizedBox(width: 6),
+            Text(active > 0 ? 'Filter · $active' : 'Filter',
+                style: TextStyle(fontWeight: FontWeight.w600, color: active > 0 ? Colors.white : cs.onSurface)),
+          ]),
+        ),
+      ),
+      const Spacer(),
+      FilterChip(
+        label: const Text('✨ Smart'),
+        selected: _smart,
+        onSelected: (v) {
+          setState(() => _smart = v);
+          if (_query.isNotEmpty) _load(reset: true);
+        },
+      ),
+    ]);
+  }
+
   /// One day's photos as a list of rows (used when _listView is on).
   Widget _daySliverList(List<Photo> photos) {
     // Same URL rule PhotoTile uses: an absolute thumb URL as-is, a relative one
@@ -838,81 +919,17 @@ class _GalleryScreenState extends State<GalleryScreen>
                         ),
                       ),
                     ],
-                    const SizedBox(height: 8),
-                    Wrap(spacing: 8, children: [
-                      if (_personId != 0)
-                        InputChip(
-                          avatar: const Icon(Icons.person, size: 18),
-                          label: Text(_personName.isEmpty ? 'This person' : _personName),
-                          onDeleted: () {
-                            setState(() {
-                              _personId = 0;
-                              _personName = '';
-                            });
-                            _load(reset: true);
-                          },
-                        ),
-                      FilterChip(
-                        label: const Text('★ Favourites'),
-                        selected: _favesOnly,
-                        onSelected: (v) {
-                          setState(() => _favesOnly = v);
-                          _load(reset: true);
-                        },
-                      ),
-                      // Photos and videos are one library, filtered — not two
-                      // tabs. They were taken on the same day and belong next
-                      // to each other; the filter is for the times you want
-                      // only one of them.
-                      FilterChip(
-                        label: const Text('🖼 Photos'),
-                        selected: _mediaKind == 'photos',
-                        onSelected: (v) {
-                          setState(() => _mediaKind = v ? 'photos' : '');
-                          _load(reset: true);
-                        },
-                      ),
-                      FilterChip(
-                        label: const Text('🎬 Videos'),
-                        selected: _mediaKind == 'videos',
-                        onSelected: (v) {
-                          setState(() => _mediaKind = v ? 'videos' : '');
-                          _load(reset: true);
-                        },
-                      ),
-                      // Both of these the server has always answered and
-                      // only the Collections screen ever asked for. Somebody
-                      // standing in the gallery wanting just their screenshots
-                      // had to leave it, find the collection, and lose every
-                      // other filter they had set.
-                      FilterChip(
-                        label: const Text('📱 Screenshots'),
-                        selected: _mediaKind == 'screenshots',
-                        onSelected: (v) {
-                          setState(() => _mediaKind = v ? 'screenshots' : '');
-                          _load(reset: true);
-                        },
-                      ),
-                      FilterChip(
-                        label: const Text('🕑 Recently added'),
-                        selected: _recent,
-                        onSelected: (v) {
-                          setState(() => _recent = v);
-                          _load(reset: true);
-                        },
-                      ),
-                      // Content search is only meaningful with a search term —
-                      // offering it against an empty box would return nothing
-                      // and look broken.
-                      FilterChip(
-                        label: const Text('✨ What’s in the photo'),
-                        selected: _smart,
-                        onSelected: (v) {
-                          setState(() => _smart = v);
-                          if (_query.isNotEmpty) _load(reset: true);
-                        },
-                      ),
-                    ]),
+                    // One tidy filter row — and only when there is something to
+                    // filter (or a filter is already on), so an empty gallery is
+                    // not buried under chips.
+                    if (_photos.isNotEmpty ||
+                        _favesOnly ||
+                        _mediaKind.isNotEmpty ||
+                        _recent ||
+                        _personId != 0) ...[
+                      const SizedBox(height: 8),
+                      _filterBar(),
+                    ],
                   ],
                 ),
               ),

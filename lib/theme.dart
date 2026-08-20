@@ -24,8 +24,10 @@ const kBrand2 = Color(0xFF1B96FF);
 const _lightBg = Color(0xFFF4F5FB);       // --bg
 const _lightElev = Color(0xFFFFFFFF);     // --bg-elev / --card
 const _lightInk = Color(0xFF12132A);      // --ink
-const _lightInkSoft = Color(0xFF5A5D78);  // --ink-soft
-const _lightInkFaint = Color(0xFF9A9DB5); // --ink-faint
+// Darkened so secondary text (dates, captions, hints) reads clearly instead of a
+// faint grey. Kept in step with the web --ink-soft / --ink-faint.
+const _lightInkSoft = Color(0xFF34364E);  // --ink-soft
+const _lightInkFaint = Color(0xFF5A5D78); // --ink-faint
 const _lightLine = Color(0xFFE7E8F2);     // --line
 
 /// Dark — :root[data-theme='dark']

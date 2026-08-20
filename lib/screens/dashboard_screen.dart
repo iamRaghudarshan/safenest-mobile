@@ -29,12 +29,17 @@ class DashboardScreen extends StatefulWidget {
   const DashboardScreen({
     super.key,
     required this.onOpen,
+    this.refreshTick = 0,
     this.initialData,
     this.initialBrief,
   });
 
   /// Opens another tab or module by key — 'expenses', 'gallery', 'modules'.
   final void Function(String key) onOpen;
+
+  /// Home bumps this when a pushed module returns; a change re-reads the
+  /// dashboard so a habit (or anything) added on another screen shows here.
+  final int refreshTick;
 
   /// Supplied ONLY by tests, so this screen can be laid out with realistic
   /// content and no server. It exists because the overflow that reached a real
@@ -72,6 +77,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
       return;
     }
     _load();
+  }
+
+  @override
+  void didUpdateWidget(DashboardScreen old) {
+    super.didUpdateWidget(old);
+    // A pushed module (a habit added, a bill paid) has returned; re-read so the
+    // dues, snapshot and habits-today all reflect it. Tests pass no tick.
+    if (widget.refreshTick != old.refreshTick && widget.initialData == null) {
+      _load();
+    }
   }
 
   Future<void> _load() async {
@@ -296,6 +311,60 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   onTap: () => widget.onOpen('documents')),
             ]),
             const SizedBox(height: 20),
+
+            // Habits today. The count lives in the same /api/dashboard payload
+            // (moduleTotals/moduleAttention), so a habit added on its own screen
+            // shows here as soon as _refreshTick re-reads it — the home page was
+            // the one place a new habit never appeared.
+            Builder(builder: (context) {
+              final totals = (_data?['moduleTotals'] ?? const {}) as Map;
+              final attn = (_data?['moduleAttention'] ?? const {}) as Map;
+              final total = (totals['habits'] as num?)?.toInt() ?? 0;
+              if (total == 0) return const SizedBox.shrink();
+              final todo = (attn['habits'] as num?)?.toInt() ?? 0;
+              final word = total == 1 ? 'habit' : 'habits';
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 20),
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(16),
+                  onTap: () => widget.onOpen('habits'),
+                  child: BrandCard(
+                    child: Row(children: [
+                      Container(
+                        width: 46,
+                        height: 46,
+                        decoration: BoxDecoration(
+                          color: kModuleColours['habits'],
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: const Icon(Icons.local_fire_department,
+                            color: Colors.white),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('Habits',
+                                style: theme.textTheme.titleSmall),
+                            Text(
+                                todo == 0
+                                    ? 'All done for today · $total $word'
+                                    : '$todo of $total to do today',
+                                style: theme.textTheme.bodySmall),
+                          ],
+                        ),
+                      ),
+                      Icon(todo == 0 ? Icons.check_circle : Icons.chevron_right,
+                          color: todo == 0
+                              ? kOk
+                              : theme.textTheme.bodySmall?.color),
+                    ]),
+                  ),
+                ),
+              );
+            }),
 
             _SectionTitle('Snapshot'),
             const SizedBox(height: 8),

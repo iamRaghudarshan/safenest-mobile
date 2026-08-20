@@ -91,6 +91,10 @@ class BackupService extends ChangeNotifier {
   // Set once the one-time "fill in durations for already-uploaded videos" pass has
   // run, so it never repeats its extra hashing on later backups.
   static const _backfillKey = 'backup.durations.backfilled';
+  // A newer, separate one-time pass: server-side duration re-scan from the video
+  // container + phone-rendered posters for the black HEVC tiles. Separate key so
+  // it runs once even for users who already passed the durations backfill.
+  static const _repairKey = 'backup.videos.repaired.v1';
   static const _concurrency = 4;
 
   BackupProgress _p = const BackupProgress();
@@ -256,6 +260,9 @@ class BackupService extends ChangeNotifier {
       // were uploaded before the phone sent duration (they show "0:01"). Best
       // effort, after the real work, and never repeats.
       await _backfillDurations();
+      // Fix the videos already on the computer: real durations from their
+      // containers, and posters for the black HEVC tiles. Once, best effort.
+      await _repairVideos();
     } finally {
       await _keepAwake(false);
       _busy = false;
@@ -295,6 +302,57 @@ class BackupService extends ChangeNotifier {
       }
       if (!_stop) await prefs.setBool(_backfillKey, true);
     } catch (_) {/* best effort; a failure just means it runs again next time */}
+  }
+
+  /// Send the phone's poster for one video, keyed by the hash the server holds
+  /// (`sourceHash` = sha256 of the exact bytes uploaded, the same key /have uses).
+  Future<void> _sendPoster(AssetEntity asset, String sourceHash) async {
+    try {
+      final jpeg = await asset.thumbnailDataWithSize(
+          const ThumbnailSize(1080, 1080));
+      if (jpeg == null || jpeg.isEmpty) return;
+      await _api.postMultipartFiles('/api/gallery/poster',
+          fileField: 'file',
+          files: [(name: 'poster.jpg', bytes: jpeg)],
+          fields: {'source_hash': sourceHash});
+    } catch (_) {/* older server, offline, or no thumbnail — never fatal */}
+  }
+
+  /// One-time repair for clips backed up before this build: ask the computer to
+  /// re-read every stored video's real length from its container (fixes the
+  /// "0:01" that the phone-side backfill could not, because those clips already
+  /// had OpenCV's bogus value), then send a poster for each so the black tiles
+  /// become real thumbnails. Runs once, after the real backup, best effort.
+  Future<void> _repairVideos() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (prefs.getBool(_repairKey) == true) return;
+    try {
+      // Server-side: authoritative and needs nothing per-video from the phone.
+      try {
+        await _api.post('/api/gallery/rescan-durations');
+      } catch (_) {/* older server — the poster pass below still helps */}
+
+      final albums = await PhotoManager.getAssetPathList(
+          onlyAll: true, type: RequestType.video);
+      if (albums.isEmpty) { await prefs.setBool(_repairKey, true); return; }
+      final all = albums.first;
+      final count = await all.assetCountAsync;
+      const page = 100;
+      for (var off = 0; off < count && !_stop; off += page) {
+        final batch = await all.getAssetListRange(start: off, end: off + page);
+        for (final a in batch) {
+          if (_stop) break;
+          try {
+            final f = await a.originFile;
+            if (f == null || !await f.exists()) continue;
+            // Stream the hash — never pull a 100 MB clip into memory here.
+            final hash = (await sha256.bind(f.openRead()).first).toString();
+            await _sendPoster(a, hash);
+          } catch (_) {/* unreadable or iCloud-only — skip */}
+        }
+      }
+      if (!_stop) await prefs.setBool(_repairKey, true);
+    } catch (_) {/* best effort; runs again next time if it did not finish */}
   }
 
   Future<void> _runFullBackup() async {
@@ -612,6 +670,13 @@ class BackupService extends ChangeNotifier {
           durationMs: asset.duration > 0 ? asset.duration * 1000 : 0);
       if (r.status >= 200 && r.status < 300) {
         await _remember(asset.id);
+        // A video's poster comes from the phone, which decodes HEVC where the
+        // computer's OpenCV cannot — without it every iPhone clip showed the
+        // neutral "black" tile. Best effort, keyed by the same hash the server
+        // stores, and skipped for photos (they poster themselves).
+        if (asset.type == AssetType.video) {
+          await _sendPoster(asset, sha256.convert(bytes).toString());
+        }
         // The server answers 200 for a photo it already holds, saying so in
         // the body. Counted as new, that is a backup claiming to have sent
         // thousands while the gallery gains none — which is exactly what a
