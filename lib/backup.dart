@@ -508,10 +508,23 @@ class BackupService extends ChangeNotifier {
       // through the whole library, then jumped to 100% at the end.
       report();
 
-      // Four at a time, matching what the server was measured to do best.
-      for (var i = 0; i < todo.length; i += _concurrency) {
+      // Photos four at a time (measured best); a VIDEO takes the uplink to
+      // itself. Four 50 MB clips sharing one home upstream each take four times
+      // as long and time out — the phone reports "could not be reached" — while a
+      // single one gets through (measured at 67s for 51 MB over the tunnel). So
+      // videos upload one at a time and small photos still batch.
+      var i = 0;
+      while (i < todo.length) {
         if (_stop) break;
-        final slice = todo.skip(i).take(_concurrency).toList();
+        final wantVideo = todo[i].type == AssetType.video;
+        final cap = wantVideo ? 1 : _concurrency;
+        final slice = <AssetEntity>[];
+        while (slice.length < cap &&
+            i < todo.length &&
+            (todo[i].type == AssetType.video) == wantVideo) {
+          slice.add(todo[i]);
+          i++;
+        }
         final results = await Future.wait(slice.map(_send));
         for (var k = 0; k < results.length; k++) {
           switch (results[k]) {
