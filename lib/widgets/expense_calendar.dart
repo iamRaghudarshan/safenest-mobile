@@ -99,6 +99,17 @@ class _ExpenseCalendarState extends State<ExpenseCalendar> {
       }
     }
 
+    // Heaviest single day this month, to scale the heatmap tint on the cells.
+    num maxDaySpend = 0;
+    byDay.forEach((k, list) {
+      if (k.year != _month.year || k.month != _month.month) return;
+      num s = 0;
+      for (final r in list) {
+        if (!_isIncome(r)) s += _amount(r);
+      }
+      if (s > maxDaySpend) maxDaySpend = s;
+    });
+
     final first = DateTime(_month.year, _month.month, 1);
     final daysInMonth = DateTime(_month.year, _month.month + 1, 0).day;
     // Sunday-first grid. weekday: Mon=1..Sun=7 → %7 gives Sun=0, Mon=1..Sat=6.
@@ -109,72 +120,84 @@ class _ExpenseCalendarState extends State<ExpenseCalendar> {
         _selected == null ? const <Map<String, dynamic>>[] : (byDay[_selected] ?? const []);
 
     return ListView(
-      padding: const EdgeInsets.fromLTRB(14, 4, 14, 96),
+      padding: const EdgeInsets.fromLTRB(14, 8, 14, 96),
       children: [
-        // ── Month header: ◀  Month Year  ▶  + this month's totals ─────────
-        Row(children: [
-          IconButton(
-            icon: const Icon(Icons.chevron_left),
-            onPressed: () => setState(() {
-              _month = DateTime(_month.year, _month.month - 1);
-              _selected = null;
-            }),
+        // ── The calendar itself, in one clean card ───────────────────────
+        Container(
+          padding: const EdgeInsets.fromLTRB(8, 6, 8, 12),
+          decoration: BoxDecoration(
+            color: theme.colorScheme.surface,
+            borderRadius: BorderRadius.circular(kRadius),
+            boxShadow: softShadow(theme.brightness == Brightness.dark),
           ),
-          Expanded(
-            child: Column(children: [
-              Text('${_months[_month.month - 1]} ${_month.year}',
-                  style: theme.textTheme.titleMedium
-                      ?.copyWith(fontWeight: FontWeight.w800)),
-              const SizedBox(height: 2),
-              Text(
-                income > 0
-                    ? '${_money(spent)} spent · ${_money(income)} in'
-                    : '${_money(spent)} spent',
-                style: theme.textTheme.bodySmall
-                    ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+          child: Column(children: [
+            // Month, a step either side.
+            Row(children: [
+              IconButton(
+                icon: const Icon(Icons.chevron_left),
+                onPressed: () => setState(() {
+                  _month = DateTime(_month.year, _month.month - 1);
+                  _selected = null;
+                }),
+              ),
+              Expanded(
+                child: Text('${_months[_month.month - 1]} ${_month.year}',
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.titleLarge
+                        ?.copyWith(fontWeight: FontWeight.w800)),
+              ),
+              IconButton(
+                icon: const Icon(Icons.chevron_right),
+                onPressed: () => setState(() {
+                  _month = DateTime(_month.year, _month.month + 1);
+                  _selected = null;
+                }),
               ),
             ]),
-          ),
-          IconButton(
-            icon: const Icon(Icons.chevron_right),
-            onPressed: () => setState(() {
-              _month = DateTime(_month.year, _month.month + 1);
-              _selected = null;
-            }),
-          ),
-        ]),
-        const SizedBox(height: 6),
-
-        // ── Weekday labels ───────────────────────────────────────────────
-        Row(
-          children: [
-            for (final d in const ['S', 'M', 'T', 'W', 'T', 'F', 'S'])
-              Expanded(
-                child: Center(
-                  child: Text(d,
-                      style: theme.textTheme.labelSmall?.copyWith(
-                          fontWeight: FontWeight.w700,
-                          color: theme.colorScheme.outline)),
-                ),
-              ),
-          ],
-        ),
-        const SizedBox(height: 4),
-
-        // ── The month grid ──────────────────────────────────────────────
-        for (var w = 0; w < weeks; w++)
-          Row(children: [
-            for (var d = 0; d < 7; d++)
-              _cell(
-                context,
-                dayNumber: w * 7 + d - leading + 1,
-                daysInMonth: daysInMonth,
-                byDay: byDay,
-                today: today,
-              ),
+            const SizedBox(height: 2),
+            // The month at a glance — out and in.
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 6),
+              child: Row(children: [
+                Expanded(
+                    child: _statPill(theme, 'Spent', _money(spent), _amber)),
+                const SizedBox(width: 8),
+                Expanded(child: _statPill(theme, 'Income', _money(income), kOk)),
+              ]),
+            ),
+            const SizedBox(height: 14),
+            // Weekday labels.
+            Row(
+              children: [
+                for (final d in const ['S', 'M', 'T', 'W', 'T', 'F', 'S'])
+                  Expanded(
+                    child: Center(
+                      child: Text(d,
+                          style: theme.textTheme.labelSmall?.copyWith(
+                              fontWeight: FontWeight.w700,
+                              color: theme.colorScheme.outline)),
+                    ),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            // The grid, each day tinted by how heavy it was.
+            for (var w = 0; w < weeks; w++)
+              Row(children: [
+                for (var d = 0; d < 7; d++)
+                  _cell(
+                    context,
+                    dayNumber: w * 7 + d - leading + 1,
+                    daysInMonth: daysInMonth,
+                    byDay: byDay,
+                    today: today,
+                    maxDaySpend: maxDaySpend,
+                  ),
+              ]),
           ]),
+        ),
 
-        const SizedBox(height: 14),
+        const SizedBox(height: 16),
 
         // ── The selected day's expenses ──────────────────────────────────
         if (_selected != null) ...[
@@ -209,12 +232,52 @@ class _ExpenseCalendarState extends State<ExpenseCalendar> {
     );
   }
 
+  /// A month-at-a-glance figure — spent or in — as a soft tinted tile.
+  Widget _statPill(ThemeData theme, String label, String value, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(kRadiusSm),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label,
+              style: theme.textTheme.labelSmall
+                  ?.copyWith(color: color, fontWeight: FontWeight.w700)),
+          const SizedBox(height: 1),
+          Text(value,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w800,
+                  color: color,
+                  fontFeatures: const [FontFeature.tabularFigures()])),
+        ],
+      ),
+    );
+  }
+
+  /// Compact money for a cramped cell — 1.2k, 3L — in the Indian scale that ₹ is.
+  String _short(num v) {
+    if (v >= 100000) {
+      return '${(v / 100000).toStringAsFixed(v >= 1000000 ? 0 : 1)}L';
+    }
+    if (v >= 1000) {
+      return '${(v / 1000).toStringAsFixed(v >= 10000 ? 0 : 1)}k';
+    }
+    return '${v.round()}';
+  }
+
   Widget _cell(
     BuildContext context, {
     required int dayNumber,
     required int daysInMonth,
     required Map<DateTime, List<Map<String, dynamic>>> byDay,
     required DateTime today,
+    required num maxDaySpend,
   }) {
     final theme = Theme.of(context);
     if (dayNumber < 1 || dayNumber > daysInMonth) {
@@ -229,6 +292,25 @@ class _ExpenseCalendarState extends State<ExpenseCalendar> {
       if (!_isIncome(r)) spent += _amount(r);
     }
 
+    // Heatmap: the more a day cost, the deeper its amber. A selected day fills
+    // solid so the choice is unmistakable; a deep tint or a selection flips the
+    // text to white to stay legible.
+    final t = maxDaySpend > 0 ? (spent / maxDaySpend).clamp(0.0, 1.0) : 0.0;
+    final deep = isSelected || t > 0.5;
+    Color? bg;
+    if (isSelected) {
+      bg = _amber;
+    } else if (spent > 0) {
+      bg = _amber.withValues(alpha: 0.10 + 0.42 * t);
+    } else if (items.isNotEmpty) {
+      bg = theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.5);
+    }
+    final numColor = deep
+        ? Colors.white
+        : isToday
+            ? theme.colorScheme.primary
+            : null;
+
     return Expanded(
       child: GestureDetector(
         onTap: () => setState(() => _selected = isSelected ? null : day),
@@ -236,21 +318,13 @@ class _ExpenseCalendarState extends State<ExpenseCalendar> {
           height: 50,
           margin: const EdgeInsets.all(2),
           decoration: BoxDecoration(
-            color: isSelected
-                ? _amber.withValues(alpha: 0.18)
-                : items.isNotEmpty
-                    ? theme.colorScheme.surfaceContainerHighest
-                        .withValues(alpha: 0.5)
-                    : null,
+            color: bg,
             borderRadius: BorderRadius.circular(kRadiusSm),
-            border: Border.all(
-              color: isSelected
-                  ? _amber
-                  : isToday
-                      ? theme.colorScheme.outline.withValues(alpha: 0.7)
-                      : Colors.transparent,
-              width: isSelected || isToday ? 1.5 : 1,
-            ),
+            border: isToday && !isSelected
+                ? Border.all(
+                    color: theme.colorScheme.primary.withValues(alpha: 0.7),
+                    width: 1.5)
+                : null,
           ),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
@@ -258,22 +332,20 @@ class _ExpenseCalendarState extends State<ExpenseCalendar> {
               Text('$dayNumber',
                   style: TextStyle(
                       fontSize: 13,
-                      fontWeight:
-                          isToday ? FontWeight.w800 : FontWeight.w500)),
+                      color: numColor,
+                      fontWeight: isToday || isSelected
+                          ? FontWeight.w800
+                          : FontWeight.w500)),
               if (spent > 0) ...[
                 const SizedBox(height: 1),
-                Text(
-                  spent >= 1000
-                      ? '${(spent / 1000).toStringAsFixed(spent >= 10000 ? 0 : 1)}k'
-                      : '$spent',
-                  maxLines: 1,
-                  overflow: TextOverflow.clip,
-                  style: const TextStyle(
-                      fontSize: 9.5,
-                      height: 1.1,
-                      fontWeight: FontWeight.w700,
-                      color: _amber),
-                ),
+                Text(_short(spent),
+                    maxLines: 1,
+                    overflow: TextOverflow.clip,
+                    style: TextStyle(
+                        fontSize: 9.5,
+                        height: 1.1,
+                        fontWeight: FontWeight.w700,
+                        color: deep ? Colors.white : _amber)),
               ] else if (items.isNotEmpty)
                 // Income-only day: a small green dot, no spend figure.
                 Container(

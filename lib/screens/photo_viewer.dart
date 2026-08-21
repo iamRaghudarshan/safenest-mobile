@@ -73,6 +73,14 @@ class _PhotoViewerState extends State<PhotoViewer> {
     return p.url.startsWith('http') ? p.url : '$base${p.url}';
   }
 
+  /// The video's still, shown behind the player the instant it opens so a slow
+  /// load reads as "loading this clip" rather than a black rectangle.
+  String _fullThumb(Photo p) {
+    if (p.thumbUrl.isEmpty) return '';
+    final base = context.read<Session>().baseUrl ?? '';
+    return p.thumbUrl.startsWith('http') ? p.thumbUrl : '$base${p.thumbUrl}';
+  }
+
   Future<void> _toggleFavourite() async {
     final p = _photos[_index];
     // Flipped on screen first: the server is a round trip away and a star that
@@ -195,7 +203,9 @@ class _PhotoViewerState extends State<PhotoViewer> {
               // somewhere you get sent.
               if (_photos[i].isVideo) {
                 return PhotoViewGalleryPageOptions.customChild(
-                  child: VideoPage(url: _full(_photos[i])),
+                  child: VideoPage(
+                      url: _full(_photos[i]),
+                      poster: _fullThumb(_photos[i])),
                   // Zoom off: the pinch belongs to the player's own frame, and
                   // a scaled video surface is where playback stutters.
                   minScale: PhotoViewComputedScale.contained,

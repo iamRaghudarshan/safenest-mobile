@@ -88,6 +88,9 @@ class _ModuleListScreenState extends State<ModuleListScreen> {
       _loading = false;
       return;
     }
+    // Expenses opens on the calendar — "what did a day cost" is the question this
+    // module is most often asked. The list is a tap away on the toggle.
+    _calendar = _hasCalendar;
     _load();
   }
 
