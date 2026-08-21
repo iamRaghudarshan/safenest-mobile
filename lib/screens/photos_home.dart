@@ -25,6 +25,7 @@ import '../widgets/brand_button.dart';
 import 'backup_screen.dart';
 import 'collections_home.dart';
 import 'gallery_screen.dart';
+import 'library_tabs.dart';
 import 'cleanup_screen.dart';
 import 'trash_screen.dart';
 
@@ -76,6 +77,18 @@ class _PhotosHomeState extends State<PhotosHome> {
       appBar: AppBar(
         title: const Text('Gallery'),
         actions: [
+          // Search by people, up front — a person is the thing people most often
+          // look for in a gallery, and it used to be buried under Collections.
+          IconButton(
+            tooltip: 'People',
+            icon: const Icon(Icons.people_alt_outlined),
+            onPressed: () => Navigator.of(context).push(MaterialPageRoute(
+              builder: (_) => Scaffold(
+                appBar: AppBar(title: const Text('People')),
+                body: const PeopleTab(),
+              ),
+            )),
+          ),
           IconButton(
             tooltip: 'Back up this phone',
             icon: const Icon(Icons.backup_outlined),
