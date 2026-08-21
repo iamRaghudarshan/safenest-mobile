@@ -60,6 +60,7 @@ class DashboardScreen extends StatefulWidget {
 class _DashboardScreenState extends State<DashboardScreen> {
   Map<String, dynamic>? _data;
   Map<String, dynamic>? _brief;
+  List<Map<String, dynamic>> _photos = [];
   bool _loading = true;
 
   /// Unread items in the bell.
@@ -109,6 +110,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
       final items = (n is Map ? n['items'] : null) as List? ?? const [];
       _unread = items.where((x) => (x is Map) && x['read'] != true).length;
     } catch (_) {/* a missing badge must not blank the home screen */}
+    try {
+      // A strip of the latest photos, the way Google Photos and iOS put recents
+      // on their home. A nicety, so its own try — the dues must not wait on it.
+      final g = await api.get('/api/gallery', {'limit': '12'});
+      final items = (g is Map ? g['items'] : null) as List? ?? const [];
+      _photos = [for (final e in items) Map<String, dynamic>.from(e as Map)];
+    } catch (_) {/* no photos strip; home is fine without it */}
     if (mounted) setState(() => _loading = false);
   }
 
@@ -315,6 +323,35 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 ),
               );
             }),
+
+            // A scrolling strip of the latest photos, the way a phone's own home
+            // surfaces recents — tap one (or "See all") to open the gallery.
+            if (_photos.isNotEmpty) ...[
+              Row(children: [
+                _SectionTitle('Recent photos'),
+                const Spacer(),
+                TextButton(
+                  onPressed: () => widget.onOpen('gallery'),
+                  style: TextButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      minimumSize: const Size(0, 32)),
+                  child: const Text('See all'),
+                ),
+              ]),
+              const SizedBox(height: 8),
+              SizedBox(
+                height: 96,
+                child: ListView.separated(
+                  scrollDirection: Axis.horizontal,
+                  itemCount: _photos.length,
+                  separatorBuilder: (_, _) => const SizedBox(width: 8),
+                  itemBuilder: (ctx, i) => _RecentPhotoTile(
+                      photo: _photos[i],
+                      onTap: () => widget.onOpen('gallery')),
+                ),
+              ),
+              const SizedBox(height: 20),
+            ],
 
             _SectionTitle('Snapshot'),
             const SizedBox(height: 8),
@@ -726,6 +763,52 @@ class _HeroIcon extends StatelessWidget {
             ),
           ),
       ]),
+    );
+  }
+}
+
+/// One thumbnail in the Home "Recent photos" strip. The image is the same signed
+/// thumbnail the gallery uses; a video carries a play badge so it is not mistaken
+/// for a photo.
+class _RecentPhotoTile extends StatelessWidget {
+  const _RecentPhotoTile({required this.photo, required this.onTap});
+
+  final Map<String, dynamic> photo;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final base = context.read<Session>().baseUrl ?? '';
+    final thumb = '${photo['thumb_url'] ?? ''}';
+    final url = thumb.isEmpty
+        ? ''
+        : (thumb.startsWith('http') ? thumb : '$base$thumb');
+    final isVideo = '${photo['kind'] ?? 'photo'}' == 'video';
+
+    return GestureDetector(
+      onTap: onTap,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(12),
+        child: SizedBox(
+          width: 96,
+          height: 96,
+          child: Stack(fit: StackFit.expand, children: [
+            ColoredBox(color: Theme.of(context).colorScheme.surfaceContainerHighest),
+            if (url.isNotEmpty)
+              Image.network(url,
+                  fit: BoxFit.cover,
+                  gaplessPlayback: true,
+                  errorBuilder: (_, _, _) => const SizedBox.shrink()),
+            if (isVideo)
+              const Center(
+                child: Icon(Icons.play_circle_fill,
+                    color: Colors.white,
+                    size: 28,
+                    shadows: [Shadow(color: Colors.black54, blurRadius: 4)]),
+              ),
+          ]),
+        ),
+      ),
     );
   }
 }
