@@ -112,6 +112,7 @@ class _NotificationSettingsSectionState
 
   Future<void> _toggleAlarms(bool v) async {
     final messenger = ScaffoldMessenger.of(context);
+    final api = context.read<Session>().api;
     setState(() => _busy = true);
     try {
       if (v) {
@@ -124,6 +125,24 @@ class _NotificationSettingsSectionState
               content: Text('Notifications are switched off for this app. '
                   'Turn them on in Settings and try again.')));
           return;
+        }
+        // SCHEDULE THE ALARMS NOW, from the reminders the computer already holds.
+        // The toggle used to only grant permission and set the flag — so it said
+        // "reminders will ring" and then nothing did until the Reminders screen
+        // happened to be opened and re-sync them. That gap WAS "ring like an alarm
+        // does not work".
+        try {
+          final d = await api.get('/api/reminders');
+          final list = d is List
+              ? d
+              : (d is Map ? (d['items'] ?? d['rows'] ?? const []) : const []);
+          await Alarms.instance.syncFrom([
+            for (final e in (list as List)) Map<String, dynamic>.from(e as Map)
+          ]);
+          messenger.showSnackBar(const SnackBar(
+              content: Text('Your reminders will ring on this phone.')));
+        } catch (_) {
+          // The flag is still set; opening Reminders will schedule them.
         }
       } else {
         await Alarms.instance.cancelAll();
