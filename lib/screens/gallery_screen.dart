@@ -199,64 +199,69 @@ class _GalleryScreenState extends State<GalleryScreen>
   }
 
   /// List / small / medium / large — an explicit alternative to the pinch gesture.
-  Widget _viewSwitcher() {
-    final cs = Theme.of(context).colorScheme;
-    final grid = !_listView;
-    Widget btn(IconData ic, bool on, VoidCallback onTap) => Expanded(
-          child: InkWell(
-            onTap: onTap,
-            borderRadius: BorderRadius.circular(9),
-            child: Container(
-              padding: const EdgeInsets.symmetric(vertical: 7),
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                color: on ? cs.primary : Colors.transparent,
-                borderRadius: BorderRadius.circular(9),
-              ),
-              child: Icon(ic, size: 18, color: on ? Colors.white : cs.onSurfaceVariant),
-            ),
-          ),
-        );
-    return Container(
-      padding: const EdgeInsets.all(3),
-      decoration: BoxDecoration(
-        color: cs.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Row(children: [
-        btn(Icons.view_list, _listView, () => setState(() => _listView = true)),
-        btn(Icons.grid_on, grid && _cols >= 5, () => setState(() { _listView = false; _cols = 5; })),
-        btn(Icons.grid_view, grid && _cols == 3, () => setState(() { _listView = false; _cols = 3; })),
-        btn(Icons.crop_square, grid && _cols == 2, () => setState(() { _listView = false; _cols = 2; })),
-      ]),
-    );
-  }
-
-  /// Every quick filter behind ONE menu, instead of a wrapping row of chips that
-  /// filled half the screen. The button shows how many filters are on; the person
-  /// chip stays separate because it is a filter you remove, not one you pick.
-  Widget _filterBar() {
-    final cs = Theme.of(context).colorScheme;
+  /// ONE compact toolbar — view density, filters and Smart on a single line,
+  /// instead of a full-width view rail, a filter row and a Smart chip stacked
+  /// three deep before a single photo appeared. Pinch still changes density; this
+  /// is the discoverable way to the same thing, kept small.
+  Widget _toolbar() {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
     final active = (_favesOnly ? 1 : 0) +
         (_mediaKind.isNotEmpty ? 1 : 0) +
         (_recent ? 1 : 0);
+
+    Widget pill(Widget child, {Color? bg}) => Container(
+          height: 36,
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: bg ?? cs.surfaceContainerHighest,
+            borderRadius: BorderRadius.circular(999),
+          ),
+          child: child,
+        );
+
+    final viewIcon = _listView
+        ? Icons.view_list
+        : _cols >= 5
+            ? Icons.grid_on
+            : _cols == 2
+                ? Icons.crop_square
+                : Icons.grid_view;
+
     return Row(children: [
-      if (_personId != 0) ...[
-        InputChip(
-          avatar: const Icon(Icons.person, size: 18),
-          label: Text(_personName.isEmpty ? 'This person' : _personName),
-          onDeleted: () {
-            setState(() {
-              _personId = 0;
-              _personName = '';
-            });
-            _load(reset: true);
-          },
-        ),
-        const SizedBox(width: 8),
-      ],
+      // View density — options behind a tap rather than a four-button rail.
       PopupMenuButton<String>(
-        tooltip: 'Filter photos',
+        tooltip: 'View',
+        position: PopupMenuPosition.under,
+        onSelected: (v) => setState(() {
+          switch (v) {
+            case 'list':
+              _listView = true;
+            case 'small':
+              _listView = false;
+              _cols = 5;
+            case 'medium':
+              _listView = false;
+              _cols = 3;
+            case 'large':
+              _listView = false;
+              _cols = 2;
+          }
+        }),
+        itemBuilder: (_) => [
+          CheckedPopupMenuItem(value: 'list', checked: _listView, child: const Text('List')),
+          CheckedPopupMenuItem(value: 'small', checked: !_listView && _cols >= 5, child: const Text('Small grid')),
+          CheckedPopupMenuItem(value: 'medium', checked: !_listView && _cols == 3, child: const Text('Medium grid')),
+          CheckedPopupMenuItem(value: 'large', checked: !_listView && _cols == 2, child: const Text('Large grid')),
+        ],
+        child: pill(Icon(viewIcon, size: 18, color: cs.onSurfaceVariant)),
+      ),
+      const SizedBox(width: 8),
+      // Filters — one menu; the pill carries the count when any are on.
+      PopupMenuButton<String>(
+        tooltip: 'Filter',
+        position: PopupMenuPosition.under,
         onSelected: (v) {
           setState(() {
             switch (v) {
@@ -287,30 +292,88 @@ class _GalleryScreenState extends State<GalleryScreen>
           if (active > 0) const PopupMenuDivider(),
           if (active > 0) const PopupMenuItem(value: 'clear', child: Text('Clear filters')),
         ],
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
-          decoration: BoxDecoration(
-            color: active > 0 ? cs.primary : cs.surfaceContainerHighest,
-            borderRadius: BorderRadius.circular(20),
-          ),
-          child: Row(mainAxisSize: MainAxisSize.min, children: [
-            Icon(Icons.tune, size: 18, color: active > 0 ? Colors.white : cs.onSurfaceVariant),
-            const SizedBox(width: 6),
-            Text(active > 0 ? 'Filter · $active' : 'Filter',
-                style: TextStyle(fontWeight: FontWeight.w600, color: active > 0 ? Colors.white : cs.onSurface)),
+        child: pill(
+          Row(mainAxisSize: MainAxisSize.min, children: [
+            Icon(Icons.tune,
+                size: 18, color: active > 0 ? Colors.white : cs.onSurfaceVariant),
+            if (active > 0) ...[
+              const SizedBox(width: 5),
+              Text('$active',
+                  style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 13)),
+            ],
           ]),
+          bg: active > 0 ? cs.primary : null,
         ),
       ),
-      const Spacer(),
-      FilterChip(
-        label: const Text('✨ Smart'),
-        selected: _smart,
-        onSelected: (v) {
-          setState(() => _smart = v);
+      const SizedBox(width: 8),
+      // Smart search — an icon toggle, not a labelled chip.
+      InkWell(
+        borderRadius: BorderRadius.circular(999),
+        onTap: () {
+          setState(() => _smart = !_smart);
           if (_query.isNotEmpty) _load(reset: true);
         },
+        child: pill(
+          Icon(Icons.auto_awesome,
+              size: 18, color: _smart ? Colors.white : cs.onSurfaceVariant),
+          bg: _smart ? cs.primary : null,
+        ),
       ),
+      if (_personId != 0) ...[
+        const SizedBox(width: 8),
+        Flexible(
+          child: InputChip(
+            avatar: const Icon(Icons.person, size: 16),
+            label: Text(_personName.isEmpty ? 'Person' : _personName,
+                overflow: TextOverflow.ellipsis),
+            onDeleted: () {
+              setState(() {
+                _personId = 0;
+                _personName = '';
+              });
+              _load(reset: true);
+            },
+          ),
+        ),
+      ],
+      const Spacer(),
     ]);
+  }
+
+  /// The trailing item on the face strip — the way to the full People screen,
+  /// folded into the strip instead of taking its own labelled row above it.
+  Widget _seeAllFaces() {
+    final cs = Theme.of(context).colorScheme;
+    return GestureDetector(
+      onTap: () => Navigator.of(context)
+          .push(MaterialPageRoute(
+            builder: (_) => Scaffold(
+              appBar: AppBar(title: const Text('People')),
+              body: const PeopleTab(),
+            ),
+          ))
+          .then((_) => _loadPeople()),
+      child: SizedBox(
+        width: 58,
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Container(
+            width: 52,
+            height: 52,
+            decoration: BoxDecoration(
+                shape: BoxShape.circle, color: cs.surfaceContainerHighest),
+            child: Icon(Icons.more_horiz, color: cs.onSurfaceVariant),
+          ),
+          const SizedBox(height: 6),
+          Text('See all',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 11.5, color: cs.onSurfaceVariant)),
+        ]),
+      ),
+    );
   }
 
   /// One day's photos as a list of rows (used when _listView is on).
@@ -909,47 +972,31 @@ class _GalleryScreenState extends State<GalleryScreen>
                     // Only when there is something to view — no point offering
                     // list/grid on an empty gallery, and keeping it out of the
                     // empty layout is what lets the header fit an iPhone SE.
-                    if (_photos.isNotEmpty) ...[
+                    // ONE compact toolbar — view, filters and Smart on a single
+                    // line — rather than a full-width view rail and a filter row
+                    // stacked before a single photo. Only when there is something
+                    // to act on, so an empty gallery stays bare.
+                    if (_photos.isNotEmpty ||
+                        _favesOnly ||
+                        _mediaKind.isNotEmpty ||
+                        _recent ||
+                        _personId != 0) ...[
                       const SizedBox(height: 8),
-                      _viewSwitcher(),
+                      _toolbar(),
                     ],
-                    // WHO IS IN THIS LIBRARY — the answer the search box
-                    // could not give. Tap a face to narrow the grid to them.
+                    // Faces — a quiet strip with no labelled row above it. Tap a
+                    // face to narrow the grid; the last item is the way to the
+                    // full People screen.
                     if (_people.isNotEmpty) ...[
-                      const SizedBox(height: 10),
-                      // A named row with a way through to the full People screen,
-                      // where faces are named and managed. That screen used to be
-                      // two levels down (Collections → See all); here it is one tap.
-                      Row(children: [
-                        Text('People',
-                            style: Theme.of(context)
-                                .textTheme
-                                .titleSmall
-                                ?.copyWith(fontWeight: FontWeight.w700)),
-                        const Spacer(),
-                        TextButton(
-                          onPressed: () => Navigator.of(context)
-                              .push(MaterialPageRoute(
-                                builder: (_) => Scaffold(
-                                  appBar: AppBar(title: const Text('People')),
-                                  body: const PeopleTab(),
-                                ),
-                              ))
-                              .then((_) => _loadPeople()),
-                          style: TextButton.styleFrom(
-                              padding:
-                                  const EdgeInsets.symmetric(horizontal: 8),
-                              minimumSize: const Size(0, 32)),
-                          child: const Text('See all'),
-                        ),
-                      ]),
+                      const SizedBox(height: 8),
                       SizedBox(
                         height: 78,
                         child: ListView.separated(
                           scrollDirection: Axis.horizontal,
-                          itemCount: _people.length,
+                          itemCount: _people.length + 1,
                           separatorBuilder: (_, _) => const SizedBox(width: 10),
                           itemBuilder: (ctx, i) {
+                            if (i == _people.length) return _seeAllFaces();
                             final person = _people[i];
                             final id = (person['id'] as num?)?.toInt() ?? 0;
                             return _FaceChip(
@@ -973,17 +1020,6 @@ class _GalleryScreenState extends State<GalleryScreen>
                           },
                         ),
                       ),
-                    ],
-                    // One tidy filter row — and only when there is something to
-                    // filter (or a filter is already on), so an empty gallery is
-                    // not buried under chips.
-                    if (_photos.isNotEmpty ||
-                        _favesOnly ||
-                        _mediaKind.isNotEmpty ||
-                        _recent ||
-                        _personId != 0) ...[
-                      const SizedBox(height: 8),
-                      _filterBar(),
                     ],
                   ],
                 ),

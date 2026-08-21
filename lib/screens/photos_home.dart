@@ -111,12 +111,23 @@ class _PhotosHomeState extends State<PhotosHome> {
             },
           ),
         ),
-        // A live backup status + entry, right here on the gallery, so you can see
-        // it running and start it without hunting for a separate screen.
+        // A live backup status, but ONLY when it has something to report — a run
+        // in progress or one that needs attention. "Back up this phone" and
+        // "everything is backed up" are the idle common case, and a full-width
+        // banner for them just pushes every photo down the screen; the cloud icon
+        // in the bar (and the empty-gallery prompt) already start a backup.
         if (_tab == 0 && _backup != null)
           ListenableBuilder(
             listenable: _backup!,
-            builder: (context, _) => _backupStrip(context, _backup!.progress),
+            builder: (context, _) {
+              final st = _backup!.progress.state;
+              if (st != BackupState.running &&
+                  st != BackupState.scanning &&
+                  st != BackupState.failed) {
+                return const SizedBox.shrink();
+              }
+              return _backupStrip(context, _backup!.progress);
+            },
           ),
         Expanded(
           // IndexedStack, so the grid keeps its scroll position and its paging
