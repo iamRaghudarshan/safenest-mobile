@@ -21,6 +21,8 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:timezone/data/latest_all.dart' as tzdata;
 import 'package:timezone/timezone.dart' as tz;
 
+import 'dates.dart';
+
 class Alarms {
   Alarms._();
   static final Alarms instance = Alarms._();
@@ -194,7 +196,12 @@ class Alarms {
   /// reminder with no time is treated as 9am rather than midnight: an alarm at
   /// 00:00 wakes somebody up for a bill.
   DateTime? _whenOf(Map<String, dynamic> r) {
-    final date = DateTime.tryParse('${r['due_date'] ?? ''}');
+    // parseDate, not raw DateTime.tryParse: the rest of the app reads dates that
+    // way and it handles dd-mm-yyyy as well as ISO. A raw tryParse silently
+    // returns null on anything but ISO, and a null here is a reminder that never
+    // gets an alarm at all — a quiet way for every reminder to stop ringing if
+    // the server's date wording ever changes.
+    final date = parseDate('${r['due_date'] ?? ''}');
     if (date == null) return null;
     final t = '${r['due_time'] ?? ''}'.trim();
     var hour = 9, minute = 0;
