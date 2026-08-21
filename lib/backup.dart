@@ -95,6 +95,12 @@ class BackupService extends ChangeNotifier {
   // container + phone-rendered posters for the black HEVC tiles. Separate key so
   // it runs once even for users who already passed the durations backfill.
   static const _repairKey = 'backup.videos.repaired.v1';
+  // A third one-time pass: ask the computer to repair libraries stored before
+  // fast-start and before HEIC classification — put HEIC photos that were stored
+  // as 0:01 "videos" back to photos, and fast-start clips whose index sat at the
+  // end (slow to begin playing). Separate key so it runs once even on a phone
+  // that already passed v1.
+  static const _repairV2Key = 'backup.videos.repaired.v2';
   static const _concurrency = 4;
 
   BackupProgress _p = const BackupProgress();
@@ -325,6 +331,15 @@ class BackupService extends ChangeNotifier {
   /// become real thumbnails. Runs once, after the real backup, best effort.
   Future<void> _repairVideos() async {
     final prefs = await SharedPreferences.getInstance();
+    // One-time: repair libraries stored before fast-start / HEIC classification.
+    // The computer walks its OWN rows, so this needs nothing per-video from the
+    // phone. A separate key from v1 so it runs once even here.
+    if (prefs.getBool(_repairV2Key) != true) {
+      try {
+        await _api.post('/api/gallery/repair-videos');
+        await prefs.setBool(_repairV2Key, true);
+      } catch (_) {/* older server or offline — runs again next time */}
+    }
     if (prefs.getBool(_repairKey) == true) return;
     try {
       // Server-side: authoritative and needs nothing per-video from the phone.
