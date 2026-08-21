@@ -58,6 +58,11 @@ class _ModuleListScreenState extends State<ModuleListScreen> {
   String _filter = '';
   bool _calendar = false;
 
+  /// Whether we've already asked the OS for notification permission this run —
+  /// static so opening Reminders repeatedly does not re-prompt. Local alarms are
+  /// dropped silently without it, so this is the fix for "reminders don't ring".
+  static bool _askedAlarmPermission = false;
+
   /// Only Expenses gets a calendar: it is the one module where "what did a day
   /// cost" is a question, and it has a real date to hang a grid on. Guarding on
   /// the date field alone would put an empty calendar on Documents.
@@ -114,7 +119,19 @@ class _ModuleListScreenState extends State<ModuleListScreen> {
       // Only for reminders, and never blocking the list: an alarm that could
       // not be scheduled must not stop somebody seeing what is due.
       if (widget.spec.key == 'reminders') {
-        unawaited(Alarms.instance.syncFrom(_rows).catchError((_) => 0));
+        // Ask for notification permission the first time reminders are seen, not
+        // only from a settings toggle almost nobody finds — without it the OS
+        // silently drops every alarm we schedule, which IS "reminders don't
+        // notify". Once per session; then schedule from the fetched rows.
+        unawaited(() async {
+          try {
+            if (!_askedAlarmPermission) {
+              _askedAlarmPermission = true;
+              await Alarms.instance.requestPermission();
+            }
+            await Alarms.instance.syncFrom(_rows);
+          } catch (_) {/* best effort; the in-app bell still lists it */}
+        }());
       }
     } on ApiError catch (e) {
       setState(() {
