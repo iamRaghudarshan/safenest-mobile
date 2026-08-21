@@ -184,7 +184,16 @@ class _ModuleListScreenState extends State<ModuleListScreen> {
       showDragHandle: true,
       builder: (_) => _RecordSheet(spec: widget.spec, existing: existing),
     );
-    if (saved == true) _load();
+    if (saved == true) {
+      _load();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(existing == null ? 'Added' : 'Saved'),
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 2),
+        ));
+      }
+    }
   }
 
   /// The tinted badges on a row: when it is due, whether it is paid, how
@@ -765,10 +774,29 @@ class _RecordSheetState extends State<_RecordSheet> {
             const SizedBox(height: 12),
           ],
           if (_error != null) ...[
-            Align(
-              alignment: Alignment.centerLeft,
-              child: Text(_error!,
-                  style: TextStyle(color: Theme.of(context).colorScheme.error)),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.error.withValues(alpha: 0.10),
+                borderRadius: BorderRadius.circular(kRadiusSm),
+                border: Border.all(
+                    color: Theme.of(context)
+                        .colorScheme
+                        .error
+                        .withValues(alpha: 0.4)),
+              ),
+              child: Row(children: [
+                Icon(Icons.error_outline,
+                    color: Theme.of(context).colorScheme.error, size: 18),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(_error!,
+                      style: TextStyle(
+                          color: Theme.of(context).colorScheme.error,
+                          fontWeight: FontWeight.w600)),
+                ),
+              ]),
             ),
             const SizedBox(height: 10),
           ],

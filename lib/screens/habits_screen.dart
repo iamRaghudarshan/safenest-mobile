@@ -104,6 +104,13 @@ class _HabitsScreenState extends State<HabitsScreen> {
         await api.post('/api/habits', body);
       }
       await _load();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(existing == null ? 'Habit added' : 'Saved'),
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 2),
+        ));
+      }
     } on ApiError catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context)
@@ -397,6 +404,12 @@ class _HabitEditorState extends State<_HabitEditor> {
   int _weekly = 3;
   TimeOfDay? _time;
 
+  // Shown inline when Save is pressed with a required field missing — the old
+  // code just returned and nothing moved, so the person had no idea what it
+  // wanted.
+  String? _nameError;
+  String? _daysError;
+
   @override
   void initState() {
     super.initState();
@@ -434,8 +447,16 @@ class _HabitEditorState extends State<_HabitEditor> {
 
   void _save() {
     final name = _name.text.trim();
-    if (name.isEmpty) return;
-    if (_goal == 'weekdays' && _days.isEmpty) return;
+    final daysMissing = _goal == 'weekdays' && _days.isEmpty;
+    if (name.isEmpty || daysMissing) {
+      // Say what is missing, and scroll the name error into view by rebuilding —
+      // silence here was the whole complaint.
+      setState(() {
+        _nameError = name.isEmpty ? 'Give the habit a name' : null;
+        _daysError = daysMissing ? 'Pick at least one day' : null;
+      });
+      return;
+    }
     final t = _time;
     Navigator.pop(context, <String, dynamic>{
       'name': name,
@@ -467,7 +488,15 @@ class _HabitEditorState extends State<_HabitEditor> {
           TextField(
             controller: _name,
             autofocus: widget.existing == null,
-            decoration: const InputDecoration(labelText: 'Habit', hintText: 'Drink water'),
+            textCapitalization: TextCapitalization.sentences,
+            onChanged: (_) {
+              if (_nameError != null) setState(() => _nameError = null);
+            },
+            decoration: InputDecoration(
+                labelText: 'Habit',
+                hintText: 'Drink water',
+                prefixIcon: const Icon(Icons.check_circle_outline),
+                errorText: _nameError),
           ),
           const SizedBox(height: 14),
           _label('Icon'),
@@ -539,8 +568,12 @@ class _HabitEditorState extends State<_HabitEditor> {
                   child: Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 3),
                     child: GestureDetector(
-                      onTap: () => setState(() =>
-                          _days.contains(d.$1) ? _days.remove(d.$1) : _days.add(d.$1)),
+                      onTap: () => setState(() {
+                        _days.contains(d.$1)
+                            ? _days.remove(d.$1)
+                            : _days.add(d.$1);
+                        _daysError = null;
+                      }),
                       child: Container(
                         height: 42,
                         alignment: Alignment.center,
@@ -557,6 +590,14 @@ class _HabitEditorState extends State<_HabitEditor> {
                   ),
                 ),
             ]),
+            if (_daysError != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 6, left: 4),
+                child: Text(_daysError!,
+                    style: TextStyle(
+                        color: Theme.of(context).colorScheme.error,
+                        fontSize: 12)),
+              ),
           ],
           if (_goal == 'weekly') ...[
             const SizedBox(height: 12),

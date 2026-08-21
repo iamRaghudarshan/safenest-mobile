@@ -99,6 +99,28 @@ class _VaultScreenState extends State<VaultScreen> {
     // is no field on this State holding it.
   }
 
+  /// Add (or edit) a vault entry. This screen shipped with NO way to add one —
+  /// the server has POST /api/vault, the phone just never called it, so the vault
+  /// could be revealed and searched but never filled. This is that missing door.
+  Future<void> _openEdit([Map<String, dynamic>? existing]) async {
+    final saved = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (_) => _VaultEditSheet(existing: existing),
+    );
+    if (saved == true) {
+      _load();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(existing == null ? 'Saved to vault' : 'Saved'),
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 2),
+        ));
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final shown = _filter.isEmpty
@@ -112,6 +134,39 @@ class _VaultScreenState extends State<VaultScreen> {
 
     return Scaffold(
       appBar: AppBar(title: const Text('Vault')),
+      floatingActionButton: Container(
+        width: 58,
+        height: 58,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(20),
+          gradient: const LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [kBrand, kBrand2],
+          ),
+          boxShadow: [
+            BoxShadow(
+                color: kBrand.withValues(alpha: 0.44),
+                blurRadius: 28,
+                offset: const Offset(0, 12)),
+          ],
+        ),
+        child: Material(
+          color: Colors.transparent,
+          child: Semantics(
+            button: true,
+            label: 'Add a password',
+            child: Tooltip(
+              message: 'Add a password',
+              child: InkWell(
+                borderRadius: BorderRadius.circular(20),
+                onTap: () => _openEdit(),
+                child: const Icon(Icons.add, size: 30, color: Colors.white),
+              ),
+            ),
+          ),
+        ),
+      ),
       body: Column(
         children: [
           Padding(
@@ -428,4 +483,188 @@ class _VaultProblem extends StatelessWidget {
           ]),
         )
       ]);
+}
+
+/// Add or edit a vault entry. Title is required; the password is optional on an
+/// edit (blank keeps the stored one) and is encrypted server-side — nothing here
+/// or on the phone holds it in the clear.
+class _VaultEditSheet extends StatefulWidget {
+  const _VaultEditSheet({this.existing});
+  final Map<String, dynamic>? existing;
+  @override
+  State<_VaultEditSheet> createState() => _VaultEditSheetState();
+}
+
+class _VaultEditSheetState extends State<_VaultEditSheet> {
+  late final TextEditingController _title;
+  late final TextEditingController _username;
+  late final TextEditingController _password;
+  late final TextEditingController _url;
+  late final TextEditingController _category;
+  bool _show = false;
+  bool _busy = false;
+  String? _error;
+  String? _titleError;
+
+  @override
+  void initState() {
+    super.initState();
+    final e = widget.existing;
+    _title = TextEditingController(text: '${e?['title'] ?? ''}');
+    _username = TextEditingController(text: '${e?['username'] ?? ''}');
+    _password = TextEditingController();
+    _url = TextEditingController(text: '${e?['url'] ?? ''}');
+    _category = TextEditingController(text: '${e?['category'] ?? ''}');
+  }
+
+  @override
+  void dispose() {
+    _title.dispose();
+    _username.dispose();
+    _password.dispose();
+    _url.dispose();
+    _category.dispose();
+    super.dispose();
+  }
+
+  Future<void> _save() async {
+    final title = _title.text.trim();
+    if (title.isEmpty) {
+      setState(() => _titleError = 'A title is needed');
+      return;
+    }
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    final body = <String, dynamic>{
+      'title': title,
+      'username': _username.text.trim(),
+      'url': _url.text.trim(),
+      'category': _category.text.trim(),
+      if (_password.text.isNotEmpty) 'password': _password.text,
+    };
+    try {
+      final api = context.read<Session>().api;
+      final id = widget.existing?['id'];
+      if (id != null) {
+        await api.put('/api/vault/$id', body);
+      } else {
+        await api.post('/api/vault', body);
+      }
+      if (mounted) Navigator.pop(context, true);
+    } on ApiError catch (e) {
+      if (mounted) {
+        setState(() {
+          _error = e.message;
+          _busy = false;
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final editing = widget.existing != null;
+    final bottom = MediaQuery.of(context).viewInsets.bottom;
+    return Padding(
+      padding: EdgeInsets.fromLTRB(18, 4, 18, bottom + 20),
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(editing ? 'Edit entry' : 'New password',
+                style: theme.textTheme.titleMedium),
+            const SizedBox(height: 14),
+            TextField(
+              controller: _title,
+              autofocus: !editing,
+              textCapitalization: TextCapitalization.sentences,
+              onChanged: (_) {
+                if (_titleError != null) setState(() => _titleError = null);
+              },
+              decoration: InputDecoration(
+                  labelText: 'Title *',
+                  hintText: 'Gmail, Bank, Wi-Fi…',
+                  prefixIcon: const Icon(Icons.label_outline),
+                  errorText: _titleError),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _username,
+              decoration: const InputDecoration(
+                  labelText: 'Username or email',
+                  prefixIcon: Icon(Icons.person_outline)),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _password,
+              obscureText: !_show,
+              decoration: InputDecoration(
+                labelText:
+                    editing ? 'New password (blank keeps it)' : 'Password',
+                prefixIcon: const Icon(Icons.key_outlined),
+                suffixIcon: IconButton(
+                  icon: Icon(_show ? Icons.visibility_off : Icons.visibility),
+                  onPressed: () => setState(() => _show = !_show),
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _url,
+              keyboardType: TextInputType.url,
+              decoration: const InputDecoration(
+                  labelText: 'Website', prefixIcon: Icon(Icons.link)),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _category,
+              textCapitalization: TextCapitalization.sentences,
+              decoration: const InputDecoration(
+                  labelText: 'Category', prefixIcon: Icon(Icons.folder_outlined)),
+            ),
+            const SizedBox(height: 16),
+            if (_error != null) ...[
+              Container(
+                width: double.infinity,
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.error.withValues(alpha: 0.10),
+                  borderRadius: BorderRadius.circular(kRadiusSm),
+                  border: Border.all(
+                      color: theme.colorScheme.error.withValues(alpha: 0.4)),
+                ),
+                child: Row(children: [
+                  Icon(Icons.error_outline,
+                      color: theme.colorScheme.error, size: 18),
+                  const SizedBox(width: 8),
+                  Expanded(
+                      child: Text(_error!,
+                          style: TextStyle(
+                              color: theme.colorScheme.error,
+                              fontWeight: FontWeight.w600))),
+                ]),
+              ),
+              const SizedBox(height: 10),
+            ],
+            BrandButton(
+              label: editing ? 'Save changes' : 'Save to vault',
+              busy: _busy,
+              onPressed: _busy ? null : _save,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'The password is encrypted on your computer. Nothing from the '
+              'vault is stored on this phone.',
+              style: theme.textTheme.bodySmall,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
