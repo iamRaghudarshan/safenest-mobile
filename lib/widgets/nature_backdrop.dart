@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 /// A bright, flat Salesforce-style nature world painted behind EVERY screen
@@ -5,54 +7,159 @@ import 'package:flutter/material.dart';
 /// the web app's backdrop: sky, fluffy clouds, a sun, snow-capped blue mountains,
 /// a pine forest, a green meadow, a lake and a cute bear — kept faint so cards
 /// and text stay legible. Re-colours to dusk in dark mode.
-class NatureBackdrop extends StatelessWidget {
+///
+/// It is alive, gently: the sky warms at dawn and dusk from the device clock, and
+/// the clouds and birds drift on a slow 60s cycle. The motion is ambient, never
+/// demanding, and it costs almost nothing to run:
+///   * ONE painter, isolated in a RepaintBoundary, so scrolling content never
+///     repaints because a cloud moved.
+///   * frames stop entirely when the app is backgrounded (battery), and never
+///     start at all under the system "reduce motion" setting (accessibility) —
+///     the scene simply holds still, which is the whole scene minus the drift.
+class NatureBackdrop extends StatefulWidget {
   const NatureBackdrop({super.key});
+
+  @override
+  State<NatureBackdrop> createState() => _NatureBackdropState();
+}
+
+class _NatureBackdropState extends State<NatureBackdrop>
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
+  // 60s is slow enough that the drift reads as a breeze, not a carousel. The
+  // controller drives a value 0..1; the painter turns it into a gentle sway.
+  late final AnimationController _c =
+      AnimationController(vsync: this, duration: const Duration(seconds: 60));
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _c.repeat();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // No frames while the app is not in front — a backdrop nobody is looking at
+    // must not spin the GPU and warm the phone.
+    if (state == AppLifecycleState.resumed) {
+      if (!_c.isAnimating) _c.repeat();
+    } else {
+      _c.stop();
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final dark = Theme.of(context).brightness == Brightness.dark;
-    final sky = dark
-        ? const [Color(0xFF11203D), Color(0xFF15294B), Color(0xFF122A22), Color(0xFF0E2318)]
-        : const [Color(0xFF7FC4F5), Color(0xFFC4E6FF), Color(0xFFE9F7F0), Color(0xFFDFF1DF)];
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: sky,
-          stops: const [0.0, 0.36, 0.7, 1.0],
-        ),
+    final reduce = MediaQuery.of(context).disableAnimations;
+    // Honour "reduce motion": freeze on a neutral mid-drift and stay there.
+    if (reduce && _c.isAnimating) {
+      _c.stop();
+    } else if (!reduce && !_c.isAnimating) {
+      _c.repeat();
+    }
+
+    final sky = _sky(dark, DateTime.now().hour);
+
+    return RepaintBoundary(
+      child: AnimatedBuilder(
+        animation: _c,
+        builder: (context, _) {
+          // A full round trip out and back, so clouds sway rather than snap at
+          // the loop seam. Centred on 0.5; the painter reads (drift - 0.5).
+          final drift =
+              reduce ? 0.5 : 0.5 + 0.5 * math.sin(_c.value * 2 * math.pi);
+          return DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: sky,
+                stops: const [0.0, 0.36, 0.7, 1.0],
+              ),
+            ),
+            child: CustomPaint(
+              painter: _World(dark: dark, drift: drift),
+              child: const SizedBox.expand(),
+            ),
+          );
+        },
       ),
-      child: CustomPaint(painter: _World(dark: dark), child: const SizedBox.expand()),
     );
+  }
+
+  /// The sky, warmed at dawn and dusk. Dark mode keeps its own dusk palette; the
+  /// tint only shifts the top two stops so the meadow at the bottom stays green.
+  List<Color> _sky(bool dark, int hour) {
+    if (dark) {
+      return const [
+        Color(0xFF11203D),
+        Color(0xFF15294B),
+        Color(0xFF122A22),
+        Color(0xFF0E2318),
+      ];
+    }
+    const day = [
+      Color(0xFF7FC4F5),
+      Color(0xFFC4E6FF),
+      Color(0xFFE9F7F0),
+      Color(0xFFDFF1DF),
+    ];
+    const dawn = [
+      Color(0xFFF7C9A0),
+      Color(0xFFFCE1D0),
+      Color(0xFFEAF3E6),
+      Color(0xFFDFF1DF),
+    ];
+    const dusk = [
+      Color(0xFFF3B58C),
+      Color(0xFFF6D3C4),
+      Color(0xFFE7EEDF),
+      Color(0xFFDCEAD6),
+    ];
+    if (hour < 8 || hour >= 20) return dawn; // early / late — soft warm light
+    if (hour >= 17) return dusk; // evening — amber warmth
+    return day; // the bright middle of the day
   }
 }
 
 class _World extends CustomPainter {
-  _World({required this.dark});
+  _World({required this.dark, required this.drift});
   final bool dark;
+
+  /// 0..1, centred on 0.5. Clouds and birds translate by (drift - 0.5) × a small
+  /// amplitude — nearer things move more than far ones, so it parallaxes.
+  final double drift;
 
   @override
   void paint(Canvas canvas, Size size) {
     final w = size.width;
     final h = size.height;
     const a = 0.5; // faint, so content stays readable
-    // Every decorative element is sized in this unit so the scene keeps its
-    // proportions on any phone (a design width of 400, like the web viewBox).
     final u = (w / 400).clamp(0.8, 1.8);
-    // The land occupies the bottom of the screen; a fixed band reads better than a
-    // fraction on very tall phones, but is bounded so it never dominates a short one.
     final land = (h * 0.34).clamp(220.0, 360.0);
     final top = h - land;
 
+    // The sway, in device pixels. Positive drifts right.
+    final sway = (drift - 0.5) * 2; // -1..1
+
     Color c(int light, int darkC) => Color(dark ? darkC : light);
-    Paint fill(int l, int d, [double op = a]) => Paint()..color = c(l, d).withValues(alpha: op);
+    Paint fill(int l, int d, [double op = a]) =>
+        Paint()..color = c(l, d).withValues(alpha: op);
 
-    // sun
-    canvas.drawCircle(Offset(w * 0.82, h * 0.13), 46 * u, fill(0xFFFFD23E, 0xFFD9BE6A, 0.16));
-    canvas.drawCircle(Offset(w * 0.82, h * 0.13), 26 * u, fill(0xFFFFD23E, 0xFFD9BE6A, 0.55));
+    // sun — barely moves, it is the farthest thing
+    final sunX = w * 0.82 + sway * 3 * u;
+    canvas.drawCircle(Offset(sunX, h * 0.13), 46 * u, fill(0xFFFFD23E, 0xFFD9BE6A, 0.16));
+    canvas.drawCircle(Offset(sunX, h * 0.13), 26 * u, fill(0xFFFFD23E, 0xFFD9BE6A, 0.55));
 
-    // fluffy clouds
+    // fluffy clouds — the main drifting element
     void cloud(double cx, double cy, double s, double op) {
       final p = fill(0xFFFFFFFF, 0xFF47618F, op);
       canvas.drawCircle(Offset(cx - 26 * s, cy), 16 * s, p);
@@ -67,11 +174,11 @@ class _World extends CustomPainter {
       );
     }
 
-    cloud(w * 0.26, h * 0.15, 1.0 * u, 0.8);
-    cloud(w * 0.66, h * 0.1, 0.82 * u, 0.65);
-    cloud(w * 0.92, h * 0.24, 0.68 * u, 0.5);
+    cloud(w * 0.26 + sway * 16 * u, h * 0.15, 1.0 * u, 0.8);
+    cloud(w * 0.66 + sway * 11 * u, h * 0.1, 0.82 * u, 0.65);
+    cloud(w * 0.92 + sway * 7 * u, h * 0.24, 0.68 * u, 0.5);
 
-    // birds
+    // birds — light, so they move the most
     final bird = Paint()
       ..color = c(0xFF7EA0E2, 0xFF7A89A6).withValues(alpha: 0.5)
       ..style = PaintingStyle.stroke
@@ -87,8 +194,8 @@ class _World extends CustomPainter {
       );
     }
 
-    fly(w * 0.4, h * 0.19, 1.0 * u);
-    fly(w * 0.49, h * 0.16, 0.8 * u);
+    fly(w * 0.4 + sway * 22 * u, h * 0.19, 1.0 * u);
+    fly(w * 0.49 + sway * 22 * u, h * 0.16, 0.8 * u);
 
     // snow-capped blue mountains (peaks are a fraction of the land band)
     final mh = land * 0.62;
@@ -189,5 +296,6 @@ class _World extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _World old) => old.dark != dark;
+  bool shouldRepaint(covariant _World old) =>
+      old.dark != dark || old.drift != drift;
 }

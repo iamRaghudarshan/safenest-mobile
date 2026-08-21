@@ -11,6 +11,7 @@ import 'package:intl/intl.dart';
 
 import '../dates.dart';
 import '../theme.dart';
+import 'motion.dart';
 
 class ExpenseCalendar extends StatefulWidget {
   const ExpenseCalendar({
@@ -194,7 +195,8 @@ class _ExpenseCalendarState extends State<ExpenseCalendar> {
               ),
             )
           else
-            for (final r in selectedItems) _dayRow(context, r),
+            for (var i = 0; i < selectedItems.length; i++)
+              stagger(context, i, _dayRow(context, selectedItems[i])),
         ] else
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 18),
