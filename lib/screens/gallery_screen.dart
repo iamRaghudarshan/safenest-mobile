@@ -36,6 +36,7 @@ import '../sharing.dart';
 import '../widgets/date_scrubber.dart';
 import '../widgets/selection_bar.dart';
 import '../widgets/photo_tile.dart';
+import 'library_tabs.dart';
 import 'photo_viewer.dart';
 
 class Photo {
@@ -774,7 +775,29 @@ class _GalleryScreenState extends State<GalleryScreen>
   /// keeping day headers is the one thing that stops it delivering that.
   bool get _byMonth => _cols >= 5;
 
+  // Memoised, because build() reads it every frame. Grouping thousands of photos
+  // into days and sorting the keys on each rebuild — and a rebuild fires on every
+  // drag-select move, pinch and page-append — was the scroll stutter. The result
+  // only changes when the photo list or the day/month split changes, so it is
+  // recomputed only then. Identity of the first and last photo catches a filter
+  // reset that happens to return the same COUNT (different photos, same length).
+  List<DayGroup>? _groupCache;
+  int _groupKeyLen = -1;
+  bool _groupKeyByMonth = false;
+  Photo? _groupKeyFirst;
+  Photo? _groupKeyLast;
+
   List<DayGroup> get _grouped {
+    final n = _photos.length;
+    final first = n > 0 ? _photos.first : null;
+    final last = n > 0 ? _photos.last : null;
+    if (_groupCache != null &&
+        _groupKeyLen == n &&
+        _groupKeyByMonth == _byMonth &&
+        identical(_groupKeyFirst, first) &&
+        identical(_groupKeyLast, last)) {
+      return _groupCache!;
+    }
     final map = <DateTime, List<Photo>>{};
     for (final p in _photos) {
       final t = p.takenAt;
@@ -786,7 +809,13 @@ class _GalleryScreenState extends State<GalleryScreen>
       map.putIfAbsent(d, () => []).add(p);
     }
     final keys = map.keys.toList()..sort((a, b) => b.compareTo(a));
-    return [for (final k in keys) DayGroup(k, map[k]!)];
+    final result = [for (final k in keys) DayGroup(k, map[k]!)];
+    _groupCache = result;
+    _groupKeyLen = n;
+    _groupKeyByMonth = _byMonth;
+    _groupKeyFirst = first;
+    _groupKeyLast = last;
+    return result;
   }
 
   @override
@@ -888,6 +917,32 @@ class _GalleryScreenState extends State<GalleryScreen>
                     // could not give. Tap a face to narrow the grid to them.
                     if (_people.isNotEmpty) ...[
                       const SizedBox(height: 10),
+                      // A named row with a way through to the full People screen,
+                      // where faces are named and managed. That screen used to be
+                      // two levels down (Collections → See all); here it is one tap.
+                      Row(children: [
+                        Text('People',
+                            style: Theme.of(context)
+                                .textTheme
+                                .titleSmall
+                                ?.copyWith(fontWeight: FontWeight.w700)),
+                        const Spacer(),
+                        TextButton(
+                          onPressed: () => Navigator.of(context)
+                              .push(MaterialPageRoute(
+                                builder: (_) => Scaffold(
+                                  appBar: AppBar(title: const Text('People')),
+                                  body: const PeopleTab(),
+                                ),
+                              ))
+                              .then((_) => _loadPeople()),
+                          style: TextButton.styleFrom(
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 8),
+                              minimumSize: const Size(0, 32)),
+                          child: const Text('See all'),
+                        ),
+                      ]),
                       SizedBox(
                         height: 78,
                         child: ListView.separated(
@@ -954,10 +1009,19 @@ class _GalleryScreenState extends State<GalleryScreen>
                       style: Theme.of(context).textTheme.bodySmall),
                 ),
               ),
-              for (final g in groups) ...[
-                SliverToBoxAdapter(
-                    child: _DayHeader(day: g.day, monthOnly: _byMonth)),
-                SliverPadding(
+              // Each date section is its own SliverMainAxisGroup so its header
+              // pins to the top like Google Photos — sticking while that month
+              // is on screen and being pushed up by the next, rather than
+              // scrolling away (which is what a plain adapter header did, despite
+              // this file long claiming otherwise).
+              for (final g in groups)
+                SliverMainAxisGroup(slivers: [
+                  SliverPersistentHeader(
+                    pinned: true,
+                    delegate: _StickyHeaderDelegate(
+                        day: g.day, monthOnly: _byMonth),
+                  ),
+                  SliverPadding(
                   padding: const EdgeInsets.symmetric(horizontal: 2),
                   sliver: _listView
                       ? _daySliverList(g.photos)
@@ -1011,7 +1075,7 @@ class _GalleryScreenState extends State<GalleryScreen>
                     ),
                   ),
                 ),
-              ],
+              ]),
               if (_more)
                 const SliverToBoxAdapter(
                   child: Padding(
@@ -1029,6 +1093,35 @@ class _GalleryScreenState extends State<GalleryScreen>
       ]),
     );
   }
+}
+
+/// Pins a date header to the top while its section is on screen, the way Google
+/// Photos does. Opaque, because the photos scroll underneath it and a see-through
+/// bar over them reads as a rendering glitch.
+class _StickyHeaderDelegate extends SliverPersistentHeaderDelegate {
+  _StickyHeaderDelegate({required this.day, required this.monthOnly});
+  final DateTime day;
+  final bool monthOnly;
+
+  @override
+  double get minExtent => 46;
+  @override
+  double get maxExtent => 46;
+
+  @override
+  Widget build(BuildContext context, double shrinkOffset, bool overlaps) {
+    return ClipRect(
+      child: Container(
+        color: Theme.of(context).colorScheme.surface,
+        alignment: Alignment.centerLeft,
+        child: _DayHeader(day: day, monthOnly: monthOnly),
+      ),
+    );
+  }
+
+  @override
+  bool shouldRebuild(covariant _StickyHeaderDelegate old) =>
+      old.day != day || old.monthOnly != monthOnly;
 }
 
 class _DayHeader extends StatelessWidget {
@@ -1058,8 +1151,10 @@ class _DayHeader extends StatelessWidget {
                     ? '${day.day} ${months[day.month - 1]}'
                     : '${day.day} ${months[day.month - 1]} ${day.year}';
     return Padding(
-      padding: const EdgeInsets.fromLTRB(14, 18, 14, 8),
+      padding: const EdgeInsets.fromLTRB(14, 11, 14, 9),
       child: Text(label,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
           style: Theme.of(context)
               .textTheme
               .titleMedium

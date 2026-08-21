@@ -27,6 +27,7 @@ import '../session.dart';
 import '../theme.dart';
 import '../widgets/brand_button.dart';
 import '../widgets/card_face.dart';
+import '../widgets/expense_calendar.dart';
 import '../widgets/master_picker.dart';
 import '../widgets/pill.dart';
 import '../widgets/skeleton.dart';
@@ -55,6 +56,12 @@ class _ModuleListScreenState extends State<ModuleListScreen> {
   bool _loading = true;
   ApiError? _err;
   String _filter = '';
+  bool _calendar = false;
+
+  /// Only Expenses gets a calendar: it is the one module where "what did a day
+  /// cost" is a question, and it has a real date to hang a grid on. Guarding on
+  /// the date field alone would put an empty calendar on Documents.
+  bool get _hasCalendar => widget.spec.key == 'expenses';
 
   /// Cards and loans can be marked paid; the others have no such idea.
   bool get _payable =>
@@ -254,6 +261,16 @@ class _ModuleListScreenState extends State<ModuleListScreen> {
       appBar: AppBar(
         title: Text(s.label),
         automaticallyImplyLeading: !widget.embedded,
+        actions: [
+          if (_hasCalendar)
+            IconButton(
+              tooltip: _calendar ? 'List' : 'Calendar',
+              icon: Icon(_calendar
+                  ? Icons.view_list_outlined
+                  : Icons.calendar_month_outlined),
+              onPressed: () => setState(() => _calendar = !_calendar),
+            ),
+        ],
       ),
       // .fab — 58px, radius 20, the 135° brand gradient and its glow. Material's
       // default is a flat circle in one colour, which is the one control on the
@@ -297,7 +314,7 @@ class _ModuleListScreenState extends State<ModuleListScreen> {
         ),
       ),
       body: Column(children: [
-        if (_rows.length > 5)
+        if (!_calendar && _rows.length > 5)
           Padding(
             padding: const EdgeInsets.fromLTRB(14, 6, 14, 8),
             child: TextField(
@@ -318,7 +335,19 @@ class _ModuleListScreenState extends State<ModuleListScreen> {
               ? const SkeletonList()
               : _err != null
                   ? _LoadError(message: _err!.message, onRetry: _load)
-                  : rows.isEmpty
+                  : _calendar
+                      ? RefreshIndicator(
+                          onRefresh: _load,
+                          child: ExpenseCalendar(
+                            rows: _rows,
+                            dateField: s.dateField!,
+                            amountField: s.amountField!,
+                            titleField: s.titleField,
+                            subtitleField: s.subtitleField,
+                            onTapRow: (r) => _openSheet(r),
+                          ),
+                        )
+                      : rows.isEmpty
                       ? _Empty(
                           spec: s,
                           filtered: _filter.isNotEmpty,

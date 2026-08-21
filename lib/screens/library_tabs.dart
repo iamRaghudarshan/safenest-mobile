@@ -286,11 +286,15 @@ class _PeopleTabState extends State<PeopleTab> {
       onRefresh: _load,
       child: GridView.builder(
         padding: const EdgeInsets.fromLTRB(14, 10, 14, 24),
+        // Cells are deliberately tall enough for a 66px face plus two text lines
+        // even at a large system text scale: at 0.72 the avatar + name + count
+        // summed a few pixels past the cell and bottom-overflowed. 0.64 leaves
+        // real slack rather than fitting to the pixel.
         gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
           crossAxisCount: 4,
           crossAxisSpacing: 10,
           mainAxisSpacing: 16,
-          childAspectRatio: 0.72,
+          childAspectRatio: 0.64,
         ),
         itemCount: ordered.length,
         itemBuilder: (ctx, i) {
@@ -312,11 +316,11 @@ class _PeopleTabState extends State<PeopleTab> {
                     ))
                     .then((_) => _load()),
             onLongPress: () => _manage(p),
-            child: Column(children: [
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
               Stack(children: [
                 Container(
-                  width: 72,
-                  height: 72,
+                  width: 66,
+                  height: 66,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
                     color: Theme.of(ctx).colorScheme.surfaceContainerHighest,

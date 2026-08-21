@@ -15,6 +15,8 @@
 /// not the dues list somebody opened the app to see.
 library;
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
@@ -23,6 +25,7 @@ import '../session.dart';
 import '../theme.dart';
 import '../widgets/avatar.dart';
 import '../widgets/brand_button.dart';
+import '../widgets/nature_backdrop.dart';
 import 'notifications_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
@@ -157,80 +160,25 @@ class _DashboardScreenState extends State<DashboardScreen> {
         child: ListView(
           padding: const EdgeInsets.fromLTRB(14, 8, 14, 24),
           children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(name.isEmpty ? 'Home' : name,
-                          style: theme.textTheme.headlineSmall),
-                      const SizedBox(height: 2),
-                      Text(
-                        '$_greeting 👋'
-                        '${_brief?['date'] != null ? " · ${_brief!['date']}" : ""}',
-                        // .home-greeting — 13.5px, weight 500, line-height 1.35.
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          fontSize: 13.5,
-                          fontWeight: FontWeight.w500,
-                          height: 1.35,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                IconButton(
-                  icon: const Icon(Icons.search),
-                  onPressed: () => widget.onOpen('search'),
-                ),
-                // The bell, with the count on it. A reminder that fired at
-                // 4:14pm sat in the inbox with nothing anywhere on screen to
-                // say so.
-                IconButton(
-                  tooltip: 'Notifications',
-                  onPressed: () => Navigator.of(context)
-                      .push(MaterialPageRoute(
-                          builder: (_) => const NotificationsScreen()))
-                      // Coming back re-reads the count: marking things read in
-                      // there must clear the badge out here, or the number is a
-                      // lie until the next refresh.
-                      .then((_) => _load()),
-                  icon: Stack(clipBehavior: Clip.none, children: [
-                    const Icon(Icons.notifications_outlined),
-                    if (_unread > 0)
-                      Positioned(
-                        right: -3,
-                        top: -3,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 4, vertical: 1),
-                          constraints: const BoxConstraints(minWidth: 15),
-                          decoration: BoxDecoration(
-                            color: kDanger,
-                            borderRadius: BorderRadius.circular(9),
-                          ),
-                          child: Text(
-                            // Capped, because a three-digit badge is wider than
-                            // the icon it sits on.
-                            _unread > 99 ? '99+' : '$_unread',
-                            textAlign: TextAlign.center,
-                            style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 9.5,
-                                height: 1.25,
-                                fontWeight: FontWeight.w800),
-                          ),
-                        ),
-                      ),
-                  ]),
-                ),
-                const SizedBox(width: 4),
-                // The web app's .avatar-btn — the one thing in this header that
-                // belongs to the person rather than to their money. It opens
-                // Profile, as it does there.
-                Avatar(size: 40, onTap: () => widget.onOpen('profile')),
-              ],
+            // The greeting now lives over a bounded crop of the app's own nature
+            // world, so Home opens on something warm rather than a bare name and
+            // a row of icons. A line of copy rotates gently beneath it — the
+            // "slide" — and the search / notifications / profile controls move
+            // into the banner's corner.
+            _GreetingHero(
+              name: name,
+              greeting: _greeting,
+              date: _brief?['date'] != null ? '${_brief!['date']}' : '',
+              unread: _unread,
+              onSearch: () => widget.onOpen('search'),
+              onBell: () => Navigator.of(context)
+                  .push(MaterialPageRoute(
+                      builder: (_) => const NotificationsScreen()))
+                  // Coming back re-reads the count: marking things read in there
+                  // must clear the badge out here, or the number is a lie until
+                  // the next refresh.
+                  .then((_) => _load()),
+              onProfile: () => widget.onOpen('profile'),
             ),
             const SizedBox(height: 14),
 
@@ -527,4 +475,202 @@ class _Stat extends StatelessWidget {
           ],
         ),
       );
+}
+
+/// The home banner: the greeting and the person's name over a bounded crop of
+/// the app's painted nature world, with a line of copy that rotates gently
+/// beneath (the "slide") and the search / notifications / profile controls in
+/// the corner. No image assets — the scene is the same one painted app-wide.
+class _GreetingHero extends StatefulWidget {
+  const _GreetingHero({
+    required this.name,
+    required this.greeting,
+    required this.date,
+    required this.unread,
+    required this.onSearch,
+    required this.onBell,
+    required this.onProfile,
+  });
+
+  final String name;
+  final String greeting;
+  final String date;
+  final int unread;
+  final VoidCallback onSearch;
+  final VoidCallback onBell;
+  final VoidCallback onProfile;
+
+  @override
+  State<_GreetingHero> createState() => _GreetingHeroState();
+}
+
+class _GreetingHeroState extends State<_GreetingHero> {
+  // Kept to what this product actually promises, not motivational filler. A
+  // line a person reads once and nods at, then it moves on.
+  static const _lines = [
+    'Everything in one place, on your own computer.',
+    'Private by design — your records never leave here.',
+    'Backed up, organised, and yours.',
+    'Have a calm, organised day.',
+  ];
+
+  int _i = 0;
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    // 6s: long enough to read a line, gentle enough not to nag. A real clock is
+    // fine here — this is the app, not the resume-sensitive build tooling.
+    _timer = Timer.periodic(const Duration(seconds: 6), (_) {
+      if (mounted) setState(() => _i = (_i + 1) % _lines.length);
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    return Container(
+      height: 156,
+      clipBehavior: Clip.antiAlias,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(kRadius),
+        boxShadow: softShadow(dark),
+      ),
+      child: Stack(fit: StackFit.expand, children: [
+        const NatureBackdrop(),
+        // A soft scrim into the lower-left, where the words sit — so white text
+        // stays readable whether the crop lands on sky, snow or lake.
+        DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topRight,
+              end: Alignment.bottomLeft,
+              colors: [
+                Colors.black.withValues(alpha: 0.02),
+                Colors.black.withValues(alpha: 0.42),
+              ],
+            ),
+          ),
+        ),
+        Positioned(
+          top: 4,
+          right: 4,
+          child: Row(children: [
+            _HeroIcon(icon: Icons.search, onTap: widget.onSearch),
+            _HeroIcon(
+                icon: Icons.notifications_outlined,
+                onTap: widget.onBell,
+                badge: widget.unread),
+            const SizedBox(width: 2),
+            Avatar(size: 36, onTap: widget.onProfile),
+            const SizedBox(width: 6),
+          ]),
+        ),
+        Positioned(
+          left: 16,
+          right: 16,
+          bottom: 14,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '${widget.greeting} 👋'
+                '${widget.date.isNotEmpty ? '  ·  ${widget.date}' : ''}',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    shadows: [Shadow(color: Colors.black45, blurRadius: 4)]),
+              ),
+              const SizedBox(height: 1),
+              Text(
+                widget.name.isEmpty ? 'Welcome' : widget.name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 26,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: -0.5,
+                    shadows: [Shadow(color: Colors.black54, blurRadius: 6)]),
+              ),
+              const SizedBox(height: 3),
+              AnimatedSwitcher(
+                duration: const Duration(milliseconds: 450),
+                child: Text(
+                  _lines[_i],
+                  key: ValueKey<int>(_i),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.92),
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w500,
+                      shadows: const [
+                        Shadow(color: Colors.black45, blurRadius: 4)
+                      ]),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ]),
+    );
+  }
+}
+
+/// A white icon button for the hero corner, with the notifications count on it.
+class _HeroIcon extends StatelessWidget {
+  const _HeroIcon(
+      {required this.icon, required this.onTap, this.badge = 0});
+
+  final IconData icon;
+  final VoidCallback onTap;
+  final int badge;
+
+  @override
+  Widget build(BuildContext context) {
+    return IconButton(
+      onPressed: onTap,
+      visualDensity: VisualDensity.compact,
+      icon: Stack(clipBehavior: Clip.none, children: [
+        Icon(icon,
+            color: Colors.white,
+            shadows: const [Shadow(color: Colors.black38, blurRadius: 4)]),
+        if (badge > 0)
+          Positioned(
+            right: -3,
+            top: -3,
+            child: Container(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+              constraints: const BoxConstraints(minWidth: 15),
+              decoration: BoxDecoration(
+                color: kDanger,
+                borderRadius: BorderRadius.circular(9),
+              ),
+              child: Text(
+                badge > 99 ? '99+' : '$badge',
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 9.5,
+                    height: 1.25,
+                    fontWeight: FontWeight.w800),
+              ),
+            ),
+          ),
+      ]),
+    );
+  }
 }
