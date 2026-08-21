@@ -471,6 +471,21 @@ class _GalleryScreenState extends State<GalleryScreen>
         if (!_selected.remove(p.id)) _selected.add(p.id);
       });
 
+  /// Select — or, if it is already all selected, clear — every photo in one
+  /// day/month section from its header. Google Photos grabs a day this way, and
+  /// picking a whole holiday one tap at a time is exactly the tedium selection
+  /// exists to avoid.
+  void _toggleGroup(DayGroup g) => setState(() {
+        final allIn = g.photos.every((p) => _selected.contains(p.id));
+        for (final p in g.photos) {
+          if (allIn) {
+            _selected.remove(p.id);
+          } else {
+            _selected.add(p.id);
+          }
+        }
+      });
+
   void _clearSelection() => setState(_selected.clear);
 
   /// Whether this drag is selecting or clearing.
@@ -1055,7 +1070,11 @@ class _GalleryScreenState extends State<GalleryScreen>
                   SliverPersistentHeader(
                     pinned: true,
                     delegate: _StickyHeaderDelegate(
-                        day: g.day, monthOnly: _byMonth),
+                        day: g.day,
+                        monthOnly: _byMonth,
+                        allSelected: g.photos.isNotEmpty &&
+                            g.photos.every((p) => _selected.contains(p.id)),
+                        onToggle: () => _toggleGroup(g)),
                   ),
                   SliverPadding(
                   padding: const EdgeInsets.symmetric(horizontal: 2),
@@ -1135,9 +1154,16 @@ class _GalleryScreenState extends State<GalleryScreen>
 /// Photos does. Opaque, because the photos scroll underneath it and a see-through
 /// bar over them reads as a rendering glitch.
 class _StickyHeaderDelegate extends SliverPersistentHeaderDelegate {
-  _StickyHeaderDelegate({required this.day, required this.monthOnly});
+  _StickyHeaderDelegate({
+    required this.day,
+    required this.monthOnly,
+    required this.allSelected,
+    required this.onToggle,
+  });
   final DateTime day;
   final bool monthOnly;
+  final bool allSelected;
+  final VoidCallback onToggle;
 
   @override
   double get minExtent => 46;
@@ -1146,18 +1172,41 @@ class _StickyHeaderDelegate extends SliverPersistentHeaderDelegate {
 
   @override
   Widget build(BuildContext context, double shrinkOffset, bool overlaps) {
+    final cs = Theme.of(context).colorScheme;
     return ClipRect(
-      child: Container(
-        color: Theme.of(context).colorScheme.surface,
-        alignment: Alignment.centerLeft,
-        child: _DayHeader(day: day, monthOnly: monthOnly),
+      child: Material(
+        color: cs.surface,
+        child: Row(children: [
+          // Grab the whole section at once — every photo of this day (or month,
+          // zoomed out) — the way Google Photos lets you select a day from its
+          // header. Filled and coloured when the section is fully selected.
+          InkResponse(
+            onTap: onToggle,
+            radius: 22,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(12, 0, 2, 0),
+              child: Icon(
+                allSelected
+                    ? Icons.check_circle
+                    : Icons.radio_button_unchecked,
+                size: 21,
+                color: allSelected
+                    ? cs.primary
+                    : cs.outline.withValues(alpha: 0.55),
+              ),
+            ),
+          ),
+          Expanded(child: _DayHeader(day: day, monthOnly: monthOnly)),
+        ]),
       ),
     );
   }
 
   @override
   bool shouldRebuild(covariant _StickyHeaderDelegate old) =>
-      old.day != day || old.monthOnly != monthOnly;
+      old.day != day ||
+      old.monthOnly != monthOnly ||
+      old.allSelected != allSelected;
 }
 
 class _DayHeader extends StatelessWidget {
@@ -1187,7 +1236,7 @@ class _DayHeader extends StatelessWidget {
                     ? '${day.day} ${months[day.month - 1]}'
                     : '${day.day} ${months[day.month - 1]} ${day.year}';
     return Padding(
-      padding: const EdgeInsets.fromLTRB(14, 11, 14, 9),
+      padding: const EdgeInsets.fromLTRB(2, 11, 14, 9),
       child: Text(label,
           maxLines: 1,
           overflow: TextOverflow.ellipsis,

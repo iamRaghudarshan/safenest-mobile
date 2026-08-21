@@ -101,7 +101,9 @@ class _PhotosHomeState extends State<PhotosHome> {
       ),
       body: Column(children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(14, 0, 14, 10),
+          // Room above and below, so the switcher is not jammed against the app
+          // bar (it read as "no padding") and sits as a clear band of its own.
+          padding: const EdgeInsets.fromLTRB(14, 8, 14, 12),
           child: Segmented(
             labels: _labels,
             index: _tab,
