@@ -440,15 +440,34 @@ class _Quick extends StatelessWidget {
         child: GestureDetector(
           onTap: onTap,
           child: Column(mainAxisSize: MainAxisSize.min, children: [
+            // A gradient tile with a matching glow, so the row of actions reads as
+            // colour rather than four flat squares.
             Container(
-              height: 46,
-              width: 46,
+              height: 52,
+              width: 52,
               decoration: BoxDecoration(
-                  color: colour, borderRadius: BorderRadius.circular(14)),
-              child: Icon(icon, color: Colors.white, size: 22),
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [colour, Color.lerp(colour, Colors.white, 0.28)!],
+                ),
+                borderRadius: BorderRadius.circular(16),
+                boxShadow: [
+                  BoxShadow(
+                    color: colour.withValues(alpha: 0.38),
+                    blurRadius: 14,
+                    offset: const Offset(0, 6),
+                  ),
+                ],
+              ),
+              child: Icon(icon, color: Colors.white, size: 24),
             ),
-            const SizedBox(height: 6),
-            Text(label, style: Theme.of(context).textTheme.labelSmall),
+            const SizedBox(height: 7),
+            Text(label,
+                style: Theme.of(context)
+                    .textTheme
+                    .labelSmall
+                    ?.copyWith(fontWeight: FontWeight.w600)),
           ]),
         ),
       );
@@ -461,22 +480,56 @@ class _Stat extends StatelessWidget {
   final Color colour;
 
   @override
-  Widget build(BuildContext context) => BrandCard(
-        padding: const EdgeInsets.all(14),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(label, style: Theme.of(context).textTheme.labelSmall),
-            const SizedBox(height: 6),
-            Text(value,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                    fontSize: 19, fontWeight: FontWeight.w700, color: colour)),
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final dark = theme.brightness == Brightness.dark;
+    // Each figure gets its own soft-tinted card and a matching dot, so Snapshot
+    // is four colours at a glance rather than four grey boxes with coloured text.
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            colour.withValues(alpha: dark ? 0.22 : 0.12),
+            colour.withValues(alpha: dark ? 0.10 : 0.05),
           ],
         ),
-      );
+        borderRadius: BorderRadius.circular(kRadius),
+        border: Border.all(color: colour.withValues(alpha: 0.22)),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(children: [
+            Container(
+                width: 8,
+                height: 8,
+                decoration:
+                    BoxDecoration(color: colour, shape: BoxShape.circle)),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.labelSmall),
+            ),
+          ]),
+          const SizedBox(height: 8),
+          Text(value,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.w800,
+                  color: colour,
+                  fontFeatures: const [FontFeature.tabularFigures()])),
+        ],
+      ),
+    );
+  }
 }
 
 /// The home banner: the greeting and the person's name over a bounded crop of
