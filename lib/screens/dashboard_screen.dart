@@ -517,8 +517,12 @@ class _Stat extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final dark = theme.brightness == Brightness.dark;
+    final base = theme.colorScheme.surface;
     // Each figure gets its own soft-tinted card and a matching dot, so Snapshot
     // is four colours at a glance rather than four grey boxes with coloured text.
+    // The tint is BLENDED over the opaque surface, not laid on as a translucent
+    // wash — the scaffold is transparent for the nature backdrop, so a wash let
+    // the scene show straight through and the cards read as invisible.
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
@@ -526,12 +530,13 @@ class _Stat extends StatelessWidget {
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
           colors: [
-            colour.withValues(alpha: dark ? 0.22 : 0.12),
-            colour.withValues(alpha: dark ? 0.10 : 0.05),
+            Color.alphaBlend(colour.withValues(alpha: dark ? 0.30 : 0.14), base),
+            Color.alphaBlend(colour.withValues(alpha: dark ? 0.16 : 0.06), base),
           ],
         ),
         borderRadius: BorderRadius.circular(kRadius),
-        border: Border.all(color: colour.withValues(alpha: 0.22)),
+        border: Border.all(color: colour.withValues(alpha: 0.30)),
+        boxShadow: softShadow(dark),
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
