@@ -39,6 +39,19 @@ class Alarms {
   /// notification, whatever the code later asks for.
   static const _channelId = 'safenest.reminders.alarm';
 
+  // An alarm keeps going; a notification chimes once. So each reminder is not a
+  // single notification but a short BURST — the first at the due time, then
+  // repeats every _burstGap until it is dismissed or the app is next opened
+  // (syncFrom cancels everything and reschedules, clearing whatever has not yet
+  // fired). Combined with the ~24s custom alarm tone, that is close to two minutes
+  // of intermittent alarm rather than one lost chime. The extra rings live in an
+  // id space far above any server reminder id so they never collide with a real
+  // one.
+  static const _burstCount = 5;
+  static const _burstGap = Duration(seconds: 30);
+  static const _extraBase = 1 << 28; // 268,435,456 — above any reminder row id
+  int _extraId(int id, int k) => _extraBase + id * _burstCount + k;
+
   Future<void> init() async {
     if (_ready) return;
     tzdata.initializeTimeZones();
@@ -84,8 +97,8 @@ class Alarms {
     return false;
   }
 
-  NotificationDetails get _alarmStyle => const NotificationDetails(
-        android: AndroidNotificationDetails(
+  NotificationDetails _alarmStyle(int id) => NotificationDetails(
+        android: const AndroidNotificationDetails(
           _channelId,
           'Reminders',
           channelDescription: 'Reminders you set, at the time you set them',
@@ -98,19 +111,31 @@ class Alarms {
           ongoing: true,
           autoCancel: false,
           playSound: true,
+          // The bundled alarm tone (res/raw/alarm.wav) rather than the single
+          // default chime a bank advert also gets — the whole point of "ring like
+          // an alarm". Named without extension, the way Android raw resources are.
+          sound: RawResourceAndroidNotificationSound('alarm'),
           enableVibration: true,
-          // A repeating vibration rather than one buzz — the phone is usually
-          // in a pocket or face-down on a table.
-          vibrationPattern: null,
           fullScreenIntent: true,
         ),
         iOS: DarwinNotificationDetails(
           presentAlert: true,
           presentBadge: true,
           presentSound: true,
-          // Time-sensitive: it breaks through a Focus mode, which is where a
-          // reminder for something due today needs to be heard.
+          // The bundled ~24s alarm tone (ios/Runner/alarm.wav), not the default
+          // ~1s ding. iOS plays a custom notification sound for its own length up
+          // to 30s, so this rings for real.
+          sound: 'alarm.wav',
+          // Time-sensitive breaks through a Focus mode. The louder-still level,
+          // .critical, ALSO rings through the silent switch and Do Not Disturb —
+          // but Apple gates it behind the Critical Alerts entitlement, which has
+          // to be requested and approved (see requestPermission and the release
+          // notes). Until that lands, timeSensitive is the strongest level a
+          // normal build is allowed.
           interruptionLevel: InterruptionLevel.timeSensitive,
+          // Group a reminder's whole burst into one stack rather than five loose
+          // notifications.
+          threadIdentifier: 'reminder-$id',
         ),
       );
 
@@ -123,35 +148,46 @@ class Alarms {
     required DateTime when,
   }) async {
     await init();
-    await _plugin.cancel(id);
+    // Clear this reminder's whole burst first, so editing the time moves every
+    // ring rather than leaving stragglers from the old time behind.
+    await cancel(id);
     // A time already past is not scheduled at all. flutter_local_notifications
     // would otherwise fire it immediately, so opening the app would set off
-    // every reminder from the last month at once.
+    // every reminder from the last month at once. The extras are all later than
+    // `when`, so this one guard covers the whole burst.
     if (!when.isAfter(DateTime.now())) return;
-    try {
-      await _plugin.zonedSchedule(
-        id,
-        title,
-        body,
-        tz.TZDateTime.from(when, tz.local),
-        _alarmStyle,
-        androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
-        // absoluteTime: 18:30 means 18:30 in the app's clock (IST), not
-        // whatever wall time the phone happens to be showing in another
-        // country. The alternative interprets it against the device's zone and
-        // a reminder set at home fires at the wrong hour abroad.
-        uiLocalNotificationDateInterpretation:
-            UILocalNotificationDateInterpretation.absoluteTime,
-      );
-    } catch (e) {
-      // A phone that refuses exact alarms must not take the app down with it.
-      debugPrint('[alarms] could not schedule $id: $e');
+    for (var k = 0; k < _burstCount; k++) {
+      final at = when.add(_burstGap * k);
+      try {
+        await _plugin.zonedSchedule(
+          k == 0 ? id : _extraId(id, k),
+          title,
+          body,
+          tz.TZDateTime.from(at, tz.local),
+          _alarmStyle(id),
+          androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+          // absoluteTime: 18:30 means 18:30 in the app's clock (IST), not
+          // whatever wall time the phone happens to be showing in another
+          // country. The alternative interprets it against the device's zone and
+          // a reminder set at home fires at the wrong hour abroad.
+          uiLocalNotificationDateInterpretation:
+              UILocalNotificationDateInterpretation.absoluteTime,
+        );
+      } catch (e) {
+        // A phone that refuses exact alarms must not take the app down with it.
+        debugPrint('[alarms] could not schedule $id ring $k: $e');
+      }
     }
   }
 
   Future<void> cancel(int id) async {
     await init();
     await _plugin.cancel(id);
+    // ...and every extra ring of its burst, or a cancelled reminder would keep
+    // going off from the repeats already in the queue.
+    for (var k = 1; k < _burstCount; k++) {
+      await _plugin.cancel(_extraId(id, k));
+    }
   }
 
   Future<void> cancelAll() async {
