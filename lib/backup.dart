@@ -36,6 +36,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
 import 'api.dart';
+import 'discover.dart';
 
 enum BackupState { idle, scanning, running, paused, done, failed }
 
@@ -101,10 +102,38 @@ class BackupService extends ChangeNotifier {
   // end (slow to begin playing). Separate key so it runs once even on a phone
   // that already passed v1.
   static const _repairV2Key = 'backup.videos.repaired.v2';
+  // The number of items the computer held at the end of the last run. Used to spot
+  // a genuine loss on the computer (the count DROPPING) without being fooled by
+  // duplicate photos on the phone — see the staleness check in _runFullBackup.
+  static const _lastCountKey = 'backup.server.count';
   static const _concurrency = 4;
 
   BackupProgress _p = const BackupProgress();
   BackupProgress get progress => _p;
+
+  /// The computer found on this wifi for the current run, VERIFIED as this
+  /// account's own machine (its token validates only on its own server). When set,
+  /// uploads go straight to it over the LAN — roughly thirty times a tunnel
+  /// transfer and, crucially, not capped by the home broadband's upload speed,
+  /// which is the confirmed cause of "your computer could not be reached" on big
+  /// files. Null when away from home or nothing was found; the tunnel is used then.
+  Api? _lanApi;
+  Api get _net => _lanApi ?? _api;
+
+  /// Re-offer the WHOLE library only when the computer's item count has DROPPED
+  /// since the last run — a genuine loss there (bin emptied, disk swapped). Pure
+  /// and static so the rule can be tested without a phone. Comparing against the
+  /// count of ids the phone thinks it sent was the bug: the phone counts one id
+  /// per photo, the computer de-duplicates by content, so duplicates made the old
+  /// test permanently true and re-hashed everything every run.
+  static bool shouldReoffer(int? serverCount, int? lastCount) =>
+      serverCount != null && lastCount != null && serverCount < lastCount;
+
+  /// True when an address already points straight at a private LAN host, so there
+  /// is no faster route left to discover.
+  static bool looksLikeLan(String url) =>
+      RegExp(r'https?://(192\.168\.|10\.|172\.(1[6-9]|2\d|3[01])\.)')
+          .hasMatch(url);
 
   /// Ids already accepted by the server. This is what makes a repeat run cheap
   /// and is why the backup can be left on a nightly automation without shame.
@@ -201,7 +230,7 @@ class BackupService extends ChangeNotifier {
     }
     if (byHash.isEmpty) return const {};
     try {
-      final r = await _api.post('/api/gallery/have',
+      final r = await _net.post('/api/gallery/have',
           {'hashes': byHash.keys.toList()});
       final have = (r is Map ? r['have'] as List? : null) ?? const [];
       return {
@@ -219,13 +248,63 @@ class BackupService extends ChangeNotifier {
   /// trusting its local list, exactly as before.
   Future<int?> _serverItemCount() async {
     try {
-      final r = await _api.get('/api/gallery', {'limit': '1'});
+      final r = await _net.get('/api/gallery', {'limit': '1'});
       final t = (r is Map) ? r['total'] : null;
       if (t is int) return t;
       return int.tryParse('$t');
     } catch (_) {
       return null;
     }
+  }
+
+  /// Prefer a direct LAN route to the computer when the phone is on the same wifi.
+  ///
+  /// Uploads over the Cloudflare tunnel are capped by the home broadband's UPLOAD
+  /// speed and time out on large files — the confirmed cause of "your computer
+  /// could not be reached" during a backup. But at home the computer is right
+  /// there on the LAN. `Discover` already finds it (the setup screen uses the same
+  /// thing); this reuses it for the upload path.
+  ///
+  /// The candidate is VERIFIED as this account's own computer by calling
+  /// /api/auth/me with our token, which only validates on our own server — a
+  /// neighbour's SafeNest on the same wifi returns 401 and is rejected, so photos
+  /// can never be sent to a stranger's machine. Best effort: any failure just
+  /// leaves the tunnel in charge, exactly as before.
+  Future<void> _resolveUploadRoute() async {
+    _lanApi = null;
+    try {
+      // Already pointed at a private LAN address — uploads are direct as they are.
+      if (looksLikeLan(_api.baseUrl)) return;
+      for (final f in await Discover.onThisWifi()) {
+        final probe = Api(baseUrl: f.url, token: _api.token);
+        try {
+          final me = await probe.get('/api/auth/me');
+          if (me is Map && me['id'] != null) { _lanApi = probe; return; }
+        } catch (_) {/* not ours, or a bad moment — try the next / fall back */}
+      }
+    } catch (_) {/* discovery unavailable — the tunnel still works */}
+  }
+
+  /// Upload bytes, preferring the LAN route and falling back to the tunnel, with
+  /// one retry on a no-answer.
+  ///
+  /// status 0 means "never got an answer" — a momentary wifi drop, or a route that
+  /// changed mid-run — not necessarily a dead computer. One photo hitting that
+  /// should not be stranded when the very next attempt would go through, which is
+  /// the "tried multiple times, same files" complaint. Bounded on purpose: at most
+  /// the LAN once, then the tunnel twice, so a genuinely-off computer still fails
+  /// quickly rather than hanging on retries.
+  Future<({int status, Map<String, dynamic> body})> _postUploadRaw(
+      String path, List<int> body, String contentType) async {
+    if (_lanApi != null) {
+      final r = await _lanApi!.postRawResult(path, body, contentType);
+      if (r.status != 0) return r;   // an answer, good or bad — done
+      // The LAN went quiet (walked out of range?) — the tunnel is still there.
+    }
+    final r1 = await _api.postRawResult(path, body, contentType);
+    if (r1.status != 0) return r1;
+    await Future.delayed(const Duration(seconds: 1));
+    return _api.postRawResult(path, body, contentType);
   }
 
   void stop() => _stop = true;
@@ -302,7 +381,7 @@ class BackupService extends ChangeNotifier {
         }
         if (map.isNotEmpty) {
           try {
-            await _api.post('/api/gallery/backfill-durations', {'durations': map});
+            await _net.post('/api/gallery/backfill-durations', {'durations': map});
           } catch (_) {/* older server or offline — try next run */}
         }
       }
@@ -317,7 +396,7 @@ class BackupService extends ChangeNotifier {
       final jpeg = await asset.thumbnailDataWithSize(
           const ThumbnailSize(1080, 1080));
       if (jpeg == null || jpeg.isEmpty) return;
-      await _api.postMultipartFiles('/api/gallery/poster',
+      await _net.postMultipartFiles('/api/gallery/poster',
           fileField: 'file',
           files: [(name: 'poster.jpg', bytes: jpeg)],
           fields: {'source_hash': sourceHash});
@@ -336,7 +415,7 @@ class BackupService extends ChangeNotifier {
     // phone. A separate key from v1 so it runs once even here.
     if (prefs.getBool(_repairV2Key) != true) {
       try {
-        await _api.post('/api/gallery/repair-videos');
+        await _net.post('/api/gallery/repair-videos');
         await prefs.setBool(_repairV2Key, true);
       } catch (_) {/* older server or offline — runs again next time */}
     }
@@ -344,7 +423,7 @@ class BackupService extends ChangeNotifier {
     try {
       // Server-side: authoritative and needs nothing per-video from the phone.
       try {
-        await _api.post('/api/gallery/rescan-durations');
+        await _net.post('/api/gallery/rescan-durations');
       } catch (_) {/* older server — the poster pass below still helps */}
 
       final albums = await PhotoManager.getAssetPathList(
@@ -405,23 +484,38 @@ class BackupService extends ChangeNotifier {
 
     await load();
 
+    // Prefer a direct LAN route to the computer for this run's uploads, so a home
+    // backup is not throttled through the tunnel (see _resolveUploadRoute).
+    _emit(const BackupProgress(
+        state: BackupState.scanning, message: 'Looking for your computer…'));
+    await _resolveUploadRoute();
+
     // Catch a STALE "already sent" list before trusting it to skip anything.
     //
-    // That list lives on this phone and says "already backed up". If the computer
-    // now holds FEWER items than the list claims to have sent, photos were removed
-    // there (its bin emptied, a disk swapped, a restore gone wrong) — and every one
-    // of them would be skipped for ever, reported as a clean success, while sitting
-    // unprotected on the phone the whole time. It is the exact failure forgetSent()
-    // exists to undo, done automatically. Trust the computer over our memory: clear
-    // the list and re-check everything against the server, which de-duplicates by
-    // hash so nothing still there is stored twice. Safe in one direction only — the
-    // worst case is a needless re-check, never a skipped photo.
+    // That list lives on this phone and says "already backed up". If photos were
+    // removed on the computer (its bin emptied, a disk swapped, a restore gone
+    // wrong) every one would be skipped for ever, reported as a clean success,
+    // while sitting unprotected on the phone. It is the exact failure forgetSent()
+    // exists to undo, done automatically.
+    //
+    // The signal is the computer's item count DROPPING since the last run — not
+    // being below _sent.length. The old test used _sent.length, but the phone
+    // counts one id per photo while the computer de-duplicates by content, so ANY
+    // duplicate photos on the phone (a shared copy, a re-saved image) made
+    // serverCount < _sent.length permanently. That wiped the memory and re-hashed
+    // the ENTIRE library against the server on every single run — the "re-checking
+    // takes for ever, every time" complaint. A drop between runs is the honest
+    // signal and still auto-undoes a real deletion; re-checking de-duplicates by
+    // hash, so nothing still there is stored twice. Safe in one direction only —
+    // the worst case is a needless re-check, never a skipped photo.
+    final prefs = await SharedPreferences.getInstance();
     final serverCount = await _serverItemCount();
-    if (serverCount != null && serverCount < _sent.length) {
+    final lastCount = prefs.getInt(_lastCountKey);
+    if (shouldReoffer(serverCount, lastCount)) {
       _sent.clear();
-      final prefs = await SharedPreferences.getInstance();
       await prefs.remove(_sentKey);
     }
+    if (serverCount != null) await prefs.setInt(_lastCountKey, serverCount);
 
     // Photos AND videos. This said `RequestType.image` with the note "videos
     // are not photos and the gallery cannot store them" — true when it was
@@ -608,6 +702,9 @@ class BackupService extends ChangeNotifier {
 
   Future<void> _retryFailed() async {
     _stop = false;
+    // Re-find the LAN route: a retry usually follows fixing exactly the thing that
+    // broke the connection, and it should get the fast path too.
+    await _resolveUploadRoute();
     final queue = List<AssetEntity>.from(_failedAssets);
     _failedAssets.clear();
     _problems.clear();
@@ -784,7 +881,7 @@ class BackupService extends ChangeNotifier {
       ..add(tail);
 
     try {
-      return await _api.postRawResult(
+      return await _postUploadRaw(
         '/api/gallery/upload?faces=0${durationMs > 0 ? '&duration_ms=$durationMs' : ''}',
         buf.takeBytes(),
         'multipart/form-data; boundary=$boundary',
