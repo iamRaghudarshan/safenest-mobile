@@ -131,7 +131,11 @@ class _PhotosHomeState extends State<PhotosHome> {
         // "everything is backed up" are the idle common case, and a full-width
         // banner for them just pushes every photo down the screen; the cloud icon
         // in the bar (and the empty-gallery prompt) already start a backup.
-        if (_tab == 0 && _backup != null)
+        //
+        // Shown on BOTH tabs, not just Photos: the whole point is that the backup
+        // keeps running while you browse anywhere, so its progress has to follow
+        // you off the grid too.
+        if (_backup != null)
           ListenableBuilder(
             listenable: _backup!,
             builder: (context, _) {
@@ -171,7 +175,8 @@ class _PhotosHomeState extends State<PhotosHome> {
 
     final String text;
     if (running) {
-      text = p.total > 0 ? 'Backing up… $seen of ${p.total}' : 'Backing up…';
+      final pct = p.total > 0 ? ((seen / p.total) * 100).round() : 0;
+      text = p.total > 0 ? 'Backing up… $seen of ${p.total} ($pct%)' : 'Backing up…';
     } else if (failed) {
       text = 'Backup needs attention';
     } else if (done) {

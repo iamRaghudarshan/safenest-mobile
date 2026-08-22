@@ -25,6 +25,7 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';   // HapticFeedback on selection
 // BoxHitTestResult and RenderMetaData, for finding which tile a drag is over.
 import 'package:flutter/rendering.dart';
 import 'package:provider/provider.dart';
@@ -141,18 +142,22 @@ class _GalleryScreenState extends State<GalleryScreen>
   List<Map<String, dynamic>> _people = [];
   bool _peopleTried = false;
 
-  /// Newest BACKED UP first rather than newest taken. A genuinely different
-  /// order: a photo scanned in years later sorts by its EXIF date everywhere
-  /// else, deliberately, so the default ordering cannot answer this at all.
-  bool _recent = false;
+  /// How the grid is ordered. 'newest' (default) is newest TAKEN first — the
+  /// order every phone gallery opens on. 'oldest' is the reverse. 'added' is
+  /// newest BACKED UP first, a genuinely different order: a photo scanned in
+  /// years later sorts by its EXIF date everywhere else, so 'added' is the only
+  /// way to see "what reached the computer most recently".
+  String _sort = 'newest';
+  bool get _oldestFirst => _sort == 'oldest';
 
   /// How many photos fit across. Changed by pinching.
   ///
-  /// Three is the default because it is what a phone gallery looks like. Two
-  /// is for looking at pictures, five and seven are for finding one — at seven
-  /// a year of photographs is a few flicks rather than a few minutes.
+  /// FIVE (the "small grid") is the default: a dense, find-it-fast view like
+  /// Google Photos opens on, where more of the library is on screen at once. Two
+  /// is for looking at pictures, three is the roomier phone-gallery look, and
+  /// seven turns a year into a few flicks. Pinch changes it at any time.
   static const _colChoices = [2, 3, 5, 7];
-  int _cols = 3;
+  int _cols = 5;
 
   /// A one-per-row list instead of the grid — the "List" view. Pinch still works
   /// on the grid; this is the explicit alternative the view switcher offers.
@@ -206,9 +211,7 @@ class _GalleryScreenState extends State<GalleryScreen>
   Widget _toolbar() {
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
-    final active = (_favesOnly ? 1 : 0) +
-        (_mediaKind.isNotEmpty ? 1 : 0) +
-        (_recent ? 1 : 0);
+    final active = (_favesOnly ? 1 : 0) + (_mediaKind.isNotEmpty ? 1 : 0);
 
     Widget pill(Widget child, {Color? bg}) => Container(
           height: 36,
@@ -273,12 +276,9 @@ class _GalleryScreenState extends State<GalleryScreen>
                 _mediaKind = _mediaKind == 'videos' ? '' : 'videos';
               case 'screenshots':
                 _mediaKind = _mediaKind == 'screenshots' ? '' : 'screenshots';
-              case 'recent':
-                _recent = !_recent;
               case 'clear':
                 _favesOnly = false;
                 _mediaKind = '';
-                _recent = false;
             }
           });
           _load(reset: true);
@@ -288,7 +288,6 @@ class _GalleryScreenState extends State<GalleryScreen>
           CheckedPopupMenuItem(value: 'photos', checked: _mediaKind == 'photos', child: const Text('Photos only')),
           CheckedPopupMenuItem(value: 'videos', checked: _mediaKind == 'videos', child: const Text('Videos only')),
           CheckedPopupMenuItem(value: 'screenshots', checked: _mediaKind == 'screenshots', child: const Text('Screenshots')),
-          CheckedPopupMenuItem(value: 'recent', checked: _recent, child: const Text('Recently added')),
           if (active > 0) const PopupMenuDivider(),
           if (active > 0) const PopupMenuItem(value: 'clear', child: Text('Clear filters')),
         ],
@@ -306,6 +305,34 @@ class _GalleryScreenState extends State<GalleryScreen>
             ],
           ]),
           bg: active > 0 ? cs.primary : null,
+        ),
+      ),
+      const SizedBox(width: 8),
+      // Sort — newest first by default; oldest, or newest reached the computer.
+      // A control of its own, because "what order am I looking at" is a question
+      // people ask of a gallery, distinct from filtering it down. The pill lights
+      // up when the order is not the default so the current choice is visible.
+      PopupMenuButton<String>(
+        tooltip: 'Sort',
+        position: PopupMenuPosition.under,
+        onSelected: (v) {
+          if (v == _sort) return;
+          setState(() => _sort = v);
+          _load(reset: true);
+        },
+        itemBuilder: (_) => [
+          CheckedPopupMenuItem(
+              value: 'newest', checked: _sort == 'newest', child: const Text('Newest first')),
+          CheckedPopupMenuItem(
+              value: 'oldest', checked: _sort == 'oldest', child: const Text('Oldest first')),
+          CheckedPopupMenuItem(
+              value: 'added', checked: _sort == 'added', child: const Text('Recently added')),
+        ],
+        child: pill(
+          Icon(Icons.sort,
+              size: 18,
+              color: _sort == 'newest' ? cs.onSurfaceVariant : Colors.white),
+          bg: _sort == 'newest' ? null : cs.primary,
         ),
       ),
       const SizedBox(width: 8),
@@ -519,6 +546,14 @@ class _GalleryScreenState extends State<GalleryScreen>
   void _dragSelectStart(Offset at) {
     final id = _photoIdAt(at);
     if (id == null) return;
+    // A haptic tick the instant the long-press takes — the way Google Photos
+    // marks the moment a browse turns into a selection. Without it the 500ms
+    // press has no acknowledgement, so it reads as either "nothing happened" or
+    // "it selected the moment I touched it"; the tick makes it feel deliberate.
+    // Only when STARTING a selection (going from none to one), not on every tile
+    // a drag crosses — a buzz per photo across a holiday would be worse than
+    // silence.
+    if (_selected.isEmpty) HapticFeedback.selectionClick();
     _dragMode = !_selected.contains(id);
     setState(() {
       if (_dragMode!) {
@@ -733,7 +768,8 @@ class _GalleryScreenState extends State<GalleryScreen>
   /// added". Only here does the "photos · videos" split make sense; a filtered
   /// view shows a single count for what it is showing.
   bool get _plainView =>
-      _mediaKind.isEmpty && _query.isEmpty && !_favesOnly && _personId == 0 && !_recent;
+      _mediaKind.isEmpty && _query.isEmpty && !_favesOnly && _personId == 0 &&
+      _sort != 'added';
 
   String _plural(int n, String w) => '$n $w${n == 1 ? '' : 's'}';
 
@@ -780,7 +816,10 @@ class _GalleryScreenState extends State<GalleryScreen>
         if (_favesOnly) 'fav': '1',
         if (_mediaKind.isNotEmpty) 'kind': _mediaKind,
         if (_personId != 0) 'person': '$_personId',
-        if (_recent) 'sort': 'added',
+        // 'newest' is the server's default order, so it needs no param; 'oldest'
+        // and 'added' are sent through. A server too old to know 'oldest' simply
+        // returns its default (newest) rather than erroring.
+        if (_sort != 'newest') 'sort': _sort,
       });
       final items = ((d as Map)['items'] as List)
           .map((e) => Photo.fromJson(Map<String, dynamic>.from(e as Map)))
@@ -862,6 +901,7 @@ class _GalleryScreenState extends State<GalleryScreen>
   List<DayGroup>? _groupCache;
   int _groupKeyLen = -1;
   bool _groupKeyByMonth = false;
+  bool _groupKeyOldest = false;
   Photo? _groupKeyFirst;
   Photo? _groupKeyLast;
 
@@ -872,6 +912,7 @@ class _GalleryScreenState extends State<GalleryScreen>
     if (_groupCache != null &&
         _groupKeyLen == n &&
         _groupKeyByMonth == _byMonth &&
+        _groupKeyOldest == _oldestFirst &&
         identical(_groupKeyFirst, first) &&
         identical(_groupKeyLast, last)) {
       return _groupCache!;
@@ -886,11 +927,16 @@ class _GalleryScreenState extends State<GalleryScreen>
               : DateTime(t.year, t.month, t.day);
       map.putIfAbsent(d, () => []).add(p);
     }
-    final keys = map.keys.toList()..sort((a, b) => b.compareTo(a));
+    // Day/month headers run newest-first by default, oldest-first when that sort
+    // is chosen — matching the order the photos themselves came back in, so the
+    // headers and the tiles under them agree.
+    final keys = map.keys.toList()
+      ..sort((a, b) => _oldestFirst ? a.compareTo(b) : b.compareTo(a));
     final result = [for (final k in keys) DayGroup(k, map[k]!)];
     _groupCache = result;
     _groupKeyLen = n;
     _groupKeyByMonth = _byMonth;
+    _groupKeyOldest = _oldestFirst;
     _groupKeyFirst = first;
     _groupKeyLast = last;
     return result;
@@ -994,7 +1040,7 @@ class _GalleryScreenState extends State<GalleryScreen>
                     if (_photos.isNotEmpty ||
                         _favesOnly ||
                         _mediaKind.isNotEmpty ||
-                        _recent ||
+                        _sort != 'newest' ||
                         _personId != 0) ...[
                       const SizedBox(height: 8),
                       _toolbar(),
