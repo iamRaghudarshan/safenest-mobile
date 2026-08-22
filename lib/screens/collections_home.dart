@@ -27,6 +27,7 @@ import 'documents_screen.dart';
 import 'library_tabs.dart';
 import 'places_screen.dart';
 import 'trash_screen.dart';
+import 'cleanup_screen.dart';
 
 class CollectionsHome extends StatefulWidget {
   const CollectionsHome({super.key});
@@ -477,6 +478,14 @@ class CollectionsHomeState extends State<CollectionsHome> {
         unit: _documents == 1 ? 'document' : 'documents',
         emptyNote: 'Scan or upload one',
         onTap: () => _open(const DocumentsScreen()),
+      ),
+      _Tile(
+        icon: Icons.auto_delete_outlined,
+        colour: const Color(0xFFF59E0B),
+        title: 'Free up space',
+        count: 0,
+        emptyNote: 'Duplicate & look-alike photos',
+        onTap: () => _open(const CleanupScreen()),
       ),
       _Tile(
         icon: Icons.delete_outline,

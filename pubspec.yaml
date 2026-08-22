@@ -4,7 +4,7 @@ publish_to: "none"
 # Kept in step with the VERSION file. CI overrides both with --build-name/-number,
 # but a LOCAL build reads this â€” left at 0.1.0 it made the in-app update check
 # (lib/update.dart) think every server build was newer.
-version: 1.44.0+1
+version: 1.45.0+1
 
 environment:
   sdk: ^3.12.2
