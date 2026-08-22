@@ -57,6 +57,10 @@ class _ModuleListScreenState extends State<ModuleListScreen> {
   ApiError? _err;
   String _filter = '';
   bool _calendar = false;
+  // Reminders/to-dos: false shows the PENDING list, true the COMPLETED one. They
+  // are separate views — a finished reminder leaves the page rather than sinking
+  // to the bottom of it.
+  bool _showCompleted = false;
 
   /// Whether we've already asked the OS for notification permission this run —
   /// static so opening Reminders repeatedly does not re-prompt. Local alarms are
@@ -78,6 +82,9 @@ class _ModuleListScreenState extends State<ModuleListScreen> {
   /// also threw away the record that it had ever been done.
   bool get _tickable =>
       widget.spec.key == 'reminders' || widget.spec.key == 'todos';
+
+  int get _pendingCount => _rows.where((r) => !_isDone(r)).length;
+  int get _doneCount => _rows.where((r) => _isDone(r)).length;
 
   /// Done, for whichever of the two it is. Reminders carry is_done (0/1) and
   /// to-dos carry status ('pending'/'done'); they are not the same field and
@@ -153,6 +160,11 @@ class _ModuleListScreenState extends State<ModuleListScreen> {
       }).toList();
     }
     if (!_tickable) return out;
+
+    // Pending and Completed are separate views. Only the chosen half is shown —
+    // "what is still outstanding" is the question the pending list answers, and a
+    // reminder you have dealt with should be off it.
+    out = out.where((r) => _isDone(r) == _showCompleted).toList();
 
     // Finished things sink, and what is late rises. The server returns reminders
     // in is_done then due_date order and to-dos in status then due_date order,
@@ -343,6 +355,29 @@ class _ModuleListScreenState extends State<ModuleListScreen> {
         ),
       ),
       body: Column(children: [
+        // Pending / Completed — two separate lists, defaulting to Pending. Only
+        // for the tickable modules (reminders, to-dos); the others have no
+        // "done" idea.
+        if (_tickable && !_calendar && _rows.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 8, 14, 2),
+            child: SegmentedButton<bool>(
+              showSelectedIcon: false,
+              segments: [
+                ButtonSegment(
+                    value: false,
+                    label: Text(
+                        'Pending${_pendingCount > 0 ? ' ($_pendingCount)' : ''}')),
+                ButtonSegment(
+                    value: true,
+                    label: Text(
+                        'Completed${_doneCount > 0 ? ' ($_doneCount)' : ''}')),
+              ],
+              selected: {_showCompleted},
+              onSelectionChanged: (s) =>
+                  setState(() => _showCompleted = s.first),
+            ),
+          ),
         if (!_calendar && _rows.length > 5)
           Padding(
             padding: const EdgeInsets.fromLTRB(14, 6, 14, 8),
@@ -395,9 +430,18 @@ class _ModuleListScreenState extends State<ModuleListScreen> {
                               final amount = s.amountField == null
                                   ? ''
                                   : _money(r[s.amountField]);
-                              final date = s.dateField == null
-                                  ? ''
-                                  : '${r[s.dateField] ?? ''}';
+                              // Read dates as dd-mm-yyyy, not the ISO the server
+                              // stores (yyyy-mm-dd) — the raw value put the
+                              // database's spelling on the card. Done defensively:
+                              // most modules point dateField at a raw ISO date,
+                              // but some (Cards) point it at a pre-formatted
+                              // "*_fmt" value, so format only when it parses as a
+                              // date and otherwise show what the server sent.
+                              final rawDate =
+                                  s.dateField == null ? '' : '${r[s.dateField] ?? ''}';
+                              final parsedDate = parseDate(rawDate);
+                              final date =
+                                  parsedDate != null ? fmtDate(parsedDate) : rawDate;
                               final sub = [
                                 if (s.subtitleField != null &&
                                     '${r[s.subtitleField] ?? ''}'.isNotEmpty)
@@ -879,6 +923,13 @@ class _RecordSheetState extends State<_RecordSheet> {
                       hour: int.tryParse(parts[0]) ?? 9,
                       minute: int.tryParse(parts[1]) ?? 0)
                   : const TimeOfDay(hour: 9, minute: 0),
+              // Always the 12-hour AM/PM dial, even on a phone set to 24-hour —
+              // the app reads times as AM/PM everywhere, so the picker should too.
+              builder: (context, child) => MediaQuery(
+                data: MediaQuery.of(context)
+                    .copyWith(alwaysUse24HourFormat: false),
+                child: child!,
+              ),
             );
             if (picked != null) {
               // Sent as 24-hour "HH:MM" whatever the phone's clock is set to —

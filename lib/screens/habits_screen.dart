@@ -625,7 +625,7 @@ class _HabitEditorState extends State<_HabitEditor> {
           const SizedBox(height: 14),
           Row(children: [
             Expanded(
-              child: Text(_time == null ? 'No reminder' : 'Reminder at ${_time!.format(context)}',
+              child: Text(_time == null ? 'No reminder' : 'Reminder at ${fmtHm(_time!.hour, _time!.minute)}',
                   style: Theme.of(context).textTheme.bodyMedium),
             ),
             if (_time != null)
@@ -633,7 +633,14 @@ class _HabitEditorState extends State<_HabitEditor> {
             TextButton(
               onPressed: () async {
                 final picked = await showTimePicker(
-                    context: context, initialTime: _time ?? const TimeOfDay(hour: 8, minute: 0));
+                    context: context,
+                    initialTime: _time ?? const TimeOfDay(hour: 8, minute: 0),
+                    // 12-hour AM/PM dial even on a 24-hour phone.
+                    builder: (context, child) => MediaQuery(
+                          data: MediaQuery.of(context)
+                              .copyWith(alwaysUse24HourFormat: false),
+                          child: child!,
+                        ));
                 if (picked != null) setState(() => _time = picked);
               },
               child: Text(_time == null ? 'Set time' : 'Change'),

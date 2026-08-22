@@ -28,6 +28,21 @@ String fmtDate(DateTime? d) => d == null ? '' : _date.format(d);
 
 String fmtTime(DateTime? d) => d == null ? '' : _time.format(d);
 
+/// 12-hour reading of an (hour, minute): (18, 30) -> "6:30 PM". Used wherever a
+/// time is shown from a TimeOfDay or an "HH:MM" string, so nothing falls back to
+/// the device's 24-hour clock — this app shows AM/PM everywhere.
+String fmtHm(int hour, int minute) =>
+    '${hour % 12 == 0 ? 12 : hour % 12}:${minute.toString().padLeft(2, '0')} '
+    '${hour >= 12 ? 'PM' : 'AM'}';
+
+/// "18:30" -> "6:30 PM". The stored form stays 24-hour "HH:MM" (what the server
+/// wants — see the project guide); only the reading is 12-hour.
+String fmtClock(String? hhmm) {
+  final m = RegExp(r'^(\d{1,2}):(\d{2})').firstMatch((hhmm ?? '').trim());
+  if (m == null) return (hhmm ?? '').trim();
+  return fmtHm(int.parse(m.group(1)!), int.parse(m.group(2)!));
+}
+
 /// 08-08-2026 · 4:14 PM
 String fmtDateTime(DateTime? d) =>
     d == null ? '' : '${fmtDate(d)} · ${fmtTime(d)}';

@@ -218,7 +218,7 @@ class Alarms {
       await schedule(
         id: id,
         title: '${r['title'] ?? 'Reminder'}',
-        body: t.isEmpty ? 'Due today' : 'Due at $t',
+        body: t.isEmpty ? 'Due today' : 'Due at ${fmtClock(t)}',
         when: when,
       );
       set++;

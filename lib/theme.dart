@@ -61,6 +61,7 @@ const kModuleColours = <String, Color>{
   'gallery': Color(0xFFF43F5E),
   'vault': Color(0xFF64748B),
   'documents': Color(0xFF0D9488),
+  'notes': Color(0xFFF5B301),
 };
 
 /// --shadow, as a Flutter box shadow.

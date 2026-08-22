@@ -195,10 +195,16 @@ void main() {
     await tester.pump();
 
     expect(tester.takeException(), isNull);
-    // The hour is on the row, not hidden inside the record.
+    // Pending by default: the two unfinished ones, with their tick controls and
+    // the hour on the row. The handled one is on the Completed tab, not here.
     expect(find.textContaining('6:30 pm'), findsWidgets);
-    // A tick per row — the action that was not available at all before.
     expect(find.byIcon(Icons.radio_button_unchecked), findsNWidgets(2));
+    expect(find.text('Already handled'), findsNothing);
+
+    // Switch to Completed: the handled one, ticked off.
+    await tester.tap(find.text('Completed (1)'));
+    await tester.pumpAndSettle();
+    expect(find.text('Already handled'), findsOneWidget);
     expect(find.byIcon(Icons.check_circle), findsOneWidget);
   });
 
@@ -308,7 +314,7 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('what is late comes first and what is done sinks',
+  testWidgets('pending shows the late one first; done is on its own tab',
       (tester) async {
     tester.view.physicalSize = const Size(375, 900);
     tester.view.devicePixelRatio = 1.0;
@@ -325,10 +331,16 @@ void main() {
     await tester.pump();
     expect(tester.takeException(), isNull);
 
+    // Pending by default: overdue above soon, and the finished one is NOT here.
     final overdue = tester.getTopLeft(find.text('CCC overdue')).dy;
     final soon = tester.getTopLeft(find.text('BBB due next week')).dy;
-    final done = tester.getTopLeft(find.text('AAA done one')).dy;
     expect(overdue, lessThan(soon), reason: 'the late one should be on top');
-    expect(soon, lessThan(done), reason: 'the finished one should be last');
+    expect(find.text('AAA done one'), findsNothing,
+        reason: 'a finished to-do belongs on the Completed tab, not Pending');
+
+    // Completed is where the finished one lives.
+    await tester.tap(find.text('Completed (1)'));
+    await tester.pumpAndSettle();
+    expect(find.text('AAA done one'), findsOneWidget);
   });
 }

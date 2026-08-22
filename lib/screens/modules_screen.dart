@@ -97,6 +97,13 @@ class _ModulesScreenState extends State<ModulesScreen> {
               colour: kModuleColours['vault']!,
               blurb: 'Passwords, encrypted'
             ),
+            (
+              key: 'notes',
+              label: 'Notes',
+              icon: Icons.lightbulb_outline,
+              colour: kModuleColours['notes']!,
+              blurb: 'Quick notes and checklists'
+            ),
           ];
 
   @override

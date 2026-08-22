@@ -26,6 +26,7 @@ import 'package:flutter/material.dart';
 import 'package:open_filex/open_filex.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../api.dart';
 import '../dates.dart';
@@ -47,7 +48,12 @@ class DocumentsScreen extends StatefulWidget {
 class _DocumentsScreenState extends State<DocumentsScreen> {
   List<Map<String, dynamic>> _docs = [];
   bool _loading = true;
-  bool _grid = true;
+  // A LIST by default — it is the view that answers "which of these is newest /
+  // biggest / expiring", which is what a filing drawer is usually opened for; the
+  // grid is for recognising a document by its shape. The choice is remembered
+  // (it was documented as remembered long before it actually was).
+  bool _grid = false;
+  static const _viewKey = 'documents.view.grid';
   String _category = 'all';
   String _query = '';
   String? _error;
@@ -129,6 +135,11 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
     super.initState();
     _load();
     _loadCategories();
+    // Restore the remembered grid/list choice, if there is one.
+    SharedPreferences.getInstance().then((p) {
+      final v = p.getBool(_viewKey);
+      if (v != null && mounted) setState(() => _grid = v);
+    });
   }
 
   @override
@@ -274,7 +285,12 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
           IconButton(
             tooltip: _grid ? 'Show as a list' : 'Show as a grid',
             icon: Icon(_grid ? Icons.view_list_outlined : Icons.grid_view_outlined),
-            onPressed: () => setState(() => _grid = !_grid),
+            onPressed: () async {
+              setState(() => _grid = !_grid);
+              // Remember it, so the drawer opens the way it was left.
+              (await SharedPreferences.getInstance())
+                  .setBool(_viewKey, _grid);
+            },
           ),
         ],
       ),

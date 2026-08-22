@@ -93,7 +93,14 @@ class _NotificationSettingsSectionState
     final h = (_s?['sendHour'] as num?)?.toInt() ?? 9;
     final m = (_s?['sendMinute'] as num?)?.toInt() ?? 0;
     final picked = await showTimePicker(
-        context: context, initialTime: TimeOfDay(hour: h, minute: m));
+        context: context,
+        initialTime: TimeOfDay(hour: h, minute: m),
+        // 12-hour AM/PM dial even on a 24-hour phone, matching the rest of the app.
+        builder: (context, child) => MediaQuery(
+              data:
+                  MediaQuery.of(context).copyWith(alwaysUse24HourFormat: false),
+              child: child!,
+            ));
     if (picked == null) return;
     await _save({'sendHour': picked.hour, 'sendMinute': picked.minute});
   }

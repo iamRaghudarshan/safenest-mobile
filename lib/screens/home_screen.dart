@@ -23,6 +23,7 @@ import '../theme.dart';
 import '../update.dart';
 import 'dashboard_screen.dart';
 import 'documents_screen.dart';
+import 'notes_screen.dart';
 import 'habits_screen.dart';
 import 'module_list_screen.dart';
 import 'modules_screen.dart';
@@ -171,6 +172,10 @@ class _HomeScreenState extends State<HomeScreen> {
       case 'vault':
         Navigator.of(context)
             .push(MaterialPageRoute(builder: (_) => const VaultScreen()));
+      case 'notes':
+        await Navigator.of(context)
+            .push(MaterialPageRoute(builder: (_) => const NotesScreen()));
+        if (mounted) setState(() => _refreshTick++);
       case 'search':
         // The Dashboard has had a search button since it was written and this
         // switch had no case for it — no tab, no ModuleSpec, no branch — so it

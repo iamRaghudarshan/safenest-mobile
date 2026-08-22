@@ -36,6 +36,9 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   List<Map<String, dynamic>> _rows = [];
   bool _loading = true;
   String? _error;
+  // false shows UNREAD, true shows READ — two separate lists, defaulting to the
+  // unread ones (the whole point of opening notifications is what you haven't seen).
+  bool _showRead = false;
 
   @override
   void initState() {
@@ -126,6 +129,10 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final unread = _rows.where((r) => (r['is_read'] ?? 0) == 0).length;
+    // Unread and Read are two separate lists; show only the chosen half.
+    final shown = _rows
+        .where((r) => ((r['is_read'] ?? 0) == 1) == _showRead)
+        .toList();
 
     return Scaffold(
       appBar: AppBar(
@@ -134,6 +141,26 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
           if (unread > 0)
             TextButton(onPressed: _readAll, child: const Text('Mark all read')),
         ],
+        bottom: _rows.isEmpty
+            ? null
+            : PreferredSize(
+                preferredSize: const Size.fromHeight(52),
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(14, 0, 14, 8),
+                  child: SegmentedButton<bool>(
+                    showSelectedIcon: false,
+                    segments: [
+                      ButtonSegment(
+                          value: false,
+                          label: Text('Unread${unread > 0 ? ' ($unread)' : ''}')),
+                      const ButtonSegment(value: true, label: Text('Read')),
+                    ],
+                    selected: {_showRead},
+                    onSelectionChanged: (s) =>
+                        setState(() => _showRead = s.first),
+                  ),
+                ),
+              ),
       ),
       body: _loading
           ? const SkeletonList()
@@ -143,11 +170,23 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                   ? const _NothingYet()
                   : RefreshIndicator(
                       onRefresh: _load,
-                      child: ListView.builder(
+                      child: shown.isEmpty
+                          ? ListView(children: [
+                              Padding(
+                                padding: const EdgeInsets.all(48),
+                                child: Center(
+                                    child: Text(
+                                        _showRead
+                                            ? 'Nothing read yet'
+                                            : 'No unread notifications',
+                                        style: theme.textTheme.bodyMedium)),
+                              )
+                            ])
+                          : ListView.builder(
                         padding: const EdgeInsets.fromLTRB(14, 4, 14, 24),
-                        itemCount: _rows.length,
+                        itemCount: shown.length,
                         itemBuilder: (ctx, i) {
-                          final n = _rows[i];
+                          final n = shown[i];
                           final read = (n['is_read'] ?? 0) == 1;
                           final k = _kind('${n['kind'] ?? ''}');
                           final when = _when(n['created_at']);

@@ -193,13 +193,17 @@ void main() {
     await tester.pump();
 
     expect(tester.takeException(), isNull, reason: 'the inbox overflowed');
-    // Unread is said in words, not only in weight — a bold title is invisible
-    // to anyone who cannot compare it with the one below it.
+    // Unread by default: the two unread ones, said in words not only in weight.
+    // The read digest is on its own tab now, not mixed in.
     expect(find.text('New'), findsNWidgets(2));
     expect(find.text('Reminder'), findsOneWidget);
-    // A timestamp a person can read, not the raw column.
     expect(find.text('20m ago'), findsOneWidget);
-    expect(find.text('Yesterday'), findsNothing);
+    expect(find.text('2d ago'), findsNothing);
+
+    // Switch to Read: the digest, and it still fits the narrow screen.
+    await tester.tap(find.text('Read'));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull, reason: 'the read tab overflowed');
     expect(find.text('2d ago'), findsOneWidget);
   });
 
