@@ -119,11 +119,14 @@ class _ModulesScreenState extends State<ModulesScreen> {
         onRefresh: _load,
         child: GridView.builder(
           padding: const EdgeInsets.fromLTRB(14, 8, 14, 24),
+          // Three across and compact — an app-launcher grid that fits every
+          // module on one screen, rather than the big two-up cards you had to
+          // scroll through.
           gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: 2,
-            crossAxisSpacing: 12,
-            mainAxisSpacing: 12,
-            childAspectRatio: 1.12,
+            crossAxisCount: 3,
+            crossAxisSpacing: 10,
+            mainAxisSpacing: 14,
+            childAspectRatio: 0.82,
           ),
           itemCount: tiles.length,
           itemBuilder: (ctx, i) {
@@ -140,14 +143,12 @@ class _ModulesScreenState extends State<ModulesScreen> {
             // is a large soft glow bleeding from the top-right corner. That glow
             // is most of the character of the screen, and it was missing
             // entirely.
-            return _ModTile(
+            return _CompactModTile(
               label: m.label,
-              blurb: m.blurb,
               icon: m.icon,
               colour: m.colour,
-              count: count,
+              count: _loading ? null : count,
               attention: attn,
-              loading: _loading,
               onTap: () => widget.onOpen(m.key),
             );
           },
@@ -157,143 +158,87 @@ class _ModulesScreenState extends State<ModulesScreen> {
   }
 }
 
-class _ModTile extends StatelessWidget {
-  const _ModTile({
+class _CompactModTile extends StatelessWidget {
+  const _CompactModTile({
     required this.label,
-    required this.blurb,
     required this.icon,
     required this.colour,
     required this.count,
     required this.attention,
-    required this.loading,
     required this.onTap,
   });
 
   final String label;
-  final String blurb;
   final IconData icon;
   final Color colour;
   final Object? count;
   final int attention;
-  final bool loading;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final dark = theme.brightness == Brightness.dark;
     final card = theme.colorScheme.surface;
 
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: card,
-        borderRadius: BorderRadius.circular(18),
-        boxShadow: softShadow(dark),
-      ),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(18),
-          // Clipped, because the glow is deliberately positioned outside the
-          // tile and must be cut off at its rounded edge.
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(18),
-            child: Stack(
-              children: [
-                // .mod-glow — 92px circle, offset -30/-30, 12% opacity.
-                Positioned(
-                  top: -30,
-                  right: -30,
-                  child: Container(
-                    width: 92,
-                    height: 92,
-                    decoration: BoxDecoration(
-                      color: colour.withValues(alpha: 0.12),
-                      shape: BoxShape.circle,
-                    ),
-                  ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Stack(
-                        clipBehavior: Clip.none,
-                        children: [
-                          // .mod-ic — 48px, radius 14, SOLID colour, white glyph.
-                          Container(
-                            width: 48,
-                            height: 48,
-                            decoration: BoxDecoration(
-                              color: colour,
-                              borderRadius: BorderRadius.circular(14),
-                            ),
-                            child: Icon(icon, size: 24, color: Colors.white),
-                          ),
-                          if (attention > 0)
-                            Positioned(
-                              top: -7,
-                              right: -7,
-                              child: Container(
-                                constraints: const BoxConstraints(minWidth: 21),
-                                height: 21,
-                                padding: const EdgeInsets.symmetric(horizontal: 5),
-                                decoration: BoxDecoration(
-                                  color: kDanger,
-                                  borderRadius: BorderRadius.circular(999),
-                                  // box-shadow: 0 0 0 2.5px var(--card) — a ring
-                                  // punched out of the tile so the badge reads
-                                  // as sitting above it.
-                                  border: Border.all(color: card, width: 2.5),
-                                ),
-                                alignment: Alignment.center,
-                                child: Text(
-                                  attention > 9 ? '9+' : '$attention',
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.w800,
-                                    height: 1,
-                                  ),
-                                ),
-                              ),
-                            ),
-                        ],
-                      ),
-                      const SizedBox(height: 12),
-                      // .mod-name — 15px, weight 800, tight letter spacing.
-                      Text(
-                        label,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontSize: 15,
-                          fontWeight: FontWeight.w800,
-                          letterSpacing: -0.15,
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      // .mod-metric — 12.5px, weight 600, soft ink.
-                      Text(
-                        loading || count == null ? blurb : '$count',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 12.5,
-                          fontWeight: FontWeight.w600,
-                          color: theme.colorScheme.onSurfaceVariant,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(16),
+        child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+          Stack(clipBehavior: Clip.none, children: [
+            // A solid rounded block of the module's colour, white glyph.
+            Container(
+              width: 52,
+              height: 52,
+              decoration: BoxDecoration(
+                color: colour,
+                borderRadius: BorderRadius.circular(16),
+                boxShadow: [
+                  BoxShadow(
+                      color: colour.withValues(alpha: 0.30),
+                      blurRadius: 10,
+                      offset: const Offset(0, 4)),
+                ],
+              ),
+              child: Icon(icon, size: 25, color: Colors.white),
             ),
-          ),
-        ),
+            if (attention > 0)
+              Positioned(
+                top: -6,
+                right: -6,
+                child: Container(
+                  constraints: const BoxConstraints(minWidth: 20),
+                  height: 20,
+                  padding: const EdgeInsets.symmetric(horizontal: 5),
+                  decoration: BoxDecoration(
+                    color: kDanger,
+                    borderRadius: BorderRadius.circular(999),
+                    border: Border.all(color: card, width: 2),
+                  ),
+                  alignment: Alignment.center,
+                  child: Text(attention > 9 ? '9+' : '$attention',
+                      style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w800,
+                          height: 1)),
+                ),
+              ),
+          ]),
+          const SizedBox(height: 8),
+          Text(label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700)),
+          if (count != null)
+            Text('$count',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                    fontSize: 11, color: theme.colorScheme.onSurfaceVariant)),
+        ]),
       ),
     );
   }

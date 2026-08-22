@@ -145,19 +145,23 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
             ? null
             : PreferredSize(
                 preferredSize: const Size.fromHeight(52),
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(14, 0, 14, 8),
-                  child: SegmentedButton<bool>(
-                    showSelectedIcon: false,
-                    segments: [
-                      ButtonSegment(
-                          value: false,
-                          label: Text('Unread${unread > 0 ? ' ($unread)' : ''}')),
-                      const ButtonSegment(value: true, label: Text('Read')),
-                    ],
-                    selected: {_showRead},
-                    onSelectionChanged: (s) =>
-                        setState(() => _showRead = s.first),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(14, 0, 14, 8),
+                    child: Row(mainAxisSize: MainAxisSize.min, children: [
+                      ChoiceChip(
+                        label: Text('Unread${unread > 0 ? ' ($unread)' : ''}'),
+                        selected: !_showRead,
+                        onSelected: (_) => setState(() => _showRead = false),
+                      ),
+                      const SizedBox(width: 8),
+                      ChoiceChip(
+                        label: const Text('Read'),
+                        selected: _showRead,
+                        onSelected: (_) => setState(() => _showRead = true),
+                      ),
+                    ]),
                   ),
                 ),
               ),

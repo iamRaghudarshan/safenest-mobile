@@ -25,7 +25,6 @@ import '../session.dart';
 import '../theme.dart';
 import '../widgets/avatar.dart';
 import '../widgets/brand_button.dart';
-import '../widgets/motion.dart';
 import '../widgets/nature_backdrop.dart';
 import 'notifications_screen.dart';
 
@@ -195,33 +194,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
               onProfile: () => widget.onOpen('profile'),
             ),
             const SizedBox(height: 14),
-
-            // The "add an expense" nudge the web app opens with. Rises in gently
-            // on first paint, the same entrance the rest of the kit uses.
-            stagger(context, 0, BrandCard(
-              onTap: () => widget.onOpen('expenses'),
-              child: Row(children: [
-                CircleAvatar(
-                  backgroundColor:
-                      kModuleColours['expenses']!.withValues(alpha: 0.15),
-                  child: Icon(Icons.add, color: kModuleColours['expenses']),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('Add an expense', style: theme.textTheme.titleSmall),
-                      Text('Takes a few seconds',
-                          style: theme.textTheme.bodySmall),
-                    ],
-                  ),
-                ),
-                Icon(Icons.chevron_right, color: theme.colorScheme.outline),
-              ]),
-            )),
-            const SizedBox(height: 18),
 
             if (dues.isNotEmpty) ...[
               _SectionTitle(

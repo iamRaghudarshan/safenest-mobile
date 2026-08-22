@@ -1,10 +1,10 @@
-name: safenest
-description: SafeNest for phones — your own records, on your own machine.
+﻿name: safenest
+description: SafeNest for phones â€” your own records, on your own machine.
 publish_to: "none"
 # Kept in step with the VERSION file. CI overrides both with --build-name/-number,
-# but a LOCAL build reads this — left at 0.1.0 it made the in-app update check
+# but a LOCAL build reads this â€” left at 0.1.0 it made the in-app update check
 # (lib/update.dart) think every server build was newer.
-version: 1.42.0+1
+version: 1.43.0+1
 
 environment:
   sdk: ^3.12.2
@@ -36,11 +36,11 @@ dependencies:
   # There is no self-hosted route to an iPhone's lock screen: Apple and Google
   # deliver to native apps only through APNs and FCM. So this is the one place
   # something leaves the machine, and what leaves is a title and a line of
-  # body — never a record. An installation that would rather not can leave it
+  # body â€” never a record. An installation that would rather not can leave it
   # unconfigured and rely on the local alarms below.
   #
   # CONFIGURED AT RUN TIME, not with google-services.json. The usual setup
-  # applies a Gradle plugin that FAILS THE BUILD when that file is absent —
+  # applies a Gradle plugin that FAILS THE BUILD when that file is absent â€”
   # which would mean this app could not be compiled at all until somebody made
   # a Firebase project. Passing FirebaseOptions in Dart instead keeps the build
   # working for everyone and turns push on only where it is wanted.
@@ -62,7 +62,7 @@ dependencies:
   # Holds the screen awake for the length of a backup, and only then.
   #
   # Both phone systems dim and then sleep an idle screen, and a sleeping screen
-  # suspends the app — so a backup of twenty thousand photos would stop a minute
+  # suspends the app â€” so a backup of twenty thousand photos would stop a minute
   # after it was started and the person watching would see it frozen at 3%. They
   # would then have to sit tapping the screen for half an hour, which is what
   # was actually happening.
@@ -88,7 +88,7 @@ dependencies:
 
   # Reads the version out of the BUILD rather than a string someone has to
   # remember to update. The first version of the Profile screen hardcoded
-  # "0.4.0" and was wrong by the next release — a version number that lies is
+  # "0.4.0" and was wrong by the next release â€” a version number that lies is
   # worse than none, because it is what somebody reports when asking for help.
   package_info_plus: ^8.1.1
 
@@ -107,7 +107,7 @@ flutter:
   uses-material-design: true
 
   # The owner's own icon, taken from their server's /branding/icon-512.png and
-  # bundled so it is there before anyone signs in — the sign-in screen needs a
+  # bundled so it is there before anyone signs in â€” the sign-in screen needs a
   # logo at the one moment there is no server to ask.
   #
   # Once signed in the app uses the LIVE icon from their machine instead, so

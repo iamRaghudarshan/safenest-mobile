@@ -13,6 +13,8 @@
 /// one that drifted would be the one nobody opens.
 library;
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -128,10 +130,137 @@ class _PeopleTabState extends State<PeopleTab> {
   bool _loading = true;
   String? _error;
 
+  // Face-finding: kicked off from this screen and polled for progress. The server
+  // has had /api/gallery/index (start) and its GET (status) all along; the phone
+  // just never offered a "do it now" or showed how it was getting on.
+  bool _scanning = false;
+  Map<String, dynamic> _scan = const {};
+  Timer? _poll;
+
   @override
   void initState() {
     super.initState();
     _load();
+    _checkScan(); // if a pass is already running, pick up its progress
+  }
+
+  @override
+  void dispose() {
+    _poll?.cancel();
+    super.dispose();
+  }
+
+  void _beginPolling(Map<String, dynamic> first) {
+    if (!mounted) return;
+    setState(() {
+      _scan = first;
+      _scanning = true;
+    });
+    _poll?.cancel();
+    _poll = Timer.periodic(const Duration(seconds: 2), (_) => _pollScan());
+  }
+
+  Future<void> _checkScan() async {
+    try {
+      final d = await context.read<Session>().api.get('/api/gallery/index');
+      final m = d is Map ? Map<String, dynamic>.from(d) : const <String, dynamic>{};
+      if (m['running'] == true) _beginPolling(m);
+    } catch (_) {/* offline — nothing to show */}
+  }
+
+  Future<void> _startScan({bool rebuild = false}) async {
+    try {
+      final d = await context.read<Session>().api.post('/api/gallery/index',
+          {'jobs': const ['faces'], if (rebuild) 'rebuild': true});
+      _beginPolling(d is Map ? Map<String, dynamic>.from(d) : const {});
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('Could not start — check your computer is awake.')));
+      }
+    }
+  }
+
+  Future<void> _pollScan() async {
+    try {
+      final d = await context.read<Session>().api.get('/api/gallery/index');
+      if (!mounted) return;
+      final m = d is Map ? Map<String, dynamic>.from(d) : const <String, dynamic>{};
+      final running = m['running'] == true;
+      setState(() {
+        _scan = m;
+        _scanning = running;
+      });
+      if (!running) {
+        _poll?.cancel();
+        _poll = null;
+        await _load(); // the new grouping is ready
+      }
+    } catch (_) {/* transient; keep polling */}
+  }
+
+  Future<void> _stopScan() async {
+    _poll?.cancel();
+    _poll = null;
+    setState(() => _scanning = false);
+    try {
+      await context.read<Session>().api.post('/api/gallery/index/stop', null);
+    } catch (_) {}
+    _load();
+  }
+
+  /// A banner while a scan runs, or a quiet "scan again" button once there are
+  /// people. The empty state has its own, more prominent button.
+  Widget _scanHeader() {
+    final theme = Theme.of(context);
+    if (_scanning) {
+      final done = (_scan['done'] ?? 0) as int;
+      final total = (_scan['total'] ?? 0) as int;
+      final found = (_scan['people'] ?? _scan['faces_found'] ?? 0) as int;
+      return Container(
+        margin: const EdgeInsets.fromLTRB(14, 10, 14, 2),
+        padding: const EdgeInsets.fromLTRB(14, 10, 8, 10),
+        decoration: BoxDecoration(
+          color: kModuleColours['gallery']!.withValues(alpha: 0.10),
+          borderRadius: BorderRadius.circular(14),
+        ),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            const Icon(Icons.face_retouching_natural, size: 20),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                  total > 0
+                      ? 'Finding people… $done of $total · $found so far'
+                      : 'Finding people…',
+                  style: theme.textTheme.bodyMedium
+                      ?.copyWith(fontWeight: FontWeight.w600)),
+            ),
+            TextButton(onPressed: _stopScan, child: const Text('Stop')),
+          ]),
+          const SizedBox(height: 8),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(4),
+            child: LinearProgressIndicator(
+                value: total > 0 ? (done / total).clamp(0.0, 1.0) : null,
+                minHeight: 4),
+          ),
+        ]),
+      );
+    }
+    if (_people.isNotEmpty) {
+      return Align(
+        alignment: Alignment.centerRight,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(14, 6, 8, 0),
+          child: TextButton.icon(
+              onPressed: () => _startScan(),
+              icon: const Icon(Icons.refresh, size: 18),
+              label: const Text('Scan for new faces')),
+        ),
+      );
+    }
+    return const SizedBox.shrink();
   }
 
   /// A face the server has not been told a name for.
@@ -258,15 +387,39 @@ class _PeopleTabState extends State<PeopleTab> {
 
   @override
   Widget build(BuildContext context) {
+    return Column(children: [
+      _scanHeader(),
+      Expanded(child: _content(context)),
+    ]);
+  }
+
+  Widget _content(BuildContext context) {
     if (_loading) return const Center(child: CircularProgressIndicator());
     if (_error != null) return _Retry(message: _error!, onRetry: _load);
     if (_people.isEmpty) {
-      return const _Empty(
-        icon: Icons.people_outline,
-        title: 'No people found yet',
-        note: 'Your computer groups faces in the background as photos arrive. '
-            'It runs when nothing else needs the machine, so give it time '
-            'after a big backup.',
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            const Icon(Icons.people_outline, size: 44),
+            const SizedBox(height: 14),
+            const Text('No people found yet',
+                style: TextStyle(fontWeight: FontWeight.w700)),
+            const SizedBox(height: 8),
+            const Text(
+              'Scan your backed-up photos for faces — it runs on your computer '
+              'and groups the people it finds.',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 12.5),
+            ),
+            const SizedBox(height: 18),
+            FilledButton.icon(
+              onPressed: _scanning ? null : () => _startScan(),
+              icon: const Icon(Icons.face_retouching_natural),
+              label: Text(_scanning ? 'Finding people…' : 'Find people'),
+            ),
+          ]),
+        ),
       );
     }
     // GOOGLE PHOTOS SHAPES A FACE AS A CIRCLE, and it is not decoration: a

@@ -101,8 +101,13 @@ class _DateScrubberState extends State<DateScrubber> {
                 behavior: HitTestBehavior.opaque,
                 onVerticalDragStart: (_) => setState(() => _dragging = true),
                 onVerticalDragUpdate: (d) {
-                  final f = ((y + d.localPosition.dy - knob / 2) / (h - knob))
-                      .clamp(0.0, 1.0);
+                  // Move by the drag DELTA, not by (knob position + local pointer).
+                  // The knob's `y` is derived from _fraction and shifts as the grid
+                  // scrolls, so adding the pointer offset to it double-counted every
+                  // movement and raced the fraction straight to 1.0 — the "one drag
+                  // and it jumps to the end". delta is pure pointer input with no
+                  // such feedback loop.
+                  final f = (_fraction + d.delta.dy / (h - knob)).clamp(0.0, 1.0);
                   setState(() => _fraction = f);
                   _jumpTo(f, h);
                 },

@@ -361,22 +361,18 @@ class _ModuleListScreenState extends State<ModuleListScreen> {
         if (_tickable && !_calendar && _rows.isNotEmpty)
           Padding(
             padding: const EdgeInsets.fromLTRB(14, 8, 14, 2),
-            child: SegmentedButton<bool>(
-              showSelectedIcon: false,
-              segments: [
-                ButtonSegment(
-                    value: false,
-                    label: Text(
-                        'Pending${_pendingCount > 0 ? ' ($_pendingCount)' : ''}')),
-                ButtonSegment(
-                    value: true,
-                    label: Text(
-                        'Completed${_doneCount > 0 ? ' ($_doneCount)' : ''}')),
-              ],
-              selected: {_showCompleted},
-              onSelectionChanged: (s) =>
-                  setState(() => _showCompleted = s.first),
-            ),
+            child: Wrap(spacing: 8, runSpacing: 6, children: [
+              ChoiceChip(
+                label: Text('Pending${_pendingCount > 0 ? ' ($_pendingCount)' : ''}'),
+                selected: !_showCompleted,
+                onSelected: (_) => setState(() => _showCompleted = false),
+              ),
+              ChoiceChip(
+                label: Text('Completed${_doneCount > 0 ? ' ($_doneCount)' : ''}'),
+                selected: _showCompleted,
+                onSelected: (_) => setState(() => _showCompleted = true),
+              ),
+            ]),
           ),
         if (!_calendar && _rows.length > 5)
           Padding(
