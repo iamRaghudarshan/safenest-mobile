@@ -92,12 +92,12 @@ class _NotesScreenState extends State<NotesScreen> {
     } catch (_) {}
   }
 
-  Future<void> _openEditor([Map<String, dynamic>? note]) async {
+  Future<void> _openEditor([Map<String, dynamic>? note, bool checklist = false]) async {
     final saved = await showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
       showDragHandle: true,
-      builder: (_) => _NoteEditor(note: note, api: _api),
+      builder: (_) => _NoteEditor(note: note, api: _api, startChecklist: checklist),
     );
     if (saved == true) _load();
   }
@@ -137,6 +137,36 @@ class _NotesScreenState extends State<NotesScreen> {
             ),
           ),
         ),
+        // The "Take a note…" bar, the way Google Keep opens — a tap starts a
+        // note, the icon starts a checklist.
+        if (_bucket == 'active')
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 10, 14, 2),
+            child: Material(
+              color: Theme.of(context).colorScheme.surfaceContainerHighest,
+              borderRadius: BorderRadius.circular(12),
+              child: InkWell(
+                borderRadius: BorderRadius.circular(12),
+                onTap: () => _openEditor(),
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 4, 6, 4),
+                  child: Row(children: [
+                    Expanded(
+                      child: Text('Take a note…',
+                          style: TextStyle(
+                              color: Theme.of(context).colorScheme.onSurfaceVariant,
+                              fontSize: 15)),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.check_box_outlined),
+                      tooltip: 'New checklist',
+                      onPressed: () => _openEditor(null, true),
+                    ),
+                  ]),
+                ),
+              ),
+            ),
+          ),
         SizedBox(
           height: 46,
           child: ListView(
@@ -403,9 +433,10 @@ class _NotesScreenState extends State<NotesScreen> {
 
 // ---------------------------------------------------------------- the editor
 class _NoteEditor extends StatefulWidget {
-  const _NoteEditor({required this.note, required this.api});
+  const _NoteEditor({required this.note, required this.api, this.startChecklist = false});
   final Map<String, dynamic>? note;
   final Api api;
+  final bool startChecklist;
   @override
   State<_NoteEditor> createState() => _NoteEditorState();
 }
@@ -428,7 +459,7 @@ class _NoteEditorState extends State<_NoteEditor> {
     _title = TextEditingController(text: '${n?['title'] ?? ''}');
     _body = TextEditingController(text: '${n?['body'] ?? ''}');
     _labelInput = TextEditingController();
-    _kind = '${n?['kind'] ?? 'note'}';
+    _kind = widget.startChecklist ? 'checklist' : '${n?['kind'] ?? 'note'}';
     _color = '${n?['color'] ?? 'default'}';
     _labels = [for (final l in (n?['labels'] as List? ?? const [])) '$l'];
     _items = [
