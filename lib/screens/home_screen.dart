@@ -17,6 +17,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../api.dart';
+import '../customize.dart';
 import '../modules.dart';
 import '../session.dart';
 import '../theme.dart';
@@ -33,26 +34,34 @@ import 'vault_screen.dart';
 import 'profile_screen.dart';
 
 class _Tab {
-  const _Tab(this.key, this.label, this.icon, this.activeIcon, [this.mod]);
+  const _Tab(this.key, this.label, this.icon, this.activeIcon, this.colour,
+      [this.mod]);
   final String key;
   final String label;
   final IconData icon;
   final IconData activeIcon;
+
+  /// Each tab keeps its own colour in the bottom bar, always — not a wall of
+  /// grey with one tinted item. It makes the bar read at a glance and matches
+  /// the colourful module tiles.
+  final Color colour;
 
   /// Hidden unless this module is permitted — the `mod` field in App.tsx.
   final String? mod;
 }
 
 const _tabs = <_Tab>[
-  _Tab('home', 'Home', Icons.home_outlined, Icons.home),
-  _Tab('modules', 'Modules', Icons.grid_view_outlined, Icons.grid_view),
+  _Tab('home', 'Home', Icons.home_outlined, Icons.home, Color(0xFF0176D3)),
+  _Tab('modules', 'Modules', Icons.grid_view_outlined, Icons.grid_view,
+      Color(0xFF6366F1)),
   _Tab('expenses', 'Expenses', Icons.account_balance_wallet_outlined,
-      Icons.account_balance_wallet, 'expenses'),
+      Icons.account_balance_wallet, Color(0xFFF59E0B), 'expenses'),
   _Tab('reminders', 'Reminders', Icons.notifications_outlined,
-      Icons.notifications, 'reminders'),
+      Icons.notifications, Color(0xFF8B5CF6), 'reminders'),
   _Tab('gallery', 'Gallery', Icons.photo_library_outlined, Icons.photo_library,
-      'gallery'),
-  _Tab('profile', 'Profile', Icons.person_outline, Icons.person),
+      Color(0xFFF43F5E), 'gallery'),
+  _Tab('profile', 'Profile', Icons.person_outline, Icons.person,
+      Color(0xFF10B981)),
 ];
 
 class HomeScreen extends StatefulWidget {
@@ -81,12 +90,28 @@ class _HomeScreenState extends State<HomeScreen> {
   void initState() {
     super.initState();
     _loadPermissions();
+    // The person's own tab order, if they have set one. Rebuild when it loads or
+    // changes so the bar follows a reorder without a restart.
+    Customize.ensureLoaded().then((_) {
+      if (mounted) setState(() {});
+    });
+    Customize.revision.addListener(_onCustomize);
     // Offer a newer Android build from the customer's own server, if there is
     // one. Post-frame so there is a Navigator to show the prompt on and so it
     // never delays the home screen appearing; Android-only and silent on error.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) checkForUpdate(context, context.read<Session>());
     });
+  }
+
+  @override
+  void dispose() {
+    Customize.revision.removeListener(_onCustomize);
+    super.dispose();
+  }
+
+  void _onCustomize() {
+    if (mounted) setState(() {});
   }
 
   Future<void> _loadPermissions() async {
@@ -127,8 +152,17 @@ class _HomeScreenState extends State<HomeScreen> {
 
   List<_Tab> get _visible {
     final allowed = _allowed;
-    if (allowed == null) return _tabs;
-    return _tabs.where((t) => t.mod == null || allowed.contains(t.mod)).toList();
+    final base = allowed == null
+        ? _tabs
+        : _tabs.where((t) => t.mod == null || allowed.contains(t.mod)).toList();
+    // Apply the person's saved tab order over whatever they are allowed to see.
+    final byKey = {for (final t in base) t.key: t};
+    final natural = base.map((t) => t.key).toList();
+    final ordered = Customize.apply(Customize.navOrder, natural);
+    return [
+      for (final k in ordered)
+        if (byKey[k] != null) byKey[k]!,
+    ];
   }
 
   /// Jump to a tab by key, or push a module that has no tab of its own.
@@ -223,16 +257,230 @@ class _HomeScreenState extends State<HomeScreen> {
         index: index,
         children: [for (final t in tabs) _screenFor(t)],
       ),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: index,
-        onDestinationSelected: (i) => setState(() => _index = i),
-        destinations: [
-          for (final t in tabs)
-            NavigationDestination(
-              icon: Icon(t.icon),
-              selectedIcon: Icon(t.activeIcon),
-              label: t.label,
+      bottomNavigationBar: _ColourfulNavBar(
+        tabs: tabs,
+        index: index,
+        onTap: (i) => setState(() => _index = i),
+        // Press and hold anywhere on the bar to rearrange it.
+        onCustomise: () => _customiseNav(tabs),
+      ),
+    );
+  }
+
+  /// Reorder the bottom bar. A hold on the bar opens this; drag the rows and
+  /// Save. Stored on the phone (customize.dart), so it survives restarts and is
+  /// never sent anywhere.
+  Future<void> _customiseNav(List<_Tab> tabs) async {
+    final order = tabs.map((t) => t.key).toList();
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheet) => SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              Row(children: [
+                Text('Arrange the bar',
+                    style: Theme.of(ctx).textTheme.titleMedium),
+                const Spacer(),
+                TextButton(
+                  onPressed: () async {
+                    await Customize.setNavOrder(const []);
+                    if (ctx.mounted) Navigator.pop(ctx);
+                  },
+                  child: const Text('Reset'),
+                ),
+              ]),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Text('Drag to reorder the tabs along the bottom.',
+                    style: Theme.of(ctx).textTheme.bodySmall),
+              ),
+              const SizedBox(height: 8),
+              Flexible(
+                child: ReorderableListView(
+                  shrinkWrap: true,
+                  buildDefaultDragHandles: true,
+                  // onReorderItem is newer than some Flutter versions CI may use;
+                  // the classic onReorder with the index fix-up works everywhere.
+                  // ignore: deprecated_member_use
+                  onReorder: (a, b) => setSheet(() {
+                    if (b > a) b -= 1;
+                    order.insert(b, order.removeAt(a));
+                  }),
+                  children: [
+                    for (final k in order)
+                      Builder(
+                        key: ValueKey(k),
+                        builder: (_) {
+                          final t = tabs.firstWhere((e) => e.key == k);
+                          return ListTile(
+                            leading: Container(
+                              width: 38,
+                              height: 38,
+                              decoration: BoxDecoration(
+                                color: t.colour.withValues(alpha: 0.16),
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Icon(t.activeIcon, color: t.colour, size: 20),
+                            ),
+                            title: Text(t.label),
+                            trailing:
+                                const Icon(Icons.drag_handle, size: 20),
+                          );
+                        },
+                      ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 10),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton(
+                  onPressed: () async {
+                    await Customize.setNavOrder(order);
+                    if (ctx.mounted) Navigator.pop(ctx);
+                  },
+                  child: const Text('Save'),
+                ),
+              ),
+            ]),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// A fully colourful bottom bar: EVERY tab is a gradient colour chip with a
+/// white glyph, not a wall of grey with one tinted item. The selected chip is
+/// larger with a glow and a bold coloured label; the bar itself picks up a faint
+/// wash of the active tab's colour so the whole footer reads as alive. Press and
+/// hold anywhere to rearrange the tabs.
+class _ColourfulNavBar extends StatelessWidget {
+  const _ColourfulNavBar(
+      {required this.tabs,
+      required this.index,
+      required this.onTap,
+      required this.onCustomise});
+  final List<_Tab> tabs;
+  final int index;
+  final ValueChanged<int> onTap;
+  final VoidCallback onCustomise;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final dark = theme.brightness == Brightness.dark;
+    final active = tabs.isEmpty ? theme.colorScheme.primary : tabs[index].colour;
+    return GestureDetector(
+      onLongPress: onCustomise,
+      child: Container(
+        decoration: BoxDecoration(
+          // A faint wash of the active tab's colour up into the bar — this is the
+          // "coloured footer", tinted rather than a flat surface.
+          gradient: LinearGradient(
+            begin: Alignment.bottomCenter,
+            end: Alignment.topCenter,
+            colors: [
+              active.withValues(alpha: dark ? 0.24 : 0.12),
+              theme.colorScheme.surface,
+            ],
+          ),
+          border: Border(
+              top: BorderSide(
+                  color: active.withValues(alpha: 0.20))),
+          boxShadow: [
+            BoxShadow(
+                color: Colors.black.withValues(alpha: dark ? 0.30 : 0.06),
+                blurRadius: 14,
+                offset: const Offset(0, -3)),
+          ],
+        ),
+        child: SafeArea(
+          top: false,
+          child: SizedBox(
+            height: 70,
+            child: Row(
+              children: [
+                for (var i = 0; i < tabs.length; i++)
+                  Expanded(
+                    child: _NavItem(
+                      tab: tabs[i],
+                      selected: i == index,
+                      onTap: () => onTap(i),
+                      onLongPress: onCustomise,
+                    ),
+                  ),
+              ],
             ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _NavItem extends StatelessWidget {
+  const _NavItem(
+      {required this.tab,
+      required this.selected,
+      required this.onTap,
+      required this.onLongPress});
+  final _Tab tab;
+  final bool selected;
+  final VoidCallback onTap;
+  final VoidCallback onLongPress;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colour = tab.colour;
+    final light = Color.lerp(colour, Colors.white, 0.24)!;
+    final size = selected ? 46.0 : 40.0;
+
+    return InkWell(
+      onTap: onTap,
+      onLongPress: onLongPress,
+      borderRadius: BorderRadius.circular(18),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          AnimatedContainer(
+            duration: const Duration(milliseconds: 200),
+            curve: Curves.easeOut,
+            width: size,
+            height: size,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [light, colour],
+              ),
+              borderRadius: BorderRadius.circular(15),
+              boxShadow: [
+                BoxShadow(
+                    color: colour.withValues(alpha: selected ? 0.45 : 0.24),
+                    blurRadius: selected ? 12 : 6,
+                    offset: Offset(0, selected ? 5 : 3)),
+              ],
+            ),
+            child: Icon(selected ? tab.activeIcon : tab.icon,
+                size: selected ? 24 : 22, color: Colors.white),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            tab.label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: 10,
+              fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
+              color: selected ? colour : theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
         ],
       ),
     );

@@ -99,6 +99,30 @@ class Push {
         return false;
       }
 
+      // iOS hands Firebase the APNs device token a beat AFTER permission is
+      // granted, asynchronously. getToken() returns null if it is called before
+      // that arrives — and that is the single most common reason an iPhone shows
+      // "No device is signed up for push yet" while the entitlement, the Apple
+      // profile, the Firebase identifiers and the APNs key are all correct. The
+      // whole chain reports success at doing nothing, exactly as it did when the
+      // entitlement itself was missing. So on iOS, wait for the APNs token first
+      // (briefly — a handful of one-second tries), and only then ask FCM to wrap
+      // it. Android has no such token and skips this.
+      if (_isIos) {
+        var apns = await messaging.getAPNSToken();
+        for (var i = 0; apns == null && i < 6; i++) {
+          await Future.delayed(const Duration(seconds: 1));
+          apns = await messaging.getAPNSToken();
+        }
+        if (apns == null) {
+          // No APNs token this launch: either the owner's Firebase project has
+          // no APNs auth key uploaded yet, or it simply was not ready in time.
+          // Nothing to register; next launch tries again.
+          debugPrint('[push] no APNs token yet — not registering this launch');
+          return false;
+        }
+      }
+
       final t = await messaging.getToken();
       if (t == null || t.isEmpty) return false;
       _token = t;
