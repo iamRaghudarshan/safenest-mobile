@@ -110,6 +110,16 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     }
   }
 
+  /// Whether a row is read. The server serialises this as `read` (a bool) via
+  /// notifications.py::_item — NOT `is_read`. Reading the wrong key meant every
+  /// row came back null → treated as unread, so the list never emptied and
+  /// "Mark all read" looked broken even though the server had marked them. Accept
+  /// both so it is right whatever version the server is.
+  bool _readOf(Map r) => r['read'] == true || (r['is_read'] ?? 0) == 1;
+
+  /// The server sends the time as `at`; older shapes used `created_at`.
+  dynamic _atOf(Map r) => r['at'] ?? r['created_at'];
+
   /// "2h ago", not "2026-08-07T18:30:00". The raw column was going straight to
   /// the screen, which is a timestamp for a database rather than for a person.
   String _when(dynamic raw) {
@@ -128,11 +138,9 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final unread = _rows.where((r) => (r['is_read'] ?? 0) == 0).length;
+    final unread = _rows.where((r) => !_readOf(r)).length;
     // Unread and Read are two separate lists; show only the chosen half.
-    final shown = _rows
-        .where((r) => ((r['is_read'] ?? 0) == 1) == _showRead)
-        .toList();
+    final shown = _rows.where((r) => _readOf(r) == _showRead).toList();
 
     return Scaffold(
       appBar: AppBar(
@@ -191,9 +199,9 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                         itemCount: shown.length,
                         itemBuilder: (ctx, i) {
                           final n = shown[i];
-                          final read = (n['is_read'] ?? 0) == 1;
+                          final read = _readOf(n);
                           final k = _kind('${n['kind'] ?? ''}');
-                          final when = _when(n['created_at']);
+                          final when = _when(_atOf(n));
 
                           return Padding(
                             padding: const EdgeInsets.only(bottom: 10),
