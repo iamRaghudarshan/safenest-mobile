@@ -19,6 +19,7 @@ import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'api.dart';
+import 'customize.dart';
 import 'session.dart';
 import 'theme.dart';
 import 'screens/sign_in_screen.dart';
@@ -26,8 +27,11 @@ import 'screens/home_screen.dart';
 import 'widgets/licence_notice.dart';
 import 'widgets/nature_backdrop.dart';
 
-void main() {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // Load the person's appearance choices before the first frame, so a saved
+  // "plain background" shows immediately rather than flashing the nature scene.
+  await Customize.ensureLoaded();
   runApp(const SafeNestApp());
 }
 
@@ -98,13 +102,24 @@ class _SafeNestAppState extends State<SafeNestApp> {
           theme: buildTheme(_brand, Brightness.light),
           darkTheme: buildTheme(_brand, Brightness.dark),
           themeMode: _themeMode,
-          // A single nature backdrop behind every route. Scaffolds are transparent
-          // (see theme.dart) so it shows through the whole app and the sign-in page.
-          builder: (context, child) => Stack(
-            children: [
-              const Positioned.fill(child: NatureBackdrop()),
-              if (child != null) Positioned.fill(child: child),
-            ],
+          // A single backdrop behind every route. Scaffolds are transparent (see
+          // theme.dart) so it shows through the whole app and the sign-in page.
+          // The person can swap the nature scene for a plain screen in Profile →
+          // Personalise; ValueListenableBuilder rebuilds when they do.
+          builder: (context, child) => ValueListenableBuilder<int>(
+            valueListenable: Customize.revision,
+            builder: (context, _, _) => Stack(
+              children: [
+                Positioned.fill(
+                  child: Customize.natureBackground
+                      ? const NatureBackdrop()
+                      // An OPAQUE surface, not the transparent scaffold colour, or
+                      // there would be nothing behind the transparent scaffolds.
+                      : ColoredBox(color: Theme.of(context).colorScheme.surface),
+                ),
+                if (child != null) Positioned.fill(child: child),
+              ],
+            ),
           ),
           home: session.loading
               ? const _Splash()

@@ -35,6 +35,7 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'package:provider/provider.dart';
 
 import '../api.dart';
+import '../customize.dart';
 import '../dates.dart';
 import '../session.dart';
 import '../theme.dart';
@@ -54,11 +55,16 @@ class ProfileScreen extends StatefulWidget {
     required this.brand,
     this.themeMode = ThemeMode.system,
     this.onThemeChanged,
+    this.onCustomiseNav,
   });
 
   final Brand brand;
   final ThemeMode themeMode;
   final ValueChanged<ThemeMode>? onThemeChanged;
+
+  /// Opens the "arrange the bottom bar" sheet. Provided by the home shell, which
+  /// owns the tab list; null when Profile is shown outside it.
+  final VoidCallback? onCustomiseNav;
 
   @override
   State<ProfileScreen> createState() => _ProfileScreenState();
@@ -104,6 +110,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final theme = Theme.of(context);
 
     return Scaffold(
+      // A near-opaque surface over the nature backdrop: Profile is dense with
+      // text and switches, and the scene showing through them read as clutter.
+      // Kept just shy of solid so a hint of the backdrop still frames the edges.
+      backgroundColor: theme.colorScheme.surface.withValues(alpha: 0.94),
       appBar: AppBar(title: const Text('Profile')),
       body: ListView(
         padding: const EdgeInsets.only(bottom: 28),
@@ -178,6 +188,72 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       ? const Icon(Icons.check, size: 18, color: kBrand)
                       : null,
                   onTap: () => widget.onThemeChanged?.call(m),
+                ),
+            ],
+          ),
+
+          SettingsGroup(
+            title: 'Personalise',
+            footer: 'Make the app yours. These are saved on this phone and take '
+                'effect straight away.',
+            children: [
+              // Bottom icons: colourful gradient chips, or plain icons.
+              SettingsRow(
+                icon: Icons.dashboard_customize_outlined,
+                tint: kModuleColours['investments']!,
+                label: 'Colourful bottom icons',
+                trailing: Customize.colourfulNav
+                    ? const Icon(Icons.check, size: 18, color: kBrand)
+                    : null,
+                onTap: () async {
+                  await Customize.setNavStyle(Customize.navStyleColour);
+                  if (mounted) setState(() {});
+                },
+              ),
+              SettingsRow(
+                icon: Icons.dashboard_outlined,
+                tint: kModuleColours['vault']!,
+                label: 'Plain bottom icons',
+                trailing: !Customize.colourfulNav
+                    ? const Icon(Icons.check, size: 18, color: kBrand)
+                    : null,
+                onTap: () async {
+                  await Customize.setNavStyle(Customize.navStylePlain);
+                  if (mounted) setState(() {});
+                },
+              ),
+              // Background: the animated nature scene, or a plain screen.
+              SettingsRow(
+                icon: Icons.landscape_outlined,
+                tint: kModuleColours['todos']!,
+                label: 'Nature background',
+                trailing: Customize.natureBackground
+                    ? const Icon(Icons.check, size: 18, color: kBrand)
+                    : null,
+                onTap: () async {
+                  await Customize.setBackground(Customize.backgroundNature);
+                  if (mounted) setState(() {});
+                },
+              ),
+              SettingsRow(
+                icon: Icons.crop_square,
+                tint: kModuleColours['documents']!,
+                label: 'Plain background',
+                trailing: !Customize.natureBackground
+                    ? const Icon(Icons.check, size: 18, color: kBrand)
+                    : null,
+                onTap: () async {
+                  await Customize.setBackground(Customize.backgroundPlain);
+                  if (mounted) setState(() {});
+                },
+              ),
+              // Rearrange the bottom bar — same sheet as a long-press on the bar.
+              if (widget.onCustomiseNav != null)
+                SettingsRow(
+                  icon: Icons.reorder,
+                  tint: kModuleColours['reminders']!,
+                  label: 'Rearrange the bottom bar',
+                  onTap: widget.onCustomiseNav,
                 ),
             ],
           ),

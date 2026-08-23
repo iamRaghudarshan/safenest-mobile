@@ -17,6 +17,15 @@ class Customize {
 
   static const _kModuleOrder = 'module_order_v1';
   static const _kNavOrder = 'nav_order_v1';
+  static const _kNavStyle = 'nav_style_v1';     // 'colour' | 'plain'
+  static const _kBackground = 'background_v1';   // 'nature' | 'plain'
+
+  /// Defaults match what shipped before this screen existed, so a person who
+  /// never opens it sees exactly the app they had.
+  static const navStyleColour = 'colour';
+  static const navStylePlain = 'plain';
+  static const backgroundNature = 'nature';
+  static const backgroundPlain = 'plain';
 
   /// Bumped whenever an order changes, so screens listening rebuild. A plain
   /// ValueNotifier rather than Provider: this is read in two places and wiring a
@@ -26,6 +35,8 @@ class Customize {
 
   static List<String> _moduleOrder = const [];
   static List<String> _navOrder = const [];
+  static String _navStyle = navStyleColour;
+  static String _background = backgroundNature;
   static bool _loaded = false;
 
   /// Safe to call repeatedly — the first read wins and the rest are no-ops.
@@ -34,11 +45,31 @@ class Customize {
     final p = await SharedPreferences.getInstance();
     _moduleOrder = p.getStringList(_kModuleOrder) ?? const [];
     _navOrder = p.getStringList(_kNavOrder) ?? const [];
+    _navStyle = p.getString(_kNavStyle) ?? navStyleColour;
+    _background = p.getString(_kBackground) ?? backgroundNature;
     _loaded = true;
   }
 
   static List<String> get moduleOrder => _moduleOrder;
   static List<String> get navOrder => _navOrder;
+  static String get navStyle => _navStyle;
+  static String get background => _background;
+  static bool get colourfulNav => _navStyle == navStyleColour;
+  static bool get natureBackground => _background == backgroundNature;
+
+  static Future<void> setNavStyle(String v) async {
+    _navStyle = v;
+    final p = await SharedPreferences.getInstance();
+    await p.setString(_kNavStyle, v);
+    revision.value++;
+  }
+
+  static Future<void> setBackground(String v) async {
+    _background = v;
+    final p = await SharedPreferences.getInstance();
+    await p.setString(_kBackground, v);
+    revision.value++;
+  }
 
   /// Order [keys] by the saved preference: known-and-saved first in the saved
   /// order, then anything new (a module added since the order was saved) in its
@@ -71,13 +102,17 @@ class Customize {
     revision.value++;
   }
 
-  /// Back to the app's own order for both.
+  /// Back to the app's own order and look for everything.
   static Future<void> reset() async {
     _moduleOrder = const [];
     _navOrder = const [];
+    _navStyle = navStyleColour;
+    _background = backgroundNature;
     final p = await SharedPreferences.getInstance();
     await p.remove(_kModuleOrder);
     await p.remove(_kNavOrder);
+    await p.remove(_kNavStyle);
+    await p.remove(_kBackground);
     revision.value++;
   }
 }

@@ -142,7 +142,8 @@ class _World extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final w = size.width;
     final h = size.height;
-    const a = 0.5; // faint, so content stays readable
+    const a = 0.32; // faint, so content stays readable (dialled down: the scene
+    // was bleeding through cards and text and reading as clutter)
     final u = (w / 400).clamp(0.8, 1.8);
     final land = (h * 0.34).clamp(220.0, 360.0);
     final top = h - land;

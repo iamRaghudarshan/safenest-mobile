@@ -238,6 +238,7 @@ class _HomeScreenState extends State<HomeScreen> {
           brand: widget.brand,
           themeMode: widget.themeMode,
           onThemeChanged: widget.onThemeChanged,
+          onCustomiseNav: () => _customiseNav(_visible),
         );
       default:
         return const SizedBox.shrink();
@@ -374,24 +375,30 @@ class _ColourfulNavBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final dark = theme.brightness == Brightness.dark;
+    final colourful = Customize.colourfulNav;
     final active = tabs.isEmpty ? theme.colorScheme.primary : tabs[index].colour;
     return GestureDetector(
       onLongPress: onCustomise,
       child: Container(
         decoration: BoxDecoration(
-          // A faint wash of the active tab's colour up into the bar — this is the
-          // "coloured footer", tinted rather than a flat surface.
-          gradient: LinearGradient(
-            begin: Alignment.bottomCenter,
-            end: Alignment.topCenter,
-            colors: [
-              active.withValues(alpha: dark ? 0.24 : 0.12),
-              theme.colorScheme.surface,
-            ],
-          ),
+          // Colourful: a faint wash of the active tab's colour up into the bar.
+          // Plain: a flat surface, like a standard tab bar.
+          color: colourful ? null : theme.colorScheme.surface,
+          gradient: colourful
+              ? LinearGradient(
+                  begin: Alignment.bottomCenter,
+                  end: Alignment.topCenter,
+                  colors: [
+                    active.withValues(alpha: dark ? 0.24 : 0.12),
+                    theme.colorScheme.surface,
+                  ],
+                )
+              : null,
           border: Border(
               top: BorderSide(
-                  color: active.withValues(alpha: 0.20))),
+                  color: colourful
+                      ? active.withValues(alpha: 0.20)
+                      : theme.colorScheme.outlineVariant.withValues(alpha: 0.5))),
           boxShadow: [
             BoxShadow(
                 color: Colors.black.withValues(alpha: dark ? 0.30 : 0.06),
@@ -438,26 +445,22 @@ class _NavItem extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colour = tab.colour;
-    final light = Color.lerp(colour, Colors.white, 0.24)!;
-    final size = selected ? 46.0 : 40.0;
+    final colourful = Customize.colourfulNav;
 
-    return InkWell(
-      onTap: onTap,
-      onLongPress: onLongPress,
-      borderRadius: BorderRadius.circular(18),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          AnimatedContainer(
+    // Plain style: a simple monochrome icon that tints to the tab's colour when
+    // selected, sitting on a soft pill — a standard, quiet tab bar for people
+    // who would rather not have the colour chips.
+    final Widget glyph = colourful
+        ? AnimatedContainer(
             duration: const Duration(milliseconds: 200),
             curve: Curves.easeOut,
-            width: size,
-            height: size,
+            width: selected ? 46.0 : 40.0,
+            height: selected ? 46.0 : 40.0,
             decoration: BoxDecoration(
               gradient: LinearGradient(
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
-                colors: [light, colour],
+                colors: [Color.lerp(colour, Colors.white, 0.24)!, colour],
               ),
               borderRadius: BorderRadius.circular(15),
               boxShadow: [
@@ -469,7 +472,31 @@ class _NavItem extends StatelessWidget {
             ),
             child: Icon(selected ? tab.activeIcon : tab.icon,
                 size: selected ? 24 : 22, color: Colors.white),
-          ),
+          )
+        : AnimatedContainer(
+            duration: const Duration(milliseconds: 180),
+            curve: Curves.easeOut,
+            padding: EdgeInsets.symmetric(
+                horizontal: selected ? 16 : 10, vertical: 5),
+            decoration: BoxDecoration(
+              color: selected
+                  ? colour.withValues(alpha: 0.14)
+                  : Colors.transparent,
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: Icon(selected ? tab.activeIcon : tab.icon,
+                size: 24,
+                color: selected ? colour : theme.colorScheme.onSurfaceVariant),
+          );
+
+    return InkWell(
+      onTap: onTap,
+      onLongPress: onLongPress,
+      borderRadius: BorderRadius.circular(18),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          glyph,
           const SizedBox(height: 4),
           Text(
             tab.label,
