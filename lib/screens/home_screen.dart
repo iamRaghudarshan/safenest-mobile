@@ -50,7 +50,11 @@ class _Tab {
   final String? mod;
 }
 
-const _tabs = <_Tab>[
+/// Every tab that MAY go in the bottom bar — the six standard ones plus a few
+/// more the person can add. Each has a screen (see _screenFor). Which of these
+/// actually show, and in what order, is the person's choice (Customize.navBar);
+/// the default is _defaultBar.
+const _allTabs = <_Tab>[
   _Tab('home', 'Home', Icons.home_outlined, Icons.home, Color(0xFF0176D3)),
   _Tab('modules', 'Modules', Icons.grid_view_outlined, Icons.grid_view,
       Color(0xFF6366F1)),
@@ -62,7 +66,19 @@ const _tabs = <_Tab>[
       Color(0xFFF43F5E), 'gallery'),
   _Tab('profile', 'Profile', Icons.person_outline, Icons.person,
       Color(0xFF10B981)),
+  // Addable extras — off by default, each opens its own screen as a tab.
+  _Tab('notes', 'Notes', Icons.lightbulb_outline, Icons.lightbulb,
+      Color(0xFFF5B301), 'notes'),
+  _Tab('documents', 'Documents', Icons.folder_outlined, Icons.folder,
+      Color(0xFF0D9488), 'documents'),
+  _Tab('habits', 'Habits', Icons.local_fire_department_outlined,
+      Icons.local_fire_department, Color(0xFFF97316), 'habits'),
+  _Tab('vault', 'Vault', Icons.lock_outline, Icons.lock,
+      Color(0xFF64748B), 'vault'),
 ];
+
+/// The bar as it ships, before anyone customises it.
+const _defaultBar = ['home', 'modules', 'expenses', 'reminders', 'gallery', 'profile'];
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({
@@ -152,17 +168,24 @@ class _HomeScreenState extends State<HomeScreen> {
 
   List<_Tab> get _visible {
     final allowed = _allowed;
-    final base = allowed == null
-        ? _tabs
-        : _tabs.where((t) => t.mod == null || allowed.contains(t.mod)).toList();
-    // Apply the person's saved tab order over whatever they are allowed to see.
-    final byKey = {for (final t in base) t.key: t};
-    final natural = base.map((t) => t.key).toList();
-    final ordered = Customize.apply(Customize.navOrder, natural);
-    return [
-      for (final k in ordered)
-        if (byKey[k] != null) byKey[k]!,
-    ];
+    final byKey = {for (final t in _allTabs) t.key: t};
+    // The person's chosen bar, or the default set. Then drop anything this
+    // account is not permitted to see.
+    final chosen = Customize.navBar.isNotEmpty ? Customize.navBar : _defaultBar;
+    final out = <_Tab>[];
+    for (final k in chosen) {
+      final t = byKey[k];
+      if (t == null) continue;
+      if (t.mod != null && allowed != null && !allowed.contains(t.mod)) continue;
+      out.add(t);
+    }
+    // Never strand the person: Profile carries the customise screen, so it is
+    // always reachable, and the bar is never empty.
+    if (!out.any((t) => t.key == 'profile')) out.add(byKey['profile']!);
+    if (out.isEmpty) {
+      return [for (final k in _defaultBar) if (byKey[k] != null) byKey[k]!];
+    }
+    return out;
   }
 
   /// Jump to a tab by key, or push a module that has no tab of its own.
@@ -233,12 +256,22 @@ class _HomeScreenState extends State<HomeScreen> {
         return ModuleListScreen(spec: moduleByKey('reminders')!, embedded: true);
       case 'gallery':
         return const PhotosHome();
+      // The addable extras, when the person has put them in the bar. Each is the
+      // same screen they open from the Modules grid.
+      case 'notes':
+        return const NotesScreen();
+      case 'documents':
+        return const DocumentsScreen();
+      case 'habits':
+        return const HabitsScreen();
+      case 'vault':
+        return const VaultScreen();
       case 'profile':
         return ProfileScreen(
           brand: widget.brand,
           themeMode: widget.themeMode,
           onThemeChanged: widget.onThemeChanged,
-          onCustomiseNav: () => _customiseNav(_visible),
+          onCustomiseNav: _customiseNav,
         );
       default:
         return const SizedBox.shrink();
@@ -262,94 +295,150 @@ class _HomeScreenState extends State<HomeScreen> {
         tabs: tabs,
         index: index,
         onTap: (i) => setState(() => _index = i),
-        // Press and hold anywhere on the bar to rearrange it.
-        onCustomise: () => _customiseNav(tabs),
+        // Press and hold anywhere on the bar to customise it.
+        onCustomise: _customiseNav,
       ),
     );
   }
 
-  /// Reorder the bottom bar. A hold on the bar opens this; drag the rows and
-  /// Save. Stored on the phone (customize.dart), so it survives restarts and is
-  /// never sent anywhere.
-  Future<void> _customiseNav(List<_Tab> tabs) async {
-    final order = tabs.map((t) => t.key).toList();
+  /// Customise the bottom bar: add tabs, remove tabs, and drag to reorder.
+  /// A hold on the bar opens this, as does Profile → Personalise. Stored on the
+  /// phone (customize.dart), so it survives restarts and never leaves the device.
+  Future<void> _customiseNav() async {
+    final allowed = _allowed;
+    // Only offer tabs this account may actually see.
+    bool permitted(_Tab t) =>
+        t.mod == null || allowed == null || allowed.contains(t.mod);
+    final byKey = {for (final t in _allTabs) t.key: t};
+
+    // Start from the current bar (chosen set, or default), keeping only permitted.
+    final inBar = <String>[
+      for (final k in (Customize.navBar.isNotEmpty ? Customize.navBar : _defaultBar))
+        if (byKey[k] != null && permitted(byKey[k]!)) k,
+    ];
+    if (!inBar.contains('profile')) inBar.add('profile');
+
     await showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
       isScrollControlled: true,
       builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setSheet) => SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-            child: Column(mainAxisSize: MainAxisSize.min, children: [
-              Row(children: [
-                Text('Arrange the bar',
-                    style: Theme.of(ctx).textTheme.titleMedium),
-                const Spacer(),
-                TextButton(
-                  onPressed: () async {
-                    await Customize.setNavOrder(const []);
-                    if (ctx.mounted) Navigator.pop(ctx);
-                  },
-                  child: const Text('Reset'),
+        builder: (ctx, setSheet) {
+          final theme = Theme.of(ctx);
+          final available = _allTabs
+              .where((t) => permitted(t) && !inBar.contains(t.key))
+              .toList();
+          Widget chip(_Tab t) => Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: t.colour.withValues(alpha: 0.16),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(t.activeIcon, color: t.colour, size: 20),
+              );
+          return SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+              child: Column(mainAxisSize: MainAxisSize.min, children: [
+                Row(children: [
+                  Text('Customise the bar', style: theme.textTheme.titleMedium),
+                  const Spacer(),
+                  TextButton(
+                    onPressed: () async {
+                      await Customize.setNavBar(const []);
+                      if (ctx.mounted) Navigator.pop(ctx);
+                    },
+                    child: const Text('Reset'),
+                  ),
+                ]),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                      'Add or remove tabs, and drag to reorder. '
+                      '${Customize.navBarMin}–${Customize.navBarMax} tabs.',
+                      style: theme.textTheme.bodySmall),
+                ),
+                const SizedBox(height: 10),
+                // In the bar — reorderable, each removable (except Profile).
+                Flexible(
+                  child: ReorderableListView(
+                    shrinkWrap: true,
+                    buildDefaultDragHandles: true,
+                    // ignore: deprecated_member_use
+                    onReorder: (a, b) => setSheet(() {
+                      if (b > a) b -= 1;
+                      inBar.insert(b, inBar.removeAt(a));
+                    }),
+                    children: [
+                      for (final k in inBar)
+                        ListTile(
+                          key: ValueKey(k),
+                          contentPadding:
+                              const EdgeInsets.symmetric(horizontal: 4),
+                          leading: chip(byKey[k]!),
+                          title: Text(byKey[k]!.label),
+                          trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+                            // Profile stays — it is the way back to this screen.
+                            if (k != 'profile' && inBar.length > Customize.navBarMin)
+                              IconButton(
+                                tooltip: 'Remove',
+                                icon: const Icon(Icons.remove_circle_outline,
+                                    color: kDanger, size: 22),
+                                onPressed: () =>
+                                    setSheet(() => inBar.remove(k)),
+                              ),
+                            const Icon(Icons.drag_handle, size: 20),
+                          ]),
+                        ),
+                    ],
+                  ),
+                ),
+                if (available.isNotEmpty) ...[
+                  const Divider(height: 22),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text('Add to the bar',
+                        style: theme.textTheme.labelLarge),
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      for (final t in available)
+                        ActionChip(
+                          avatar: Icon(t.icon, size: 18, color: t.colour),
+                          label: Text(t.label),
+                          onPressed: inBar.length >= Customize.navBarMax
+                              ? null
+                              : () => setSheet(() => inBar.add(t.key)),
+                        ),
+                    ],
+                  ),
+                  if (inBar.length >= Customize.navBarMax)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: Text('That is the most the bar holds — remove one first.',
+                          style: theme.textTheme.bodySmall
+                              ?.copyWith(color: kDanger)),
+                    ),
+                ],
+                const SizedBox(height: 14),
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton(
+                    onPressed: () async {
+                      await Customize.setNavBar(inBar);
+                      if (ctx.mounted) Navigator.pop(ctx);
+                    },
+                    child: const Text('Save'),
+                  ),
                 ),
               ]),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: Text('Drag to reorder the tabs along the bottom.',
-                    style: Theme.of(ctx).textTheme.bodySmall),
-              ),
-              const SizedBox(height: 8),
-              Flexible(
-                child: ReorderableListView(
-                  shrinkWrap: true,
-                  buildDefaultDragHandles: true,
-                  // onReorderItem is newer than some Flutter versions CI may use;
-                  // the classic onReorder with the index fix-up works everywhere.
-                  // ignore: deprecated_member_use
-                  onReorder: (a, b) => setSheet(() {
-                    if (b > a) b -= 1;
-                    order.insert(b, order.removeAt(a));
-                  }),
-                  children: [
-                    for (final k in order)
-                      Builder(
-                        key: ValueKey(k),
-                        builder: (_) {
-                          final t = tabs.firstWhere((e) => e.key == k);
-                          return ListTile(
-                            leading: Container(
-                              width: 38,
-                              height: 38,
-                              decoration: BoxDecoration(
-                                color: t.colour.withValues(alpha: 0.16),
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              child: Icon(t.activeIcon, color: t.colour, size: 20),
-                            ),
-                            title: Text(t.label),
-                            trailing:
-                                const Icon(Icons.drag_handle, size: 20),
-                          );
-                        },
-                      ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 10),
-              SizedBox(
-                width: double.infinity,
-                child: FilledButton(
-                  onPressed: () async {
-                    await Customize.setNavOrder(order);
-                    if (ctx.mounted) Navigator.pop(ctx);
-                  },
-                  child: const Text('Save'),
-                ),
-              ),
-            ]),
-          ),
-        ),
+            ),
+          );
+        },
       ),
     );
   }

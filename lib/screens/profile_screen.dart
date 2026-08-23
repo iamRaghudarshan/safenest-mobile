@@ -118,36 +118,93 @@ class _ProfileScreenState extends State<ProfileScreen> {
       body: ListView(
         padding: const EdgeInsets.only(bottom: 28),
         children: [
+          // A hero card: the person's photo, name and email on a brand gradient,
+          // the whole thing tappable to edit. The web app's avatar-opens-edit,
+          // made the anchor of the screen it belongs to.
           Padding(
-            padding: const EdgeInsets.fromLTRB(0, 10, 0, 20),
-            // The PERSON's photo, not the app's logo.
-            //
-            // The web app's hero is `<Avatar size={58} />` and tapping it opens
-            // Edit profile. This showed BrandLogo — the app icon — which is the
-            // same on every account and tells the person nothing about
-            // themselves, on the one screen that is entirely about them.
-            child: Column(children: [
-              Avatar(size: 84, onTap: () => _editProfile(context)),
-              const SizedBox(height: 12),
-              Text('${user?['name'] ?? 'Signed in'}',
-                  style: theme.textTheme.titleMedium),
-              Text('${user?['email'] ?? ''}', style: theme.textTheme.bodySmall),
-              if (user?['role'] != null) ...[
-                const SizedBox(height: 6),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+            padding: const EdgeInsets.fromLTRB(14, 12, 14, 8),
+            child: Material(
+              color: Colors.transparent,
+              child: InkWell(
+                onTap: () => _editProfile(context),
+                borderRadius: BorderRadius.circular(22),
+                child: Ink(
                   decoration: BoxDecoration(
-                    color: kBrand.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(999),
+                    gradient: const LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [kBrand, Color(0xFF6366F1)],
+                    ),
+                    borderRadius: BorderRadius.circular(22),
+                    boxShadow: [
+                      BoxShadow(
+                          color: kBrand.withValues(alpha: 0.32),
+                          blurRadius: 18,
+                          offset: const Offset(0, 8)),
+                    ],
                   ),
-                  child: Text('${user!['role']}',
-                      style: const TextStyle(
-                          fontSize: 11.5,
-                          fontWeight: FontWeight.w700,
-                          color: kBrand)),
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Row(children: [
+                      Container(
+                        padding: const EdgeInsets.all(3),
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: Colors.white.withValues(alpha: 0.25),
+                        ),
+                        child: Avatar(size: 62, onTap: () => _editProfile(context)),
+                      ),
+                      const SizedBox(width: 14),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text('${user?['name'] ?? 'Signed in'}',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.w800)),
+                            const SizedBox(height: 2),
+                            Text('${user?['email'] ?? ''}',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                    color: Colors.white.withValues(alpha: 0.9),
+                                    fontSize: 13)),
+                            if (user?['role'] != null) ...[
+                              const SizedBox(height: 9),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 10, vertical: 3),
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withValues(alpha: 0.22),
+                                  borderRadius: BorderRadius.circular(999),
+                                ),
+                                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                                  const Icon(Icons.verified_user,
+                                      size: 12, color: Colors.white),
+                                  const SizedBox(width: 4),
+                                  Text('${user!['role']}',
+                                      style: const TextStyle(
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.w700,
+                                          color: Colors.white)),
+                                ]),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                      const Icon(Icons.edit_outlined,
+                          color: Colors.white70, size: 20),
+                    ]),
+                  ),
                 ),
-              ],
-            ]),
+              ),
+            ),
           ),
 
           SettingsGroup(title: 'Account', children: [

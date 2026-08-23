@@ -17,8 +17,14 @@ class Customize {
 
   static const _kModuleOrder = 'module_order_v1';
   static const _kNavOrder = 'nav_order_v1';
+  static const _kNavBar = 'nav_bar_v1';          // explicit tabs shown in the bar
   static const _kNavStyle = 'nav_style_v1';     // 'colour' | 'plain'
   static const _kBackground = 'background_v1';   // 'nature' | 'plain'
+
+  /// How many tabs the bottom bar can hold before it gets cramped, and the fewest
+  /// it may have and still be a bar. Enforced by the customise sheet.
+  static const navBarMax = 6;
+  static const navBarMin = 2;
 
   /// Defaults match what shipped before this screen existed, so a person who
   /// never opens it sees exactly the app they had.
@@ -35,6 +41,7 @@ class Customize {
 
   static List<String> _moduleOrder = const [];
   static List<String> _navOrder = const [];
+  static List<String> _navBar = const [];
   static String _navStyle = navStyleColour;
   static String _background = backgroundNature;
   static bool _loaded = false;
@@ -45,6 +52,7 @@ class Customize {
     final p = await SharedPreferences.getInstance();
     _moduleOrder = p.getStringList(_kModuleOrder) ?? const [];
     _navOrder = p.getStringList(_kNavOrder) ?? const [];
+    _navBar = p.getStringList(_kNavBar) ?? const [];
     _navStyle = p.getString(_kNavStyle) ?? navStyleColour;
     _background = p.getString(_kBackground) ?? backgroundNature;
     _loaded = true;
@@ -52,6 +60,18 @@ class Customize {
 
   static List<String> get moduleOrder => _moduleOrder;
   static List<String> get navOrder => _navOrder;
+
+  /// The tabs the person has chosen for the bottom bar (keys, in order). Empty
+  /// means "use the app's default set" — a fresh install behaves exactly as
+  /// before this screen existed.
+  static List<String> get navBar => _navBar;
+
+  static Future<void> setNavBar(List<String> keys) async {
+    _navBar = keys;
+    final p = await SharedPreferences.getInstance();
+    await p.setStringList(_kNavBar, keys);
+    revision.value++;
+  }
   static String get navStyle => _navStyle;
   static String get background => _background;
   static bool get colourfulNav => _navStyle == navStyleColour;
@@ -106,11 +126,13 @@ class Customize {
   static Future<void> reset() async {
     _moduleOrder = const [];
     _navOrder = const [];
+    _navBar = const [];
     _navStyle = navStyleColour;
     _background = backgroundNature;
     final p = await SharedPreferences.getInstance();
     await p.remove(_kModuleOrder);
     await p.remove(_kNavOrder);
+    await p.remove(_kNavBar);
     await p.remove(_kNavStyle);
     await p.remove(_kBackground);
     revision.value++;
