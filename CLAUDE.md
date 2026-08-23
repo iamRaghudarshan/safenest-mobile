@@ -209,10 +209,19 @@ a message that reads like a bug in this app.
 ## 8. Releasing
 
 ```
-1. edit VERSION            e.g. 1.17.0
+1. edit VERSION  AND  pubspec.yaml   e.g. VERSION=1.51.0, pubspec version: 1.51.0+1
 2. commit, push
-3. git tag v1.17.0 && git push origin v1.17.0
+3. git tag v1.51.0 && git push origin v1.51.0        (iOS -> TestFlight)
+   git tag android-1.51.0 && git push origin android-1.51.0   (Android APK)
+4. fetch the APK to the server: releases/SafeNest-android.apk
 ```
+
+**THE ONE THAT KEEPS BITING: the store version comes from `$(cat VERSION)`, NOT
+pubspec and NOT the tag.** Bumping pubspec alone (or only tagging) ships the newest
+CODE but labelled with the OLD `VERSION`. It happened at 1.17.0, and again 23 Aug
+2026: pubspec went 1.45->1.50 while VERSION stayed 1.38.0, so six TestFlight builds
+all read "1.38.0". Always bump `VERSION` and `pubspec` together, to the same
+number as the tag. See [[release-by-pushing-a-tag]].
 
 The tag is what builds. `.github/workflows/release.yml`:
 
