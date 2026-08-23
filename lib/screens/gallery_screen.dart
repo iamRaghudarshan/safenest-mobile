@@ -780,7 +780,12 @@ class _GalleryScreenState extends State<GalleryScreen>
     if (_mediaKind == 'screenshots') return _plural(_total, 'screenshot');
     if (_plainView && _videoTotal > 0) {
       final photos = (_total - _videoTotal).clamp(0, _total);
-      return '${_plural(photos, 'photo')} · ${_plural(_videoTotal, 'video')}';
+      // Lead with the TOTAL (photos + videos), because that is the single number
+      // the Modules tile shows for Gallery — it counts every non-trashed item.
+      // Without this the tile said "77" while the gallery header said "67
+      // photos", and the two read as disagreeing when 67 + 10 videos = 77.
+      return '${_plural(_total, 'item')} · $photos photos · '
+          '${_plural(_videoTotal, 'video')}';
     }
     return _plural(_total, _plainView ? 'photo' : 'item');
   }
