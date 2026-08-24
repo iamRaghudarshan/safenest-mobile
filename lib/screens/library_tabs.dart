@@ -14,7 +14,9 @@
 library;
 
 import 'dart:async';
+import 'dart:io';
 
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -57,7 +59,7 @@ class _AlbumsTabState extends State<AlbumsTab> {
       setState(() {
         _albums = [
           for (final a in ((d as Map)['albums'] as List? ?? const []))
-            Map<String, dynamic>.from(a as Map)
+            Map<String, dynamic>.from(a as Map),
         ];
         _loading = false;
         _error = null;
@@ -97,19 +99,25 @@ class _AlbumsTabState extends State<AlbumsTab> {
           return _Cover(
             title: '${a['name'] ?? 'Album'}',
             count: (a['count'] ?? 0) as int,
-            imageUrl: a['cover_url'] == null ? null : _abs(ctx, '${a['cover_url']}'),
+            imageUrl: a['cover_url'] == null
+                ? null
+                : _abs(ctx, '${a['cover_url']}'),
             square: false,
-            onTap: () => Navigator.of(ctx).push(MaterialPageRoute(
-              builder: (_) => CollectionScreen(
-                title: '${a['name'] ?? 'Album'}',
-                // /api/gallery/albums/{id} answers {id, name, count} and NO
-                // photos — so this screen fetched an album and rendered an
-                // empty grid. The photos come from the main index with an
-                // album filter, which is what the web app uses too.
-                path: '/api/gallery?album=${a['id']}',
-                albumId: a['id'] as int?,
-              ),
-            )).then((_) => _load()),
+            onTap: () => Navigator.of(ctx)
+                .push(
+                  MaterialPageRoute(
+                    builder: (_) => CollectionScreen(
+                      title: '${a['name'] ?? 'Album'}',
+                      // /api/gallery/albums/{id} answers {id, name, count} and NO
+                      // photos — so this screen fetched an album and rendered an
+                      // empty grid. The photos come from the main index with an
+                      // album filter, which is what the web app uses too.
+                      path: '/api/gallery?album=${a['id']}',
+                      albumId: a['id'] as int?,
+                    ),
+                  ),
+                )
+                .then((_) => _load()),
           );
         },
       ),
@@ -163,20 +171,29 @@ class _PeopleTabState extends State<PeopleTab> {
   Future<void> _checkScan() async {
     try {
       final d = await context.read<Session>().api.get('/api/gallery/index');
-      final m = d is Map ? Map<String, dynamic>.from(d) : const <String, dynamic>{};
+      final m = d is Map
+          ? Map<String, dynamic>.from(d)
+          : const <String, dynamic>{};
       if (m['running'] == true) _beginPolling(m);
-    } catch (_) {/* offline — nothing to show */}
+    } catch (_) {
+      /* offline — nothing to show */
+    }
   }
 
   Future<void> _startScan({bool rebuild = false}) async {
     try {
-      final d = await context.read<Session>().api.post('/api/gallery/index',
-          {'jobs': const ['faces'], if (rebuild) 'rebuild': true});
+      final d = await context.read<Session>().api.post('/api/gallery/index', {
+        'jobs': const ['faces'],
+        if (rebuild) 'rebuild': true,
+      });
       _beginPolling(d is Map ? Map<String, dynamic>.from(d) : const {});
     } catch (_) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text('Could not start — check your computer is awake.')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Could not start — check your computer is awake.'),
+          ),
+        );
       }
     }
   }
@@ -185,7 +202,9 @@ class _PeopleTabState extends State<PeopleTab> {
     try {
       final d = await context.read<Session>().api.get('/api/gallery/index');
       if (!mounted) return;
-      final m = d is Map ? Map<String, dynamic>.from(d) : const <String, dynamic>{};
+      final m = d is Map
+          ? Map<String, dynamic>.from(d)
+          : const <String, dynamic>{};
       final running = m['running'] == true;
       setState(() {
         _scan = m;
@@ -196,7 +215,9 @@ class _PeopleTabState extends State<PeopleTab> {
         _poll = null;
         await _load(); // the new grouping is ready
       }
-    } catch (_) {/* transient; keep polling */}
+    } catch (_) {
+      /* transient; keep polling */
+    }
   }
 
   Future<void> _stopScan() async {
@@ -224,28 +245,36 @@ class _PeopleTabState extends State<PeopleTab> {
           color: kModuleColours['gallery']!.withValues(alpha: 0.10),
           borderRadius: BorderRadius.circular(14),
         ),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Row(children: [
-            const Icon(Icons.face_retouching_natural, size: 20),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                  total > 0
-                      ? 'Finding people… $done of $total · $found so far'
-                      : 'Finding people…',
-                  style: theme.textTheme.bodyMedium
-                      ?.copyWith(fontWeight: FontWeight.w600)),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.face_retouching_natural, size: 20),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    total > 0
+                        ? 'Finding people… $done of $total · $found so far'
+                        : 'Finding people…',
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+                TextButton(onPressed: _stopScan, child: const Text('Stop')),
+              ],
             ),
-            TextButton(onPressed: _stopScan, child: const Text('Stop')),
-          ]),
-          const SizedBox(height: 8),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(4),
-            child: LinearProgressIndicator(
+            const SizedBox(height: 8),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(4),
+              child: LinearProgressIndicator(
                 value: total > 0 ? (done / total).clamp(0.0, 1.0) : null,
-                minHeight: 4),
-          ),
-        ]),
+                minHeight: 4,
+              ),
+            ),
+          ],
+        ),
       );
     }
     if (_people.isNotEmpty) {
@@ -254,9 +283,10 @@ class _PeopleTabState extends State<PeopleTab> {
         child: Padding(
           padding: const EdgeInsets.fromLTRB(14, 6, 8, 0),
           child: TextButton.icon(
-              onPressed: () => _startScan(),
-              icon: const Icon(Icons.refresh, size: 18),
-              label: const Text('Scan for new faces')),
+            onPressed: () => _startScan(),
+            icon: const Icon(Icons.refresh, size: 18),
+            label: const Text('Scan for new faces'),
+          ),
         ),
       );
     }
@@ -270,7 +300,8 @@ class _PeopleTabState extends State<PeopleTab> {
   /// among the ones already done.
   bool _isUnnamed(Map<String, dynamic> p) {
     final n = '${p['name'] ?? ''}'.trim();
-    return n.isEmpty || RegExp(r'^Person\s*\d+$', caseSensitive: false).hasMatch(n);
+    return n.isEmpty ||
+        RegExp(r'^Person\s*\d+$', caseSensitive: false).hasMatch(n);
   }
 
   /// Name a face, or rename one. PUT /api/people/{id} has always taken this and
@@ -292,20 +323,22 @@ class _PeopleTabState extends State<PeopleTab> {
         ),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
           TextButton(
-              onPressed: () => Navigator.pop(ctx, c.text.trim()),
-              child: const Text('Save')),
+            onPressed: () => Navigator.pop(ctx, c.text.trim()),
+            child: const Text('Save'),
+          ),
         ],
       ),
     );
     if (name == null || name.isEmpty || !mounted) return;
     final messenger = ScaffoldMessenger.of(context);
     try {
-      await context
-          .read<Session>()
-          .api
-          .put('/api/people/${p['id']}', {'name': name});
+      await context.read<Session>().api.put('/api/people/${p['id']}', {
+        'name': name,
+      });
       await _load();
     } on ApiError catch (e) {
       messenger.showSnackBar(SnackBar(content: Text(e.message)));
@@ -318,21 +351,24 @@ class _PeopleTabState extends State<PeopleTab> {
       context: context,
       showDragHandle: true,
       builder: (ctx) => SafeArea(
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          ListTile(
-            leading: const Icon(Icons.edit_outlined),
-            title: Text(_isUnnamed(p) ? 'Add a name' : 'Rename'),
-            onTap: () => Navigator.pop(ctx, 'name'),
-          ),
-          ListTile(
-            leading: const Icon(Icons.person_remove_outlined, color: kDanger),
-            title: const Text('Remove this person'),
-            // Says exactly what goes, because "remove person" beside a grid of
-            // faces reads as deleting their photographs.
-            subtitle: const Text('The grouping goes. The photos stay.'),
-            onTap: () => Navigator.pop(ctx, 'remove'),
-          ),
-        ]),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.edit_outlined),
+              title: Text(_isUnnamed(p) ? 'Add a name' : 'Rename'),
+              onTap: () => Navigator.pop(ctx, 'name'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.person_remove_outlined, color: kDanger),
+              title: const Text('Remove this person'),
+              // Says exactly what goes, because "remove person" beside a grid of
+              // faces reads as deleting their photographs.
+              subtitle: const Text('The grouping goes. The photos stay.'),
+              onTap: () => Navigator.pop(ctx, 'remove'),
+            ),
+          ],
+        ),
       ),
     );
     if (choice == null || !mounted) return;
@@ -343,15 +379,18 @@ class _PeopleTabState extends State<PeopleTab> {
       builder: (ctx) => AlertDialog(
         title: const Text('Remove this person?'),
         content: const Text(
-            'They stop being grouped as one person. Every photo they are in '
-            'stays exactly where it is.'),
+          'They stop being grouped as one person. Every photo they are in '
+          'stays exactly where it is.',
+        ),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Keep')),
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Keep'),
+          ),
           TextButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Remove')),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Remove'),
+          ),
         ],
       ),
     );
@@ -372,7 +411,7 @@ class _PeopleTabState extends State<PeopleTab> {
       setState(() {
         _people = [
           for (final p in ((d as Map)['people'] as List? ?? const []))
-            Map<String, dynamic>.from(p as Map)
+            Map<String, dynamic>.from(p as Map),
         ];
         _loading = false;
         _error = null;
@@ -387,10 +426,12 @@ class _PeopleTabState extends State<PeopleTab> {
 
   @override
   Widget build(BuildContext context) {
-    return Column(children: [
-      _scanHeader(),
-      Expanded(child: _content(context)),
-    ]);
+    return Column(
+      children: [
+        _scanHeader(),
+        Expanded(child: _content(context)),
+      ],
+    );
   }
 
   Widget _content(BuildContext context) {
@@ -400,25 +441,30 @@ class _PeopleTabState extends State<PeopleTab> {
       return Center(
         child: Padding(
           padding: const EdgeInsets.all(32),
-          child: Column(mainAxisSize: MainAxisSize.min, children: [
-            const Icon(Icons.people_outline, size: 44),
-            const SizedBox(height: 14),
-            const Text('No people found yet',
-                style: TextStyle(fontWeight: FontWeight.w700)),
-            const SizedBox(height: 8),
-            const Text(
-              'Scan your backed-up photos for faces — it runs on your computer '
-              'and groups the people it finds.',
-              textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 12.5),
-            ),
-            const SizedBox(height: 18),
-            FilledButton.icon(
-              onPressed: _scanning ? null : () => _startScan(),
-              icon: const Icon(Icons.face_retouching_natural),
-              label: Text(_scanning ? 'Finding people…' : 'Find people'),
-            ),
-          ]),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.people_outline, size: 44),
+              const SizedBox(height: 14),
+              const Text(
+                'No people found yet',
+                style: TextStyle(fontWeight: FontWeight.w700),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'Scan your backed-up photos for faces — it runs on your computer '
+                'and groups the people it finds.',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 12.5),
+              ),
+              const SizedBox(height: 18),
+              FilledButton.icon(
+                onPressed: _scanning ? null : () => _startScan(),
+                icon: const Icon(Icons.face_retouching_natural),
+                label: Text(_scanning ? 'Finding people…' : 'Find people'),
+              ),
+            ],
+          ),
         ),
       );
     }
@@ -461,64 +507,86 @@ class _PeopleTabState extends State<PeopleTab> {
             onTap: () => unnamedOne
                 ? _name(p)
                 : Navigator.of(ctx)
-                    .push(MaterialPageRoute(
-                      builder: (_) => CollectionScreen(
-                        title: '${p['name'] ?? 'Someone'}',
-                        path: '/api/people/${p['id']}/photos',
-                      ),
-                    ))
-                    .then((_) => _load()),
+                      .push(
+                        MaterialPageRoute(
+                          builder: (_) => CollectionScreen(
+                            title: '${p['name'] ?? 'Someone'}',
+                            path: '/api/people/${p['id']}/photos',
+                          ),
+                        ),
+                      )
+                      .then((_) => _load()),
             onLongPress: () => _manage(p),
-            child: Column(mainAxisSize: MainAxisSize.min, children: [
-              Stack(children: [
-                Container(
-                  width: 66,
-                  height: 66,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: Theme.of(ctx).colorScheme.surfaceContainerHighest,
-                    border: Border.all(
-                        color: unnamedOne
-                            ? kBrand.withValues(alpha: 0.55)
-                            : Colors.transparent,
-                        width: 2),
-                  ),
-                  clipBehavior: Clip.antiAlias,
-                  child: p['cover_url'] == null
-                      ? Icon(Icons.person,
-                          color: Theme.of(ctx).colorScheme.outline)
-                      : Image.network(_abs(ctx, '${p['cover_url']}'),
-                          fit: BoxFit.cover,
-                          cacheWidth: 220,
-                          errorBuilder: (_, _, _) => Icon(Icons.person,
-                              color: Theme.of(ctx).colorScheme.outline)),
-                ),
-                if (unnamedOne)
-                  Positioned(
-                    right: 0,
-                    bottom: 0,
-                    child: Container(
-                      padding: const EdgeInsets.all(3),
-                      decoration: const BoxDecoration(
-                          color: kBrand, shape: BoxShape.circle),
-                      child: const Icon(Icons.add,
-                          size: 13, color: Colors.white),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Stack(
+                  children: [
+                    Container(
+                      width: 66,
+                      height: 66,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: Theme.of(
+                          ctx,
+                        ).colorScheme.surfaceContainerHighest,
+                        border: Border.all(
+                          color: unnamedOne
+                              ? kBrand.withValues(alpha: 0.55)
+                              : Colors.transparent,
+                          width: 2,
+                        ),
+                      ),
+                      clipBehavior: Clip.antiAlias,
+                      child: p['cover_url'] == null
+                          ? Icon(
+                              Icons.person,
+                              color: Theme.of(ctx).colorScheme.outline,
+                            )
+                          : Image.network(
+                              _abs(ctx, '${p['cover_url']}'),
+                              fit: BoxFit.cover,
+                              cacheWidth: 220,
+                              errorBuilder: (_, _, _) => Icon(
+                                Icons.person,
+                                color: Theme.of(ctx).colorScheme.outline,
+                              ),
+                            ),
                     ),
-                  ),
-              ]),
-              const SizedBox(height: 6),
-              Text(
+                    if (unnamedOne)
+                      Positioned(
+                        right: 0,
+                        bottom: 0,
+                        child: Container(
+                          padding: const EdgeInsets.all(3),
+                          decoration: const BoxDecoration(
+                            color: kBrand,
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(
+                            Icons.add,
+                            size: 13,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                Text(
                   unnamedOne ? 'Add a name' : '${p['name']}',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   textAlign: TextAlign.center,
                   style: TextStyle(
-                      fontSize: 12.5,
-                      fontWeight: FontWeight.w700,
-                      color: unnamedOne ? kBrand : null)),
-              Text('$count',
-                  style: Theme.of(ctx).textTheme.labelSmall),
-            ]),
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w700,
+                    color: unnamedOne ? kBrand : null,
+                  ),
+                ),
+                Text('$count', style: Theme.of(ctx).textTheme.labelSmall),
+              ],
+            ),
           );
         },
       ),
@@ -554,7 +622,7 @@ class _MemoriesTabState extends State<MemoriesTab> {
       setState(() {
         _groups = [
           for (final g in (m['groups'] as List? ?? const []))
-            Map<String, dynamic>.from(g as Map)
+            Map<String, dynamic>.from(g as Map),
         ];
         _date = '${m['date'] ?? ''}';
         _loading = false;
@@ -576,7 +644,8 @@ class _MemoriesTabState extends State<MemoriesTab> {
       return _Empty(
         icon: Icons.auto_awesome_outlined,
         title: 'Nothing from $_date in other years',
-        note: 'Once you have photos from previous years, this shows what you '
+        note:
+            'Once you have photos from previous years, this shows what you '
             'were doing on this day.',
       );
     }
@@ -588,42 +657,51 @@ class _MemoriesTabState extends State<MemoriesTab> {
           for (final g in _groups) ...[
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 18, 16, 10),
-              child: Text('${g['label']}',
-                  style: Theme.of(context).textTheme.titleMedium),
+              child: Text(
+                '${g['label']}',
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
             ),
             SizedBox(
               height: 132,
-              child: Builder(builder: (ctx) {
-                final items = [
-                  for (final e in (g['items'] as List? ?? const []))
-                    Photo.fromJson(Map<String, dynamic>.from(e as Map))
-                ];
-                return ListView.separated(
-                  scrollDirection: Axis.horizontal,
-                  padding: const EdgeInsets.symmetric(horizontal: 14),
-                  itemCount: items.length,
-                  separatorBuilder: (_, i) => const SizedBox(width: 8),
-                  itemBuilder: (c2, i) => GestureDetector(
-                    onTap: () => Navigator.of(c2).push(MaterialPageRoute(
-                      builder: (_) =>
-                          PhotoViewer(photos: items, initialIndex: i),
-                    )),
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(12),
-                      child: Image.network(
-                        _abs(c2, items[i].thumbUrl),
-                        width: 118,
-                        height: 132,
-                        fit: BoxFit.cover,
-                        cacheWidth: 300,
-                        errorBuilder: (a, b, c) => Container(
+              child: Builder(
+                builder: (ctx) {
+                  final items = [
+                    for (final e in (g['items'] as List? ?? const []))
+                      Photo.fromJson(Map<String, dynamic>.from(e as Map)),
+                  ];
+                  return ListView.separated(
+                    scrollDirection: Axis.horizontal,
+                    padding: const EdgeInsets.symmetric(horizontal: 14),
+                    itemCount: items.length,
+                    separatorBuilder: (_, i) => const SizedBox(width: 8),
+                    itemBuilder: (c2, i) => GestureDetector(
+                      onTap: () => Navigator.of(c2).push(
+                        MaterialPageRoute(
+                          builder: (_) =>
+                              PhotoViewer(photos: items, initialIndex: i),
+                        ),
+                      ),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(12),
+                        child: Image.network(
+                          _abs(c2, items[i].thumbUrl),
+                          width: 118,
+                          height: 132,
+                          fit: BoxFit.cover,
+                          cacheWidth: 300,
+                          errorBuilder: (a, b, c) => Container(
                             width: 118,
-                            color: Theme.of(c2).colorScheme.surfaceContainerHighest),
+                            color: Theme.of(
+                              c2,
+                            ).colorScheme.surfaceContainerHighest,
+                          ),
+                        ),
                       ),
                     ),
-                  ),
-                );
-              }),
+                  );
+                },
+              ),
             ),
           ],
         ],
@@ -636,12 +714,13 @@ class _MemoriesTabState extends State<MemoriesTab> {
 
 /// The photos of one album or one person. Same grid, different source.
 class CollectionScreen extends StatefulWidget {
-  const CollectionScreen(
-      {super.key,
-      required this.title,
-      required this.path,
-      this.albumId,
-      this.initialPhotos});
+  const CollectionScreen({
+    super.key,
+    required this.title,
+    required this.path,
+    this.albumId,
+    this.initialPhotos,
+  });
   final String title;
   final String path;
 
@@ -662,6 +741,10 @@ class _CollectionScreenState extends State<CollectionScreen> {
   bool _loading = true;
   String? _error;
   bool _busy = false;
+
+  /// "Uploading 3 of 12…" while photos from the phone stream in. A line over
+  /// the grid rather than a dialog, so the album stays visible as it fills.
+  String? _addNote;
 
   static const _pageSize = 120;
   int _offset = 0;
@@ -704,20 +787,23 @@ class _CollectionScreenState extends State<CollectionScreen> {
         ),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
           TextButton(
-              onPressed: () => Navigator.pop(ctx, c.text.trim()),
-              child: const Text('Save')),
+            onPressed: () => Navigator.pop(ctx, c.text.trim()),
+            child: const Text('Save'),
+          ),
         ],
       ),
     );
     if (name == null || name.isEmpty || !mounted) return;
     final messenger = ScaffoldMessenger.of(context);
     try {
-      await context
-          .read<Session>()
-          .api
-          .put('/api/gallery/albums/${widget.albumId}', {'name': name});
+      await context.read<Session>().api.put(
+        '/api/gallery/albums/${widget.albumId}',
+        {'name': name},
+      );
       setState(() => _title = name);
     } on ApiError catch (e) {
       // 409 is the useful one: the server refuses a duplicate name, and saying
@@ -735,15 +821,18 @@ class _CollectionScreenState extends State<CollectionScreen> {
         // exactly where it was. Saying so is what stops this reading as
         // "delete these 214 photos".
         content: const Text(
-            'The album goes; the photos stay in your gallery. Nothing is '
-            'deleted.'),
+          'The album goes; the photos stay in your gallery. Nothing is '
+          'deleted.',
+        ),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Keep')),
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Keep'),
+          ),
           TextButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Delete album')),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete album'),
+          ),
         ],
       ),
     );
@@ -751,14 +840,136 @@ class _CollectionScreenState extends State<CollectionScreen> {
     final messenger = ScaffoldMessenger.of(context);
     final navigator = Navigator.of(context);
     try {
-      await context
-          .read<Session>()
-          .api
-          .delete('/api/gallery/albums/${widget.albumId}');
+      await context.read<Session>().api.delete(
+        '/api/gallery/albums/${widget.albumId}',
+      );
       navigator.pop(true);
     } on ApiError catch (e) {
       messenger.showSnackBar(SnackBar(content: Text(e.message)));
     }
+  }
+
+  /// "Add photos" has two answers — photos the app already holds, and photos
+  /// still on the phone — and which one someone means is not guessable, so a
+  /// sheet asks. Only albums get this; a person's photos are computed.
+  Future<void> _addMenu() async {
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.photo_library_outlined),
+              title: const Text('Choose from your gallery'),
+              subtitle: const Text('Photos already in the app'),
+              onTap: () => Navigator.pop(ctx, 'gallery'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.upload_file_outlined),
+              title: const Text('Upload from this phone'),
+              subtitle: const Text('Straight into this album'),
+              onTap: () => Navigator.pop(ctx, 'phone'),
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+    if (!mounted) return;
+    if (choice == 'gallery') await _addFromGallery();
+    if (choice == 'phone') await _addFromPhone();
+  }
+
+  Future<void> _addFromGallery() async {
+    final ids = await Navigator.of(context).push<List<int>>(
+      MaterialPageRoute(builder: (_) => const AlbumAddPicker()),
+    );
+    if (ids == null || ids.isEmpty || !mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    setState(() => _busy = true);
+    try {
+      final d = await context.read<Session>().api.post(
+        '/api/gallery/albums/${widget.albumId}/photos',
+        {'photo_ids': ids},
+      );
+      await _load();
+      // The server reports what it actually added; photos that were already in
+      // the album are skipped there, and saying "added 0" for a re-pick is the
+      // honest outcome rather than a fault.
+      final added = (d is Map ? d['added'] : null) ?? ids.length;
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            added == 0
+                ? 'Those photos were already in this album'
+                : 'Added $added photo${added == 1 ? '' : 's'}',
+          ),
+        ),
+      );
+    } on ApiError catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text(e.message)));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _addFromPhone() async {
+    // Static in file_picker 11, and withData false on purpose — the bytes are
+    // read one file at a time below, not all at once into memory. Same shape as
+    // the Documents upload, which is the proven path.
+    final picked = await FilePicker.pickFiles(
+      allowMultiple: true,
+      withData: false,
+      type: FileType.media,
+    );
+    if (picked == null || picked.files.isEmpty || !mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    final api = context.read<Session>().api;
+    final total = picked.files.length;
+    var done = 0, dupes = 0, failed = 0;
+    for (final (i, f) in picked.files.indexed) {
+      final path = f.path;
+      if (path == null) {
+        failed++;
+        continue;
+      }
+      if (mounted) {
+        setState(() => _addNote = 'Uploading ${i + 1} of $total…');
+      }
+      try {
+        final bytes = await File(path).readAsBytes();
+        // The album is attached by the SERVER (album_id on the upload), so a
+        // photo the library already holds still lands in the album — the
+        // upload comes back duplicate:true with the existing photo attached.
+        final d = await api.postMultipartJson(
+          '/api/gallery/upload?faces=0&album_id=${widget.albumId}',
+          fileField: 'file',
+          filename: f.name,
+          bytes: bytes,
+        );
+        done++;
+        if (d is Map && d['duplicate'] == true) dupes++;
+      } on ApiError {
+        failed++;
+      } catch (_) {
+        failed++;
+      }
+    }
+    if (!mounted) return;
+    setState(() => _addNote = null);
+    await _load();
+    final also = dupes > 0 ? ' ($dupes already in your gallery)' : '';
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(
+          failed == 0
+              ? 'Added $done photo${done == 1 ? '' : 's'} to this album$also'
+              : 'Added $done$also — $failed could not be sent',
+        ),
+      ),
+    );
   }
 
   Future<void> _removeSelected() async {
@@ -768,12 +979,19 @@ class _CollectionScreenState extends State<CollectionScreen> {
     setState(() => _busy = true);
     try {
       await context.read<Session>().api.post(
-          '/api/gallery/albums/${widget.albumId}/remove', {'photo_ids': ids});
+        '/api/gallery/albums/${widget.albumId}/remove',
+        {'photo_ids': ids},
+      );
       _selected.clear();
       await _load();
-      messenger.showSnackBar(SnackBar(
-          content: Text('Removed ${ids.length} from this album — '
-              'still in your gallery')));
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            'Removed ${ids.length} from this album — '
+            'still in your gallery',
+          ),
+        ),
+      );
     } on ApiError catch (e) {
       messenger.showSnackBar(SnackBar(content: Text(e.message)));
     } finally {
@@ -809,10 +1027,9 @@ class _CollectionScreenState extends State<CollectionScreen> {
       // for ever.
       final sep = widget.path.contains('?') ? '&' : '?';
       final start = more ? _offset : 0;
-      final d = await context
-          .read<Session>()
-          .api
-          .get('${widget.path}${sep}offset=$start&limit=$_pageSize');
+      final d = await context.read<Session>().api.get(
+        '${widget.path}${sep}offset=$start&limit=$_pageSize',
+      );
       // Albums answer {album:…, items:[…]}, people answer {items:[…]}, and a
       // bare list is possible too. Accepting all three beats guessing one.
       final list = d is List
@@ -820,7 +1037,7 @@ class _CollectionScreenState extends State<CollectionScreen> {
           : (d is Map ? (d['items'] ?? d['photos'] ?? const []) : const []);
       final page = [
         for (final e in (list as List))
-          Photo.fromJson(Map<String, dynamic>.from(e as Map))
+          Photo.fromJson(Map<String, dynamic>.from(e as Map)),
       ];
       if (!mounted) return;
 
@@ -831,7 +1048,9 @@ class _CollectionScreenState extends State<CollectionScreen> {
       // owner happens to be running, and older builds of `/api/people/{id}/
       // photos` took no offset at all, so the guard is not theoretical.
       final known = _photos.map((p) => p.id).toSet();
-      final fresh = more ? page.where((p) => !known.contains(p.id)).toList() : page;
+      final fresh = more
+          ? page.where((p) => !known.contains(p.id)).toList()
+          : page;
       final ignoredOffset = more && page.isNotEmpty && fresh.isEmpty;
 
       setState(() {
@@ -848,8 +1067,8 @@ class _CollectionScreenState extends State<CollectionScreen> {
         _hasMore = ignoredOffset
             ? false
             : (_total != null
-                ? _photos.length < _total!
-                : page.length >= _pageSize);
+                  ? _photos.length < _total!
+                  : page.length >= _pageSize);
         _loading = false;
         _loadingMore = false;
         _error = null;
@@ -865,8 +1084,9 @@ class _CollectionScreenState extends State<CollectionScreen> {
         _hasMore = false;
       });
       if (more) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(e.message)));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(e.message)));
       }
     }
   }
@@ -880,12 +1100,17 @@ class _CollectionScreenState extends State<CollectionScreen> {
           // Only for an album. A person's photos are a computed collection —
           // there is nothing to rename and nothing to take a photo out of.
           if (_isAlbum && !_selecting)
+            IconButton(
+              tooltip: 'Add photos',
+              icon: const Icon(Icons.add_photo_alternate_outlined),
+              onPressed: _addNote != null ? null : _addMenu,
+            ),
+          if (_isAlbum && !_selecting)
             PopupMenuButton<String>(
               onSelected: (v) => v == 'rename' ? _rename() : _deleteAlbum(),
               itemBuilder: (_) => const [
                 PopupMenuItem(value: 'rename', child: Text('Rename album')),
-                PopupMenuItem(
-                    value: 'delete', child: Text('Delete album')),
+                PopupMenuItem(value: 'delete', child: Text('Delete album')),
               ],
             ),
         ],
@@ -896,10 +1121,11 @@ class _CollectionScreenState extends State<CollectionScreen> {
             // "12 of 340" while more is still to come. A bare count that is
             // really a page count is the thing this screen used to get wrong.
             child: Text(
-                _total != null && _total! > _photos.length
-                    ? '${_photos.length} of $_total'
-                    : '${_photos.length} photos',
-                style: Theme.of(context).textTheme.bodySmall),
+              _total != null && _total! > _photos.length
+                  ? '${_photos.length} of $_total'
+                  : '${_photos.length} photos',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
           ),
         ),
       ),
@@ -910,106 +1136,303 @@ class _CollectionScreenState extends State<CollectionScreen> {
                 decoration: BoxDecoration(
                   color: Theme.of(context).colorScheme.surface,
                   border: Border(
-                      top: BorderSide(
-                          color: Theme.of(context).colorScheme.outlineVariant)),
+                    top: BorderSide(
+                      color: Theme.of(context).colorScheme.outlineVariant,
+                    ),
+                  ),
                 ),
                 padding: const EdgeInsets.fromLTRB(10, 6, 10, 6),
-                child: Column(mainAxisSize: MainAxisSize.min, children: [
-                  Row(children: [
-                    IconButton(
-                      tooltip: 'Cancel',
-                      onPressed: _busy ? null : () => setState(_selected.clear),
-                      icon: const Icon(Icons.close),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Row(
+                      children: [
+                        IconButton(
+                          tooltip: 'Cancel',
+                          onPressed: _busy
+                              ? null
+                              : () => setState(_selected.clear),
+                          icon: const Icon(Icons.close),
+                        ),
+                        Expanded(
+                          child: Text(
+                            '${_selected.length} selected',
+                            style: const TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
-                    Expanded(
-                      child: Text('${_selected.length} selected',
-                          style: const TextStyle(
-                              fontSize: 15, fontWeight: FontWeight.w700)),
+                    if (_busy) const LinearProgressIndicator(minHeight: 2),
+                    const SizedBox(height: 4),
+                    // "Remove from album", never "Delete". Taking a photo out of
+                    // an album does not touch the photo, and the wording has to
+                    // make that obvious before the tap, not after it.
+                    BrandButton(
+                      label: 'Remove from this album',
+                      icon: Icons.playlist_remove,
+                      block: true,
+                      onPressed: _busy ? null : _removeSelected,
                     ),
-                  ]),
-                  if (_busy) const LinearProgressIndicator(minHeight: 2),
-                  const SizedBox(height: 4),
-                  // "Remove from album", never "Delete". Taking a photo out of
-                  // an album does not touch the photo, and the wording has to
-                  // make that obvious before the tap, not after it.
-                  BrandButton(
-                    label: 'Remove from this album',
-                    icon: Icons.playlist_remove,
-                    block: true,
-                    onPressed: _busy ? null : _removeSelected,
-                  ),
-                ]),
+                  ],
+                ),
               ),
             )
           : null,
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _error != null
-              ? _Retry(message: _error!, onRetry: _load)
-              : _photos.isEmpty
-                  ? const _Empty(
-                      icon: Icons.photo_outlined,
-                      title: 'Nothing here',
-                      note: 'This collection has no photos in it.')
-                  : GridView.builder(
-                      padding: const EdgeInsets.all(2),
-                      gridDelegate:
-                          const SliverGridDelegateWithFixedCrossAxisCount(
-                        crossAxisCount: 3,
-                        mainAxisSpacing: 2,
-                        crossAxisSpacing: 2,
-                      ),
-                      itemCount: _photos.length,
-                      // PhotoTile rather than a bare Image: it already knows
-                      // how to be selected, caps its decode, and shows a
-                      // broken-image glyph instead of a grey square. Three
-                      // behaviours that were reimplemented worse here.
-                      itemBuilder: (ctx, i) {
-                        // Fetch the next page while there is still a screenful
-                        // left to scroll, so the grid never stops under a
-                        // finger. The builder is the trigger rather than a
-                        // scroll listener because it fires for exactly the
-                        // tiles being laid out, whatever the row height
-                        // happens to be.
-                        if (i >= _photos.length - 12 && _hasMore && !_loadingMore) {
-                          // After this frame: calling setState from inside a
-                          // build is an error, and _load does.
-                          WidgetsBinding.instance.addPostFrameCallback(
-                              (_) => _load(more: true));
-                        }
-                        return PhotoTile(
-                          photo: _photos[i],
-                          selecting: _selecting,
-                          selected: _selected.contains(_photos[i].id),
-                          onOpen: () {
-                            if (_selecting) {
-                              setState(() {
-                                if (!_selected.remove(_photos[i].id)) {
-                                  _selected.add(_photos[i].id);
-                                }
-                              });
-                              return;
-                            }
-                            Navigator.of(ctx).push(MaterialPageRoute(
-                              builder: (_) => PhotoViewer(
-                                photos: _photos,
-                                initialIndex: i,
-                                onChanged: _load,
-                              ),
-                            ));
-                          },
-                          // Only an album can have photos taken out of it, so
-                          // only an album offers the long-press that starts it.
-                          onLongPress: _isAlbum
-                              ? () => setState(() {
-                                    if (!_selected.remove(_photos[i].id)) {
-                                      _selected.add(_photos[i].id);
-                                    }
-                                  })
-                              : null,
-                        );
-                      },
+          ? _Retry(message: _error!, onRetry: _load)
+          : Column(
+              children: [
+                if (_addNote != null)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 6, 12, 6),
+                    child: Row(
+                      children: [
+                        const SizedBox(
+                          width: 14,
+                          height: 14,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
+                        const SizedBox(width: 10),
+                        Text(
+                          _addNote!,
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                      ],
                     ),
+                  ),
+                Expanded(child: _grid(context)),
+              ],
+            ),
+    );
+  }
+
+  Widget _grid(BuildContext context) {
+    return _photos.isEmpty
+        ? _Empty(
+            icon: Icons.photo_outlined,
+            title: 'Nothing here',
+            note: _isAlbum
+                ? 'Use ＋ to put photos in this album.'
+                : 'This collection has no photos in it.',
+          )
+        : GridView.builder(
+            padding: const EdgeInsets.all(2),
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 3,
+              mainAxisSpacing: 2,
+              crossAxisSpacing: 2,
+            ),
+            itemCount: _photos.length,
+            // PhotoTile rather than a bare Image: it already knows
+            // how to be selected, caps its decode, and shows a
+            // broken-image glyph instead of a grey square. Three
+            // behaviours that were reimplemented worse here.
+            itemBuilder: (ctx, i) {
+              // Fetch the next page while there is still a screenful
+              // left to scroll, so the grid never stops under a
+              // finger. The builder is the trigger rather than a
+              // scroll listener because it fires for exactly the
+              // tiles being laid out, whatever the row height
+              // happens to be.
+              if (i >= _photos.length - 12 && _hasMore && !_loadingMore) {
+                // After this frame: calling setState from inside a
+                // build is an error, and _load does.
+                WidgetsBinding.instance.addPostFrameCallback(
+                  (_) => _load(more: true),
+                );
+              }
+              return PhotoTile(
+                photo: _photos[i],
+                selecting: _selecting,
+                selected: _selected.contains(_photos[i].id),
+                onOpen: () {
+                  if (_selecting) {
+                    setState(() {
+                      if (!_selected.remove(_photos[i].id)) {
+                        _selected.add(_photos[i].id);
+                      }
+                    });
+                    return;
+                  }
+                  Navigator.of(ctx).push(
+                    MaterialPageRoute(
+                      builder: (_) => PhotoViewer(
+                        photos: _photos,
+                        initialIndex: i,
+                        onChanged: _load,
+                      ),
+                    ),
+                  );
+                },
+                // Only an album can have photos taken out of it, so
+                // only an album offers the long-press that starts it.
+                onLongPress: _isAlbum
+                    ? () => setState(() {
+                        if (!_selected.remove(_photos[i].id)) {
+                          _selected.add(_photos[i].id);
+                        }
+                      })
+                    : null,
+              );
+            },
+          );
+  }
+}
+
+/// ------------------------------------------------------- add-to-album picker
+
+/// Multi-select over the whole gallery, for putting existing photos into an
+/// album. Pops with the chosen ids; the CALLER does the adding, so this screen
+/// needs to know nothing about which album it is feeding.
+class AlbumAddPicker extends StatefulWidget {
+  const AlbumAddPicker({super.key, this.initialPhotos});
+
+  /// For tests — lay the screen out without a server.
+  final List<Photo>? initialPhotos;
+
+  @override
+  State<AlbumAddPicker> createState() => _AlbumAddPickerState();
+}
+
+class _AlbumAddPickerState extends State<AlbumAddPicker> {
+  List<Photo> _photos = [];
+  bool _loading = true;
+  String? _error;
+  final Set<int> _selected = {};
+
+  static const _pageSize = 120;
+  int _offset = 0;
+  int? _total;
+  bool _hasMore = true;
+  bool _loadingMore = false;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.initialPhotos != null) {
+      _photos = widget.initialPhotos!;
+      _loading = false;
+      return;
+    }
+    _load();
+  }
+
+  Future<void> _load({bool more = false}) async {
+    if (more && (_loadingMore || !_hasMore)) return;
+    setState(() => more ? _loadingMore = true : _loading = true);
+    try {
+      final start = more ? _offset : 0;
+      final d = await context.read<Session>().api.get(
+        '/api/gallery?offset=$start&limit=$_pageSize',
+      );
+      final list = d is Map ? (d['items'] ?? const []) : const [];
+      final page = [
+        for (final e in (list as List))
+          Photo.fromJson(Map<String, dynamic>.from(e as Map)),
+      ];
+      if (!mounted) return;
+      setState(() {
+        if (more) {
+          final known = _photos.map((p) => p.id).toSet();
+          _photos.addAll(page.where((p) => !known.contains(p.id)));
+        } else {
+          _photos = page;
+        }
+        _offset = _photos.length;
+        final total = d is Map ? d['total'] : null;
+        _total = total is int ? total : null;
+        _hasMore = _total != null
+            ? _photos.length < _total!
+            : page.length >= _pageSize;
+        _loading = false;
+        _loadingMore = false;
+        _error = null;
+      });
+    } on ApiError catch (e) {
+      if (!mounted) return;
+      setState(() {
+        if (!more) _error = e.message;
+        _loading = false;
+        _loadingMore = false;
+        _hasMore = false;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final n = _selected.length;
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Add to album'),
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(18),
+          child: Padding(
+            padding: const EdgeInsets.only(bottom: 6),
+            child: Text(
+              n == 0 ? 'Tap the photos to add' : '$n selected',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ),
+        ),
+      ),
+      bottomNavigationBar: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(10, 6, 10, 6),
+          child: BrandButton(
+            label: n == 0 ? 'Add photos' : 'Add $n photo${n == 1 ? '' : 's'}',
+            icon: Icons.playlist_add,
+            block: true,
+            onPressed: n == 0
+                ? null
+                : () => Navigator.pop(context, _selected.toList()),
+          ),
+        ),
+      ),
+      body: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : _error != null
+          ? _Retry(message: _error!, onRetry: _load)
+          : _photos.isEmpty
+          ? const _Empty(
+              icon: Icons.photo_outlined,
+              title: 'No photos yet',
+              note: 'Photos you add to the app will appear here.',
+            )
+          : GridView.builder(
+              padding: const EdgeInsets.all(2),
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 3,
+                mainAxisSpacing: 2,
+                crossAxisSpacing: 2,
+              ),
+              itemCount: _photos.length,
+              itemBuilder: (ctx, i) {
+                if (i >= _photos.length - 12 && _hasMore && !_loadingMore) {
+                  WidgetsBinding.instance.addPostFrameCallback(
+                    (_) => _load(more: true),
+                  );
+                }
+                // Always in selection mode: tapping picks, it never
+                // opens the viewer. Choosing is the whole screen.
+                return PhotoTile(
+                  photo: _photos[i],
+                  selecting: true,
+                  selected: _selected.contains(_photos[i].id),
+                  onOpen: () => setState(() {
+                    if (!_selected.remove(_photos[i].id)) {
+                      _selected.add(_photos[i].id);
+                    }
+                  }),
+                );
+              },
+            ),
     );
   }
 }
@@ -1034,8 +1457,10 @@ class _Cover extends StatelessWidget {
   Widget build(BuildContext context) {
     final placeholder = ColoredBox(
       color: Theme.of(context).colorScheme.surfaceContainerHighest,
-      child: Icon(square ? Icons.person : Icons.photo_album_outlined,
-          color: Theme.of(context).colorScheme.outline),
+      child: Icon(
+        square ? Icons.person : Icons.photo_album_outlined,
+        color: Theme.of(context).colorScheme.outline,
+      ),
     );
     return InkWell(
       onTap: onTap,
@@ -1050,22 +1475,28 @@ class _Cover extends StatelessWidget {
                 aspectRatio: 1,
                 child: imageUrl == null
                     ? placeholder
-                    : Image.network(imageUrl!,
+                    : Image.network(
+                        imageUrl!,
                         fit: BoxFit.cover,
                         cacheWidth: 400,
-                        errorBuilder: (a, b, c) => placeholder),
+                        errorBuilder: (a, b, c) => placeholder,
+                      ),
               ),
             ),
           ),
           const SizedBox(height: 8),
-          Text(title,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              textAlign: square ? TextAlign.center : TextAlign.start,
-              style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
-          Text('$count',
-              textAlign: square ? TextAlign.center : TextAlign.start,
-              style: Theme.of(context).textTheme.bodySmall),
+          Text(
+            title,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            textAlign: square ? TextAlign.center : TextAlign.start,
+            style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+          ),
+          Text(
+            '$count',
+            textAlign: square ? TextAlign.center : TextAlign.start,
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
         ],
       ),
     );
@@ -1080,19 +1511,24 @@ class _Empty extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Center(
-        child: Padding(
-          padding: const EdgeInsets.all(36),
-          child: Column(mainAxisSize: MainAxisSize.min, children: [
-            Icon(icon, size: 44, color: Theme.of(context).colorScheme.outline),
-            const SizedBox(height: 14),
-            Text(title, style: Theme.of(context).textTheme.titleMedium),
-            const SizedBox(height: 8),
-            Text(note,
-                textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.bodySmall),
-          ]),
-        ),
-      );
+    child: Padding(
+      padding: const EdgeInsets.all(36),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 44, color: Theme.of(context).colorScheme.outline),
+          const SizedBox(height: 14),
+          Text(title, style: Theme.of(context).textTheme.titleMedium),
+          const SizedBox(height: 8),
+          Text(
+            note,
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+        ],
+      ),
+    ),
+  );
 }
 
 class _Retry extends StatelessWidget {
@@ -1102,13 +1538,19 @@ class _Retry extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Center(
-        child: Padding(
-          padding: const EdgeInsets.all(32),
-          child: Column(mainAxisSize: MainAxisSize.min, children: [
-            Text(message, textAlign: TextAlign.center),
-            const SizedBox(height: 16),
-            FilledButton.tonal(onPressed: onRetry, child: const Text('Try again')),
-          ]),
-        ),
-      );
+    child: Padding(
+      padding: const EdgeInsets.all(32),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(message, textAlign: TextAlign.center),
+          const SizedBox(height: 16),
+          FilledButton.tonal(
+            onPressed: onRetry,
+            child: const Text('Try again'),
+          ),
+        ],
+      ),
+    ),
+  );
 }
