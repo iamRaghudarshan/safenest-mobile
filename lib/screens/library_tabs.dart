@@ -929,6 +929,9 @@ class _CollectionScreenState extends State<CollectionScreen> {
     final api = context.read<Session>().api;
     final total = picked.files.length;
     var done = 0, dupes = 0, failed = 0;
+    // What actually got stored, so the album can be filled from the ids rather
+    // than from the server having honoured album_id. See the attach below.
+    final uploaded = <int>[];
     for (final (i, f) in picked.files.indexed) {
       final path = f.path;
       if (path == null) {
@@ -951,12 +954,38 @@ class _CollectionScreenState extends State<CollectionScreen> {
         );
         done++;
         if (d is Map && d['duplicate'] == true) dupes++;
+        final item = d is Map ? d['item'] : null;
+        final id = item is Map ? (item['id'] as num?)?.toInt() : null;
+        if (id != null) uploaded.add(id);
       } on ApiError {
         failed++;
       } catch (_) {
         failed++;
       }
     }
+    // PUT THEM IN THE ALBUM FROM HERE, rather than trusting album_id.
+    //
+    // The upload carries album_id, but this app talks to whatever server version
+    // the owner happens to be running, and an older one does not know that
+    // parameter — FastAPI ignores a query parameter no argument claims, so the
+    // photos uploaded perfectly and the album stayed empty with nothing anywhere
+    // saying why. Reported exactly that way: two photos sent from the phone,
+    // both in the gallery, the album still reading "0 photos".
+    //
+    // /albums/{id}/photos has existed as long as albums have, so this works
+    // against every server. Adding a photo already in the album is a no-op
+    // server-side, so doing both costs nothing where album_id WAS honoured.
+    var attached = true;
+    if (uploaded.isNotEmpty) {
+      try {
+        await api.post('/api/gallery/albums/${widget.albumId}/photos', {
+          'photo_ids': uploaded,
+        });
+      } catch (_) {
+        attached = false;
+      }
+    }
+
     if (!mounted) return;
     setState(() => _addNote = null);
     await _load();
@@ -964,7 +993,11 @@ class _CollectionScreenState extends State<CollectionScreen> {
     messenger.showSnackBar(
       SnackBar(
         content: Text(
-          failed == 0
+          !attached
+              // The photos are safe; they are just not where they were asked to
+              // go, which is a different problem from an upload that failed.
+              ? 'Uploaded $done, but they could not be put in this album'
+              : failed == 0
               ? 'Added $done photo${done == 1 ? '' : 's'} to this album$also'
               : 'Added $done$also — $failed could not be sent',
         ),

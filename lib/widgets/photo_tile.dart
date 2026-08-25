@@ -16,6 +16,20 @@ import '../session.dart';
 import '../theme.dart';
 import '../screens/gallery_screen.dart';
 
+/// A media URL from the server, made absolute.
+///
+/// The server mints signed, time-limited paths like
+/// `/api/gallery/media/thumb/<name>?t=<signature>` — RELATIVE, because the web
+/// app is served from the same origin. A phone is not, and `Image.network`
+/// cannot resolve a relative URL: it fails outright, which surfaces as a
+/// silhouette or a broken-image glyph where a photograph should be.
+///
+/// One function because the rule was copied into five widgets and the fifth
+/// forgot it, which is what put a strip of grey circles across the top of a
+/// gallery that had found every face perfectly well.
+String absoluteMedia(String raw, String base) =>
+    raw.startsWith('http') ? raw : '$base$raw';
+
 class PhotoTile extends StatelessWidget {
   const PhotoTile({
     super.key,
@@ -41,10 +55,7 @@ class PhotoTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final session = context.read<Session>();
-    final base = session.baseUrl ?? '';
-    final url = photo.thumbUrl.startsWith('http')
-        ? photo.thumbUrl
-        : '$base${photo.thumbUrl}';
+    final url = absoluteMedia(photo.thumbUrl, session.baseUrl ?? '');
 
     return GestureDetector(
       onTap: onOpen,

@@ -1065,7 +1065,7 @@ class _GalleryScreenState extends State<GalleryScreen>
                             if (i == _people.length) return _seeAllFaces();
                             final person = _people[i];
                             final id = (person['id'] as num?)?.toInt() ?? 0;
-                            return _FaceChip(
+                            return FaceChip(
                               person: person,
                               selected: _personId == id,
                               onTap: () {
@@ -1304,9 +1304,25 @@ class _DayHeader extends StatelessWidget {
 /// The name is shown when there is one. The clustering calls unnamed faces
 /// "Person 3", which is not a name and is worth nothing under a picture of
 /// somebody — the count is the thing that helps you recognise which face you
-/// are looking for, so that is what goes there instead.
-class _FaceChip extends StatelessWidget {
-  const _FaceChip({required this.person, required this.selected, required this.onTap});
+/// are looking for, so that is what goes there instead. It says "411 photos"
+/// and not "411": a bare number under a face reads as a fault, which is exactly
+/// how it was reported.
+///
+/// THE COVER URL MUST BE MADE ABSOLUTE, like every other image in this app.
+/// The server mints `/api/gallery/media/thumb/<name>?t=<signature>` — a RELATIVE
+/// path — and Image.network cannot resolve one, so every face fell to the
+/// errorBuilder and the whole strip showed grey silhouettes. It looked like face
+/// detection had failed; the faces were found and the pictures were simply never
+/// fetched. The same rule is spelled out in photo_tile.dart, _daySliverList
+/// above, library_tabs.dart and collections_home.dart — this was the one place
+/// that forgot it.
+class FaceChip extends StatelessWidget {
+  const FaceChip({
+    super.key,
+    required this.person,
+    required this.selected,
+    required this.onTap,
+  });
   final Map<String, dynamic> person;
   final bool selected;
   final VoidCallback onTap;
@@ -1319,7 +1335,10 @@ class _FaceChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final url = person['cover_url'] as String?;
+    final raw = person['cover_url'] as String?;
+    final url = (raw == null || raw.isEmpty)
+        ? null
+        : absoluteMedia(raw, context.read<Session>().baseUrl ?? '');
     final count = (person['count'] as num?)?.toInt() ?? 0;
     return GestureDetector(
       onTap: onTap,
@@ -1352,7 +1371,7 @@ class _FaceChip extends StatelessWidget {
           ),
           const SizedBox(height: 3),
           Text(
-            _unnamed ? '$count' : '${person['name']}',
+            _unnamed ? '$count ${count == 1 ? 'photo' : 'photos'}' : '${person['name']}',
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             textAlign: TextAlign.center,
