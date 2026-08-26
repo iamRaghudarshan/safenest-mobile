@@ -20,6 +20,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'api.dart';
 import 'customize.dart';
+import 'offline/mode.dart';
+import 'offline/records.dart';
 import 'offline/store.dart';
 import 'offline/sync.dart';
 import 'session.dart';
@@ -52,6 +54,8 @@ class _SafeNestAppState extends State<SafeNestApp> {
   /// entered on one screen would be invisible to the Sync button on another.
   late final _store = OfflineStore();
   late final _sync = SyncService(store: _store, api: () => _session.api);
+  late final _mode = OfflineMode();
+  late final _records = OfflineRecords(store: _store, mode: _mode);
   Brand _brand = const Brand();
 
   /// Light, dark, or follow the phone. Remembered — a theme that resets on every
@@ -79,6 +83,11 @@ class _SafeNestAppState extends State<SafeNestApp> {
   void initState() {
     super.initState();
     _loadThemeMode();
+    // The saved choice, and how much is waiting. Both read before the first
+    // screen so the offline banner is right on the first frame rather than
+    // appearing a second later.
+    _mode.load();
+    _sync.refreshPending();
     _session.restore().then((_) => _loadBrand());
   }
 
@@ -107,6 +116,8 @@ class _SafeNestAppState extends State<SafeNestApp> {
         ChangeNotifierProvider<Session>.value(value: _session),
         Provider<OfflineStore>.value(value: _store),
         ChangeNotifierProvider<SyncService>.value(value: _sync),
+        ChangeNotifierProvider<OfflineMode>.value(value: _mode),
+        Provider<OfflineRecords>.value(value: _records),
       ],
       child: Consumer<Session>(
         builder: (context, session, _) => MaterialApp(

@@ -122,8 +122,23 @@ class SyncService extends ChangeNotifier {
   /// 0..1, and never NaN — a progress bar fed 0/0 renders as a full one.
   double get progress => _total == 0 ? 0 : (_done / _total).clamp(0.0, 1.0);
 
+  /// Re-read how much is waiting.
+  ///
+  /// NEVER THROWS. This runs during startup, and a store that cannot be opened
+  /// must not be the reason the app fails to launch — the owner would have no
+  /// way in at all, including no way to reach the very screen that might
+  /// explain it. The count is left at whatever was last known and the cause is
+  /// logged.
+  ///
+  /// The cost of that choice, stated: an unreadable store shows "nothing
+  /// waiting" when something may well be. It is the lesser of the two, because
+  /// the alternative is an app that will not start.
   Future<void> refreshPending() async {
-    _pending = await _store.pendingCount();
+    try {
+      _pending = await _store.pendingCount();
+    } catch (e) {
+      debugPrint('[sync] could not read the queue: $e');
+    }
     notifyListeners();
   }
 

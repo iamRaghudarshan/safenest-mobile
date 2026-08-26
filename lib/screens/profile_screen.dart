@@ -47,6 +47,8 @@ import '../widgets/edit_profile_sheet.dart';
 import 'activity_screen.dart';
 import 'storage_screen.dart';
 import 'backup_screen.dart';
+import 'offline_screen.dart';
+import 'sync_screen.dart';
 import 'notifications_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
@@ -312,6 +314,29 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   label: 'Rearrange the bottom bar',
                   onTap: widget.onCustomiseNav,
                 ),
+            ],
+          ),
+
+          SettingsGroup(
+            title: 'Your computer',
+            footer: 'Records are kept on this phone too, so the app still works '
+                'when your computer is asleep. Anything you change is sent when '
+                'you press Sync.',
+            children: [
+              SettingsRow(
+                icon: Icons.cloud_off_outlined,
+                tint: kWarn,
+                label: 'Working offline',
+                onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const OfflineScreen())),
+              ),
+              SettingsRow(
+                icon: Icons.sync,
+                tint: kOk,
+                label: 'Sync',
+                onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const SyncScreen())),
+              ),
             ],
           ),
 

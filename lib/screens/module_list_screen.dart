@@ -23,6 +23,7 @@ import '../alarms.dart';
 import '../api.dart';
 import '../modules.dart';
 import '../dates.dart';
+import '../offline/records.dart';
 import '../session.dart';
 import '../theme.dart';
 import '../widgets/brand_button.dart';
@@ -57,6 +58,12 @@ class _ModuleListScreenState extends State<ModuleListScreen> {
   ApiError? _err;
   String _filter = '';
   bool _calendar = false;
+
+  /// True when the computer could not be reached and this list is what the
+  /// phone last saw. Shown, never hidden: figures presented as current when
+  /// they are a week old are worse than an error message.
+  bool _fromCache = false;
+  DateTime? _asOf;
   // Reminders/to-dos: false shows the PENDING list, true the COMPLETED one. They
   // are separate views — a finished reminder leaves the page rather than sinking
   // to the bottom of it.
@@ -109,12 +116,16 @@ class _ModuleListScreenState extends State<ModuleListScreen> {
   Future<void> _load() async {
     setState(() => _loading = true);
     try {
-      final d = await context.read<Session>().api.get('/api/${widget.spec.key}');
-      final list = d is List
-          ? d
-          : (d is Map ? (d['items'] ?? d['rows'] ?? const []) : const []);
+      // Through the offline layer: it fetches when the computer is reachable
+      // and falls back to what this phone last saw when it is not, with
+      // anything typed offline already applied on top.
+      final loaded = await context
+          .read<OfflineRecords>()
+          .list(context.read<Session>().api, widget.spec.key);
       setState(() {
-        _rows = [for (final e in (list as List)) Map<String, dynamic>.from(e as Map)];
+        _rows = loaded.rows;
+        _fromCache = loaded.fromCache;
+        _asOf = loaded.asOf;
         _loading = false;
         _err = null;
       });
@@ -385,6 +396,26 @@ class _ModuleListScreenState extends State<ModuleListScreen> {
                 isDense: true,
               ),
             ),
+          ),
+        // Said out loud whenever this list did not come from the computer.
+        // Silence here would present a week-old balance as today's, which is
+        // worse than any error message.
+        if (_fromCache && !_loading)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 0, 14, 8),
+            child: Row(children: [
+              const Icon(Icons.cloud_off, size: 15, color: kWarn),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  _asOf == null
+                      ? 'Shown from this phone — not checked with your computer'
+                      : 'From this phone · last checked ${fmtDateTime(_asOf!)}',
+                  style: TextStyle(
+                      fontSize: 12, color: theme.colorScheme.onSurfaceVariant),
+                ),
+              ),
+            ]),
           ),
         Expanded(
           child: _loading
@@ -728,12 +759,20 @@ class _RecordSheetState extends State<_RecordSheet> {
     });
     final api = context.read<Session>().api;
     try {
-      if (_editing) {
-        await api.put('/api/${widget.spec.key}/${widget.existing!['id']}', body);
-      } else {
-        await api.post('/api/${widget.spec.key}', body);
+      final where = await context.read<OfflineRecords>().save(
+            api,
+            widget.spec.key,
+            id: _editing ? (widget.existing!['id'] as num).toInt() : null,
+            body: body,
+            baseUpdatedAt: '${widget.existing?['updated_at'] ?? ''}'.isEmpty
+                ? null
+                : '${widget.existing!['updated_at']}',
+          );
+      // 'queued' rather than true, so the list can say "saved on this phone"
+      // instead of "saved" -- those are different promises.
+      if (mounted) {
+        Navigator.pop(context, where == Saved.queued ? 'queued' : true);
       }
-      if (mounted) Navigator.pop(context, true);
     } on ApiError catch (e) {
       setState(() {
         _error = e.message;
@@ -759,11 +798,14 @@ class _RecordSheetState extends State<_RecordSheet> {
     );
     if (ok != true || !mounted) return;
     try {
-      await context
-          .read<Session>()
-          .api
-          .delete('/api/${widget.spec.key}/${widget.existing!['id']}');
-      if (mounted) Navigator.pop(context, true);
+      final where = await context.read<OfflineRecords>().remove(
+            context.read<Session>().api,
+            widget.spec.key,
+            (widget.existing!['id'] as num).toInt(),
+          );
+      if (mounted) {
+        Navigator.pop(context, where == Saved.queued ? 'queued' : true);
+      }
     } on ApiError catch (e) {
       if (mounted) setState(() => _error = e.message);
     }
