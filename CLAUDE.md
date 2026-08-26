@@ -238,6 +238,9 @@ happen by pushing a tag.
 
 ### Known release facts
 
+- **Latest shipped: 1.52.1** (25 Aug 2026) — iOS on TestFlight, Android APK on
+  the website. It fixes the faces strip and album uploads from the phone; both
+  are written up in §10. 1.52.0 shipped with both defects and is superseded.
 - Apple error **1064 "holiday"** on upload means Apple maintenance, not a
   revoked password. Check their status feed before touching credentials.
 - **Minimum iOS is 13.0.** From Spring 2027 Apple requires 15.0. A warning
@@ -286,6 +289,42 @@ tested server code with no way to reach it from a phone.
 is simply unwired.** Read `backend/app/routers/` for what is actually offered,
 and compare against what a screen calls. That check costs minutes and has
 repeatedly replaced days of rebuilding.
+
+### Its mirror image: reaching for a server feature that is not there yet
+
+Reading `backend/app/routers/` tells you what THIS repository offers. It does
+not tell you what the server on the other end of the phone is running, and those
+are not the same thing — there is more than one SafeNest installation in this
+household, and the owner's phone talks to the one that is behind.
+
+`album_id` on `POST /api/gallery/upload` was added and 1.52.0 used it. FastAPI
+**ignores a query parameter no argument claims**, so against the older
+installation the upload succeeded, the photos appeared in the gallery, and the
+album stayed empty. No error on either side. It was reported from a real phone:
+two photos sent from the album screen, album still reading "0 photos".
+
+1.52.1 uploads and then attaches the returned ids itself through
+`/albums/{id}/photos`, an endpoint as old as albums, and says so plainly if that
+step is the one that fails.
+
+**A server change and a phone release do not arrive together. Assume the far end
+is older: use what has always been there, or check before relying on what is
+new.** An unknown query parameter is silently dropped; an unknown endpoint at
+least gives you a 404 to notice.
+
+### Media URLs from the server are relative — make them absolute
+
+`/api/gallery/media/thumb/<name>?t=<signature>` is correct for the web app,
+which is same-origin, and unusable here: `Image.network` cannot resolve a
+relative URL and fails outright. The faces strip passed `cover_url` straight
+through, so every face fell to its errorBuilder and the top of the gallery was a
+row of grey silhouettes — reading as "face detection is broken" when every face
+had been found and the pictures were simply never fetched.
+
+`absoluteMedia()` in `lib/widgets/photo_tile.dart` is the one definition. The
+rule had been copied into four widgets and the fifth forgot it; use the function
+rather than writing `startsWith('http')` a sixth time. Pinned by
+`test/faces_strip_test.dart`.
 
 ---
 
