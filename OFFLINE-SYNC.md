@@ -45,13 +45,13 @@ already have their own queues (`backup.dart`, `BackupProgress`).
       and `x86_64` (21.1 MB of 60.8 MB) is emulators and a few Chromebooks. No
       phone runs it. Independent of everything below; done first because it is
       small and measurable.
-- [ ] **2. Server: make replay safe** — one `sync_ops(user_id, client_uuid,
+- [x] **2. Server: make replay safe** — one `sync_ops(user_id, client_uuid,
       module, server_id)` table so a retried create returns the existing row
       instead of making a second one. One table, one migration, every module —
       rather than a `client_uuid` column on nine tables. Plus a capability the
       phone can ask about, so an older server refuses the sync instead of
       silently duplicating everything (CLAUDE.md §10's mirror image).
-- [ ] **3. Local store and read cache** — `sqflite` (uses the OS's own SQLite,
+- [x] **3. Local store and read cache** — `sqflite` (uses the OS's own SQLite,
       so it adds no database engine to the download), payloads encrypted with a
       key from `flutter_secure_storage`. Screens read offline. Nothing can be
       lost yet, because the server is still the only writer.

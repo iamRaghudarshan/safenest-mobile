@@ -31,6 +31,27 @@ dependencies:
   # before uploading a library it already holds.
   crypto: ^3.0.6
 
+  # --- working while the computer is asleep ---
+  # The server here is somebody's home PC, so "offline" is the normal case, not
+  # an edge case. Records live on the phone and are pushed when it is reachable.
+  #
+  # sqflite AND NOT sqflite_sqlcipher, deliberately. sqflite is a thin wrapper
+  # over the SQLite that Android and iOS already ship, so it adds no database
+  # engine to the download. sqlcipher bundles its own SQLite plus crypto as
+  # NATIVE code, which is charged once per ABI -- measured against this app's
+  # own APK, where native code is 95% of 60.8 MB, that is roughly 5-6 MB for
+  # encryption both platforms already provide for app-private storage. The
+  # payloads are encrypted anyway (see store.dart) with a key from
+  # flutter_secure_storage above, which costs kilobytes.
+  sqflite: ^2.4.1
+  # Somewhere to put the database that is app-private on both platforms.
+  # Already an indirect dependency; named here because this uses it directly.
+  path: ^1.9.0
+  # A uuid per offline operation. The server remembers the ones it has honoured
+  # (sync_ops), which is what stops a retry after a dropped reply from making a
+  # second copy of a real record. Pure Dart, a few kilobytes.
+  uuid: ^4.5.1
+
   # Push from the owner's own server, by way of Firebase.
   #
   # There is no self-hosted route to an iPhone's lock screen: Apple and Google
@@ -102,6 +123,11 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^6.0.0
+  # Runs the offline store's real SQLite on this machine, so its tests exercise
+  # the actual database -- ordering, the unique constraint, deleting exactly one
+  # row -- rather than a mock that would agree with whatever the code did.
+  # Test-only: it is not in the app's dependencies and adds nothing to the APK.
+  sqflite_common_ffi: ^2.3.4
 
 flutter:
   uses-material-design: true
