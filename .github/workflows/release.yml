@@ -129,8 +129,25 @@ jobs:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        # ARM ONLY, and it is worth a third of the download.
+        #
+        # A default `flutter build apk` is a fat APK carrying every ABI Flutter
+        # supports. Measured on 1.52.1: x86_64 was 21.1 MB of a 60.8 MB APK, and
+        # native code was 95% of the whole file. x86_64 on Android is emulators
+        # and a handful of Chromebooks -- no phone this is sideloaded onto can
+        # run a byte of it, and everyone downloading from the website was paying
+        # for it.
+        #
+        # Not --split-per-abi: that produces several APKs and the website hands
+        # out ONE file, so the release would then have to choose a slice and the
+        # wrong choice is unbootable. One APK that works on every real phone is
+        # worth more here than the last few megabytes.
+        #
+        # Local debug builds are unaffected (they build for the attached device).
+        # An x86_64 EMULATOR cannot install this artifact -- use a debug build.
         run: |
           flutter build apk --release \
+            --target-platform android-arm,android-arm64 \
             --build-name=$(cat VERSION) \
             --build-number=${{ github.run_number }} \
             --dart-define-from-file=firebase.env
