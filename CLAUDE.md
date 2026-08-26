@@ -312,6 +312,44 @@ is older: use what has always been there, or check before relying on what is
 new.** An unknown query parameter is silently dropped; an unknown endpoint at
 least gives you a 404 to notice.
 
+### Working offline — `lib/offline/`
+
+The server is somebody's home PC, so unreachable is the normal case. Records are
+held on the phone and pushed when the owner presses **Sync**.
+
+`store.dart` holds **two things with two lifetimes**, and conflating them is the
+whole risk. `cache` is what the server last said — disposable, replaced
+wholesale on each fetch. `pending` is what the owner typed while the computer
+was asleep, and **until it syncs it exists in exactly one place in the world.**
+So `confirmed()` deletes the one row the server named; a refusal is kept with
+its reason. Eight of ten landing leaves exactly two behind, and a test says so.
+
+Three rules that must survive any edit here:
+
+1. **Replay oldest-first.** A create that replays after the edit which followed
+   it is an edit against nothing. `resolveLocalId` re-points later operations
+   once a create lands.
+2. **Clear per item, never per batch.**
+3. **Never silently discard a value.** A conflict keeps the local copy and tells
+   the owner; the server's version stands until they say otherwise.
+
+`sqflite`, **not** `sqflite_sqlcipher` — the latter bundles its own SQLite and
+crypto natively, charged per ABI, ~5-6 MB against an APK that is 95% native
+code. Payloads are sealed with a SHA-256 counter-mode stream plus an HMAC tag
+(`crypto`, already a dependency), which is stated plainly in the header rather
+than letting "encrypted" imply AES-GCM.
+
+**The engine refuses to sync into a server whose `/api/sync/capabilities` 404s**
+— see the version-drift trap above. It also distinguishes that from *cannot
+reach it*, because those need different actions from the owner.
+
+Vault is excluded and must stay excluded: its contents are decrypted on the
+computer and the key never leaves it. Gallery and Documents keep their own
+queues.
+
+Server side lives in `finmate-react/backend/app/routers/sync.py`, verified by
+`backend/verify_sync.py` against a running server.
+
 ### Media URLs from the server are relative — make them absolute
 
 `/api/gallery/media/thumb/<name>?t=<signature>` is correct for the web app,
