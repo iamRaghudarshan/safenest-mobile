@@ -13,6 +13,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 import 'package:safenest/api.dart';
+import 'package:safenest/modules.dart';
 import 'package:safenest/offline/mode.dart';
 import 'package:safenest/offline/records.dart';
 import 'package:safenest/offline/store.dart';
@@ -63,9 +64,13 @@ void main() {
   });
 
   group('the list says what is true, and only what is true', () {
-    test('the three that cannot work offline are named, with reasons', () {
+    test('everything that needs the computer says WHY', () {
       final blocked = {for (final m in needsComputer) m.key: m.reason};
-      expect(blocked.keys.toSet(), {'vault', 'gallery', 'documents'});
+      // Vault, Photos and Documents will never be offline. Notes and Habits
+      // are here only because their screens are not wired yet — the reason
+      // text says which is which, and this test does not care, because what
+      // matters is that neither kind is left unexplained.
+      expect(blocked.keys, containsAll(<String>['vault', 'gallery', 'documents']));
       for (final entry in blocked.entries) {
         expect(entry.value, isNotNull);
         expect(entry.value!.length, greaterThan(20),
@@ -78,12 +83,40 @@ void main() {
       expect(worksOffline.map((m) => m.key), isNot(contains('vault')));
     });
 
+    // THE TEST THAT WOULD HAVE CAUGHT IT. The first version of this listed the
+    // module keys by hand, and 'todo' was written in both the source and the
+    // test — so the test agreed with the typo instead of with the app, and
+    // To-dos silently stopped being an offline module while the screen went on
+    // promising it was one. Compare against the REAL specs.
+    test('every module promised offline is a real module key', () {
+      final real = {for (final m in kModules) m.key};
+      for (final m in worksOffline) {
+        expect(real, contains(m.key),
+            reason: '"${m.key}" is not a key in kModules — the offline layer '
+                'looks modules up by that key, so it would quietly do nothing');
+      }
+    });
+
+    test('and is one ModuleListScreen actually drives', () {
+      // Only that screen was wired to the store. Notes and Habits have screens
+      // of their own, so the SERVER would take them but the phone cannot queue
+      // them — they belong in the other half until their screens are wired.
+      final generic = {for (final m in kModules) m.key};
+      for (final m in worksOffline) {
+        expect(generic, contains(m.key),
+            reason: '${m.key} does not go through ModuleListScreen, so nothing '
+                'about it touches the offline store');
+      }
+      expect(worksOffline.map((m) => m.key), isNot(contains('notes')));
+      expect(worksOffline.map((m) => m.key), isNot(contains('habits')));
+    });
+
     test('every module promised offline is one the server will sync', () {
       // Mirrors SYNCABLE in backend/app/routers/sync.py. A module promised here
       // and refused there would queue work that can never be delivered.
       const serverSyncable = {
         'expenses', 'loans', 'cards', 'insurance', 'investments',
-        'reminders', 'todo', 'notes', 'habits',
+        'reminders', 'todos', 'notes', 'habits',
       };
       for (final m in worksOffline) {
         expect(serverSyncable, contains(m.key),

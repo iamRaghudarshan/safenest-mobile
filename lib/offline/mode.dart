@@ -38,17 +38,32 @@ class OfflineNote {
 /// screen behind all of these, so that is one switch rather than nine — but it
 /// is still a switch somebody has to throw.
 const offlineModules = <OfflineNote>[
+  // These seven are the ones ModuleListScreen drives, and it is the screen
+  // wired to the offline store. THE KEYS MUST MATCH `kModules` in modules.dart
+  // exactly -- 'todos' is plural there, and writing 'todo' here silently turned
+  // the whole module back into an online-only one while still promising
+  // otherwise on screen. A test compares these against the real keys now,
+  // because a typo repeated in the test passes happily.
   OfflineNote('expenses', 'Expenses', null),
   OfflineNote('loans', 'Loans', null),
   OfflineNote('cards', 'Cards', null),
   OfflineNote('insurance', 'Insurance', null),
   OfflineNote('investments', 'Investments', null),
   OfflineNote('reminders', 'Reminders', null),
-  OfflineNote('todo', 'To-dos', null),
-  OfflineNote('notes', 'Notes', null),
-  OfflineNote('habits', 'Habits', null),
+  OfflineNote('todos', 'To-dos', null),
 
-  // The three that will not, each for its own reason.
+  // Notes and Habits have screens of their own rather than going through
+  // ModuleListScreen, so nothing about them touches the offline store yet. The
+  // SERVER would accept them; the phone has no way to queue them. Listing them
+  // as working would be a promise the code does not keep.
+  OfflineNote('notes', 'Notes',
+      'This screen still reads from your computer. It is on the list to '
+          'change.'),
+  OfflineNote('habits', 'Habits',
+      'This screen still reads from your computer. It is on the list to '
+          'change.'),
+
+  // And these three, each for a reason that is not going to change.
   OfflineNote('vault', 'Vault',
       'Passwords are unlocked on your computer and the key never leaves it. '
           'Keeping a usable copy on your phone would undo that.'),
