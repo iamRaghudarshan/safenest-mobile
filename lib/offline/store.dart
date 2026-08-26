@@ -503,6 +503,29 @@ class OfflineStore {
     await db.delete('cache');
   }
 
+  /// Put an operation back exactly as it was — same uuid, same payload.
+  ///
+  /// Only a test needs this, and only to reproduce the single case the whole
+  /// uuid scheme exists for: the server committed the record and the reply
+  /// never arrived, so the phone still believes the work is outstanding and
+  /// sends it again. Nothing in the app re-queues a confirmed operation.
+  @visibleForTesting
+  Future<void> requeue(PendingOp op) async {
+    final db = await _open;
+    await db.insert('pending', {
+      'module': op.module,
+      'op': opName(op.op),
+      'client_uuid': op.clientUuid,
+      'local_id': op.localId,
+      'server_id': op.serverId,
+      'body': await _seal(op.payload),
+      'base_updated_at': op.baseUpdatedAt,
+      'state': OpState.pending.name,
+      'tries': op.tries,
+      'created_at': op.createdAt.toIso8601String(),
+    });
+  }
+
   @visibleForTesting
   Future<void> clearEverything() async {
     final db = await _open;
