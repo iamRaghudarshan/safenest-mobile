@@ -63,7 +63,7 @@ already have their own queues (`backup.dart`, `BackupProgress`).
 - [x] **6. Offer, do not act** — when the server appears and something is
       pending, a prompt says so. It never syncs by itself. A pending count that
       is hard to ignore, because unsynced data lives in one place only.
-- [ ] **7. Document and release** — CLAUDE.md §10, the field-table tests, and a
+- [x] **7. Document and release** — CLAUDE.md §10, the field-table tests, and a
       real-server verification script.
 
 ---
@@ -80,3 +80,21 @@ app-private storage, and encrypting the JSON payloads with a key from
 
 Measure every release: the arithmetic above is a prediction until an APK is
 weighed.
+
+---
+
+## Where this stops, and what is left
+
+Everything above is built and tested. **What no screen does yet is USE it**: the
+record screens still read straight from the server, so the cache is written by
+nobody and the queue is filled by nobody. The machinery is proven — 33 tests
+here, 35 checks against a running server — and the remaining work is mechanical
+and per-screen:
+
+    read:   store.read(module)     merged with what is pending
+    write:  store.enqueue(...)     instead of the api call, when offline
+
+Do it one module at a time, starting with Expenses, and drive each on a real
+phone with the computer switched off before moving to the next. Nine screens
+wired blind is how a feature ships looking complete and works nowhere — which is
+the defect §10 of CLAUDE.md exists to name.
