@@ -51,6 +51,9 @@ class _MemSecure extends FlutterSecureStorage {
   }
 }
 
+/// Shared with sync_test.dart, which needs the same stand-in for the Keychain.
+FlutterSecureStorage memSecure() => _MemSecure();
+
 Future<OfflineStore> _store() async {
   final s = OfflineStore(secure: _MemSecure(), path: inMemoryDatabasePath);
   await s.clearEverything();

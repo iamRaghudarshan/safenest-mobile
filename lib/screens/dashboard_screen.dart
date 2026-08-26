@@ -26,6 +26,7 @@ import '../theme.dart';
 import '../widgets/avatar.dart';
 import '../widgets/brand_button.dart';
 import '../widgets/nature_backdrop.dart';
+import '../widgets/sync_offer.dart';
 import 'notifications_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
@@ -173,6 +174,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
         child: ListView(
           padding: const EdgeInsets.fromLTRB(14, 8, 14, 24),
           children: [
+            // Anything typed while the computer was asleep, said out loud on
+            // the first screen. It offers and does not act — see SyncOffer —
+            // and it hides itself entirely when there is nothing waiting, so
+            // the ordinary case is unchanged.
+            const Padding(
+              padding: EdgeInsets.only(bottom: 2),
+              child: SyncOffer(),
+            ),
             // The greeting now lives over a bounded crop of the app's own nature
             // world, so Home opens on something warm rather than a bare name and
             // a row of icons. A line of copy rotates gently beneath it — the

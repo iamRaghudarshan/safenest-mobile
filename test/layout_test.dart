@@ -26,6 +26,9 @@ import 'package:provider/provider.dart';
 
 import 'package:safenest/screens/dashboard_screen.dart';
 import 'package:safenest/screens/notifications_screen.dart';
+import 'package:safenest/api.dart';
+import 'package:safenest/offline/store.dart';
+import 'package:safenest/offline/sync.dart';
 import 'package:safenest/session.dart';
 import 'package:safenest/theme.dart';
 import 'package:safenest/widgets/brand_button.dart';
@@ -58,8 +61,18 @@ final _dashboardData = <String, dynamic>{
 final _brief = <String, dynamic>{'date': 'Friday, 07 August'};
 
 Widget _wrap(Widget child, {Brightness brightness = Brightness.light}) {
-  return ChangeNotifierProvider<Session>(
-    create: (_) => Session(),
+  // Home carries the "changes not on your computer yet" offer, so it needs the
+  // sync service. Constructing these is synchronous — the store opens its
+  // database lazily and nothing here reads it, so no real I/O happens inside
+  // the FakeAsync zone a widget test runs in.
+  return MultiProvider(
+    providers: [
+      ChangeNotifierProvider<Session>(create: (_) => Session()),
+      ChangeNotifierProvider<SyncService>(
+        create: (_) => SyncService(
+            store: OfflineStore(), api: () => Api(baseUrl: '')),
+      ),
+    ],
     child: MaterialApp(
       theme: buildTheme(const Brand(), brightness),
       home: child,

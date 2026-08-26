@@ -55,12 +55,12 @@ already have their own queues (`backup.dart`, `BackupProgress`).
       so it adds no database engine to the download), payloads encrypted with a
       key from `flutter_secure_storage`. Screens read offline. Nothing can be
       lost yet, because the server is still the only writer.
-- [ ] **4. Offline creates + the Sync button** — the outbox, the progress bar,
+- [x] **4. Offline creates + the Sync button** — the outbox, the progress bar,
       per-item results. The common case, and no conflicts are possible yet.
-- [ ] **5. Edits and deletes + conflicts** — tombstones, the `updated_at` check,
+- [x] **5. Edits and deletes + conflicts** — tombstones, the `updated_at` check,
       and the review list. The hard part, attempted only once the machinery
       above is proven.
-- [ ] **6. Offer, do not act** — when the server appears and something is
+- [x] **6. Offer, do not act** — when the server appears and something is
       pending, a prompt says so. It never syncs by itself. A pending count that
       is hard to ignore, because unsynced data lives in one place only.
 - [ ] **7. Document and release** — CLAUDE.md §10, the field-table tests, and a

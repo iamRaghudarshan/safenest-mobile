@@ -20,6 +20,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'api.dart';
 import 'customize.dart';
+import 'offline/store.dart';
+import 'offline/sync.dart';
 import 'session.dart';
 import 'theme.dart';
 import 'screens/sign_in_screen.dart';
@@ -43,6 +45,13 @@ class SafeNestApp extends StatefulWidget {
 
 class _SafeNestAppState extends State<SafeNestApp> {
   final _session = Session();
+
+  /// Where records live while the computer is asleep, and the thing that pushes
+  /// them back. Made once here and handed down, so every screen reads and
+  /// writes the same queue -- two stores would mean two queues, and work
+  /// entered on one screen would be invisible to the Sync button on another.
+  late final _store = OfflineStore();
+  late final _sync = SyncService(store: _store, api: () => _session.api);
   Brand _brand = const Brand();
 
   /// Light, dark, or follow the phone. Remembered — a theme that resets on every
@@ -93,8 +102,12 @@ class _SafeNestAppState extends State<SafeNestApp> {
 
   @override
   Widget build(BuildContext context) {
-    return ChangeNotifierProvider.value(
-      value: _session,
+    return MultiProvider(
+      providers: [
+        ChangeNotifierProvider<Session>.value(value: _session),
+        Provider<OfflineStore>.value(value: _store),
+        ChangeNotifierProvider<SyncService>.value(value: _sync),
+      ],
       child: Consumer<Session>(
         builder: (context, session, _) => MaterialApp(
           title: _brand.name,
