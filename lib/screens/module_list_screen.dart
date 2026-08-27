@@ -24,6 +24,7 @@ import '../api.dart';
 import '../modules.dart';
 import '../dates.dart';
 import '../offline/records.dart';
+import '../offline/sync.dart';
 import '../session.dart';
 import '../theme.dart';
 import '../widgets/brand_button.dart';
@@ -201,21 +202,38 @@ class _ModuleListScreenState extends State<ModuleListScreen> {
   }
 
   Future<void> _openSheet([Map<String, dynamic>? existing]) async {
-    final saved = await showModalBottomSheet<bool>(
+    // Object? and NOT bool. The sheet answers `true` when the computer took the
+    // record and `'queued'` when it is being held on this phone, and a route
+    // typed <bool> cannot carry the second one -- it arrived as null, so
+    // `saved == true` was false, the list never reloaded, and a record saved
+    // offline simply did not appear. It was queued correctly the whole time;
+    // nothing showed it. Reported as "saving offline does not work".
+    final saved = await showModalBottomSheet<Object?>(
       context: context,
       isScrollControlled: true,
       showDragHandle: true,
       builder: (_) => _RecordSheet(spec: widget.spec, existing: existing),
     );
-    if (saved == true) {
-      _load();
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(existing == null ? 'Added' : 'Saved'),
-          behavior: SnackBarBehavior.floating,
-          duration: const Duration(seconds: 2),
-        ));
-      }
+    if (saved == null || saved == false) return;
+
+    final queued = saved == 'queued';
+    _load();
+    if (!mounted) return;
+    // Two different promises, and they must not read the same. "Saved" when the
+    // computer has it; something that mentions this phone when it does not.
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(queued
+          ? 'Saved on this phone — send it with Sync'
+          : existing == null
+              ? 'Added'
+              : 'Saved'),
+      behavior: SnackBarBehavior.floating,
+      duration: Duration(seconds: queued ? 4 : 2),
+    ));
+    if (queued) {
+      // The badge and the Home banner both read this, so refresh it now rather
+      // than leaving them a count behind until something else happens to look.
+      unawaited(context.read<SyncService>().refreshPending());
     }
   }
 

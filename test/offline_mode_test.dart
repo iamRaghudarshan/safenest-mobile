@@ -248,4 +248,49 @@ void main() {
       await store.close();
     });
   });
+
+  group('a save made offline actually shows up', () {
+    // THE DEFECT THIS PINS. The record sheet answers `true` when the computer
+    // took the record and `'queued'` when the phone is holding it. The sheet was
+    // opened as showModalBottomSheet<bool>, so the second answer could not
+    // travel — it arrived as null, `saved == true` was false, the list never
+    // reloaded, and a record saved offline simply never appeared. It had been
+    // queued correctly the whole time; nothing on screen said so. Reported from
+    // a real phone as "saving offline does not work".
+    test('an offline save is readable straight back out of the store', () async {
+      final store = OfflineStore(secure: memSecure(), path: inMemoryDatabasePath);
+      await store.clearEverything();
+      final records = OfflineRecords(store: store, mode: OfflineMode());
+
+      await records.save(Api(baseUrl: 'http://127.0.0.1:1'), 'expenses',
+          body: {'note': 'bought chai', 'amount': 20, 'category': 'Food'});
+
+      // What the list would show. If this is empty the record is invisible even
+      // though it is safely queued, which is the shape of the bug above.
+      final shown = await records.list(Api(baseUrl: 'http://127.0.0.1:1'), 'expenses');
+      expect(shown.rows, hasLength(1));
+      expect(shown.rows.single['note'], 'bought chai');
+      expect(shown.rows.single['_pending'], isTrue,
+          reason: 'the row has to be marked so the screen can show it is '
+              'not on the computer yet');
+      expect(shown.fromCache, isTrue);
+      await store.close();
+    });
+
+    test('to-dos queue too — the key must be the real one', () async {
+      final store = OfflineStore(secure: memSecure(), path: inMemoryDatabasePath);
+      await store.clearEverything();
+      final records = OfflineRecords(store: store, mode: OfflineMode());
+
+      // 'todos', as kModules has it. With 'todo' in the offline list this fell
+      // through to the online path and threw instead of queueing.
+      final where = await records.save(
+          Api(baseUrl: 'http://127.0.0.1:1'), 'todos',
+          body: {'title': 'call the bank'});
+
+      expect(where, Saved.queued);
+      expect(await store.pendingCount(), 1);
+      await store.close();
+    });
+  });
 }
