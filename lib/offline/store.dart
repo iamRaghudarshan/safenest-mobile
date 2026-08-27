@@ -47,7 +47,13 @@ import 'package:sqflite/sqflite.dart';
 import 'package:uuid/uuid.dart';
 
 /// What a queued operation is trying to do.
-enum Op { create, update, delete }
+///
+/// `action` is the fourth because create/update/delete does not describe what
+/// people actually do to some records. Ticking a habit is `POST
+/// /api/habits/{id}/check`, and a habit tracker that cannot be ticked without
+/// the computer is not working offline in any sense the owner would recognise.
+/// Pinning and archiving a note are the same shape.
+enum Op { create, update, delete, action }
 
 /// Where a queued operation has got to.
 ///
@@ -76,6 +82,7 @@ class PendingOp {
     required this.tries,
     required this.lastError,
     required this.createdAt,
+    this.action,
   });
 
   /// Order of creation. The journal replays in this order and nothing else:
@@ -101,6 +108,11 @@ class PendingOp {
   /// The `updated_at` this edit was based on, so the server can tell whether
   /// somebody else changed the record in the meantime. Null for a create.
   final String? baseUpdatedAt;
+
+  /// For [Op.action]: which one, e.g. `check` for a habit or `pin` for a note.
+  /// The server keeps a fixed list of the actions it will accept — this is not
+  /// a path a client gets to choose.
+  final String? action;
   final OpState state;
   final int tries;
   final String? lastError;
@@ -160,7 +172,15 @@ class OfflineStore {
     final file = _pathOverride ?? p.join(await getDatabasesPath(), 'offline.db');
     return openDatabase(
       file,
-      version: 1,
+      version: 2,
+      // v2 added `pending.action`. An upgrade rather than a recreate, because
+      // by the time this shipped there were phones holding queued work in a v1
+      // database — and that queue is the only copy of it anywhere.
+      onUpgrade: (db, from, to) async {
+        if (from < 2) {
+          await db.execute('ALTER TABLE pending ADD COLUMN action TEXT');
+        }
+      },
       onCreate: (db, _) async {
         // What the server last said. Disposable by design.
         await db.execute('''
@@ -183,6 +203,7 @@ class OfflineStore {
             server_id       INTEGER,
             body            TEXT    NOT NULL,
             base_updated_at TEXT,
+            action          TEXT,
             state           TEXT    NOT NULL,
             tries           INTEGER NOT NULL DEFAULT 0,
             last_error      TEXT,
@@ -363,6 +384,17 @@ class OfflineStore {
           }
         case Op.delete:
           deleted.add(o.target);
+        case Op.action:
+          // An action's EFFECT is the server's to work out — only it knows what
+          // ticking a habit does to the streak. What the phone can do is carry
+          // the optimistic fields the screen supplied, so the tick appears
+          // immediately instead of after a sync, and mark the row pending.
+          // Anything not supplied simply stays as the server last said.
+          if (o.serverId != null && byId.containsKey(o.serverId)) {
+            byId[o.serverId!] = {...byId[o.serverId!]!, ...o.payload};
+          } else if (o.localId != null && localOnly.containsKey(o.localId)) {
+            localOnly[o.localId!] = {...localOnly[o.localId!]!, ...o.payload};
+          }
       }
     }
 
@@ -402,6 +434,7 @@ class OfflineStore {
     int? localId,
     int? serverId,
     String? baseUpdatedAt,
+    String? action,
   }) async {
     final db = await _open;
     final uuid = _uuid.v4();
@@ -413,6 +446,7 @@ class OfflineStore {
       'server_id': serverId,
       'body': await _seal(payload),
       'base_updated_at': baseUpdatedAt,
+      'action': action,
       'state': OpState.pending.name,
       'tries': 0,
       'created_at': DateTime.now().toIso8601String(),
@@ -441,6 +475,7 @@ class OfflineStore {
           serverId: r['server_id'] as int?,
           payload: await _unseal('${r['body']}'),
           baseUpdatedAt: r['base_updated_at'] as String?,
+          action: r['action'] as String?,
           state: OpState.values.firstWhere((s) => s.name == '${r['state']}',
               orElse: () => OpState.pending),
           tries: (r['tries'] as int?) ?? 0,
@@ -520,6 +555,7 @@ class OfflineStore {
       'server_id': op.serverId,
       'body': await _seal(op.payload),
       'base_updated_at': op.baseUpdatedAt,
+      'action': op.action,
       'state': OpState.pending.name,
       'tries': op.tries,
       'created_at': op.createdAt.toIso8601String(),

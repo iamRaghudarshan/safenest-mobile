@@ -193,6 +193,40 @@ class OfflineRecords {
     return Saved.queued;
   }
 
+  /// Tick a habit, pin a note, toggle a to-do — the things that are not an
+  /// edit of fields.
+  ///
+  /// [optimistic] is what the screen wants the row to look like straight away.
+  /// The real effect is the server's to work out (only it knows what a tick
+  /// does to a streak), but without something to show, ticking a habit offline
+  /// would leave the tick invisible until a sync — which is the shape of the
+  /// bug that made offline saves look broken.
+  Future<Saved> act(Api api, String module, int id, String action,
+      {Map<String, dynamic> body = const {},
+      Map<String, dynamic> optimistic = const {}}) async {
+    if (!_syncable(module)) {
+      await api.post('/api/$module/$id/$action', body);
+      return Saved.server;
+    }
+
+    if (!_mode.on && id > 0) {
+      try {
+        await api.post('/api/$module/$id/$action', body);
+        return Saved.server;
+      } on ApiError catch (e) {
+        if (e.status > 0) rethrow;
+      } catch (_) {
+        // unreachable — queue it
+      }
+    }
+
+    await _store.enqueue(
+        module: module, op: Op.action, action: action,
+        serverId: id > 0 ? id : null, localId: id < 0 ? -id : null,
+        payload: {...body, ...optimistic});
+    return Saved.queued;
+  }
+
   Future<Saved> remove(Api api, String module, int id) async {
     if (!_syncable(module)) {
       await api.delete('/api/$module/$id');

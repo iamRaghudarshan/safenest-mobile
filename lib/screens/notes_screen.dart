@@ -9,6 +9,8 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../api.dart';
+import '../offline/records.dart';
+import '../theme.dart';
 import '../session.dart';
 
 // Keep's pastels; text on a coloured card is forced dark to suit them.
@@ -56,9 +58,32 @@ class _NotesScreenState extends State<NotesScreen> {
     super.dispose();
   }
 
+  /// True when this list is the copy held on this phone.
+  bool _fromCache = false;
+
   Future<void> _load() async {
     setState(() => _loading = true);
     try {
+      // THE PLAIN VIEW IS THE ONE HELD ON THIS PHONE. Buckets, labels and
+      // search are worked out by the computer, and reproducing that here would
+      // be a second implementation to keep in step -- one that would quietly
+      // disagree about which notes are archived. So the default view is cached
+      // and everything else asks the computer; offline, a filtered view says so
+      // rather than showing the wrong notes.
+      final plain = _bucket == 'notes' && _label.isEmpty && _query.isEmpty;
+      if (plain) {
+        final loaded = await context
+            .read<OfflineRecords>()
+            .list(_api, 'notes');
+        if (!mounted) return;
+        setState(() {
+          _notes = loaded.rows;
+          _fromCache = loaded.fromCache;
+          _loading = false;
+        });
+        return;
+      }
+
       final d = await _api.get('/api/notes', {
         'bucket': _bucket,
         if (_label.isNotEmpty) 'label': _label,
@@ -71,6 +96,7 @@ class _NotesScreenState extends State<NotesScreen> {
             Map<String, dynamic>.from(e as Map)
         ];
         _labels = [for (final l in (d['labels'] as List? ?? const [])) '$l'];
+        _fromCache = false;
         _loading = false;
       });
     } catch (_) {
@@ -80,14 +106,16 @@ class _NotesScreenState extends State<NotesScreen> {
 
   Future<void> _act(int id, String path) async {
     try {
-      await _api.post('/api/notes/$id/$path', null);
+      await context
+          .read<OfflineRecords>()
+          .act(_api, 'notes', id, path);
       _load();
     } catch (_) {/* a failed toggle just leaves the note as it was */}
   }
 
   Future<void> _delete(int id) async {
     try {
-      await _api.delete('/api/notes/$id');
+      await context.read<OfflineRecords>().remove(_api, 'notes', id);
       _load();
     } catch (_) {}
   }
@@ -213,6 +241,22 @@ class _NotesScreenState extends State<NotesScreen> {
             ],
           ),
         ),
+        if (_fromCache && !_loading)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 0, 14, 8),
+            child: Row(children: [
+              const Icon(Icons.cloud_off, size: 15, color: kWarn),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  'From this phone — not checked with your computer',
+                  style: TextStyle(
+                      fontSize: 12,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant),
+                ),
+              ),
+            ]),
+          ),
         Expanded(
           child: _loading
               ? const Center(child: CircularProgressIndicator())
@@ -498,9 +542,11 @@ class _NoteEditorState extends State<_NoteEditor> {
     try {
       final id = widget.note?['id'];
       if (id != null) {
-        await widget.api.put('/api/notes/$id', body);
+        await context
+            .read<OfflineRecords>()
+            .save(widget.api, 'notes', id: id, body: body);
       } else {
-        await widget.api.post('/api/notes', body);
+        await context.read<OfflineRecords>().save(widget.api, 'notes', body: body);
       }
       if (mounted) Navigator.pop(context, true);
     } catch (_) {

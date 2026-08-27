@@ -344,6 +344,7 @@ class SyncService extends ChangeNotifier {
         'client_uuid': o.clientUuid,
         'module': o.module,
         'op': opName(o.op),
+        if (o.action != null) 'action': o.action,
         if (o.serverId != null) 'server_id': o.serverId,
         if (o.baseUpdatedAt != null) 'base_updated_at': o.baseUpdatedAt,
         'payload': o.payload,

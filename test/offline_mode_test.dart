@@ -113,7 +113,7 @@ void main() {
     // inheriting it from ModuleListScreen. Every addition here is a real piece
     // of work on a real screen — the list exists so that promising a module
     // offline requires having done it, not merely having meant to.
-    const wiredByHand = {'vault'};
+    const wiredByHand = {'vault', 'notes', 'habits'};
 
     test('every module promised offline is genuinely wired to the store', () {
       final generic = {for (final m in kModules) m.key};
@@ -125,11 +125,11 @@ void main() {
       }
     });
 
-    test('Notes and Habits are NOT promised — their screens are not wired', () {
-      // The server would take both. The phone has no way to queue them yet, so
-      // listing them as working would be a promise the code does not keep.
-      expect(worksOffline.map((m) => m.key), isNot(contains('notes')));
-      expect(worksOffline.map((m) => m.key), isNot(contains('habits')));
+    test('everything except photos and documents works offline', () {
+      // What the owner asked for, stated as the invariant. If a module is ever
+      // added, it belongs in one of the two halves deliberately — and the test
+      // above will refuse it in the working half until its screen is wired.
+      expect(needsComputer.map((m) => m.key).toSet(), {'gallery', 'documents'});
     });
 
     test('every module promised offline is one the server will sync', () {

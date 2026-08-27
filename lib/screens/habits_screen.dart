@@ -9,6 +9,7 @@ import 'package:provider/provider.dart';
 
 import '../api.dart';
 import '../dates.dart';
+import '../offline/records.dart';
 import '../session.dart';
 import '../theme.dart';
 import '../widgets/brand_button.dart';
@@ -58,7 +59,12 @@ class _HabitsScreenState extends State<HabitsScreen> {
   Future<void> _load() async {
     setState(() => _loading = true);
     try {
-      final d = await context.read<Session>().api.get('/api/habits');
+      // Through the offline layer, so the list survives the computer being
+      // asleep and anything ticked offline is already applied on top.
+      final loaded = await context
+          .read<OfflineRecords>()
+          .list(context.read<Session>().api, 'habits');
+      final d = {'items': loaded.rows};
       setState(() {
         _items = [
           for (final e in ((d as Map)['items'] as List? ?? const []))
@@ -77,8 +83,16 @@ class _HabitsScreenState extends State<HabitsScreen> {
 
   Future<void> _check(Map<String, dynamic> h, {int? count}) async {
     try {
-      await context.read<Session>().api.post(
-          '/api/habits/${h['id']}/check', count == null ? {} : {'count': count});
+      // Ticking is THE thing a habit tracker is for, so it must work with the
+      // computer asleep. `done_today` is the optimistic bit: without it the
+      // tick would be invisible until a sync, which reads as nothing having
+      // happened.
+      await context.read<OfflineRecords>().act(
+            context.read<Session>().api, 'habits',
+            (h['id'] as num).toInt(), 'check',
+            body: count == null ? {} : {'count': count},
+            optimistic: {'done_today': true},
+          );
       await _load();
     } on ApiError catch (e) {
       if (mounted) {
@@ -99,9 +113,10 @@ class _HabitsScreenState extends State<HabitsScreen> {
     try {
       final api = context.read<Session>().api;
       if (existing != null) {
-        await api.put('/api/habits/${existing['id']}', body);
+        await context.read<OfflineRecords>().save(api, 'habits',
+            id: (existing['id'] as num).toInt(), body: body);
       } else {
-        await api.post('/api/habits', body);
+        await context.read<OfflineRecords>().save(api, 'habits', body: body);
       }
       await _load();
       if (mounted) {
@@ -120,7 +135,8 @@ class _HabitsScreenState extends State<HabitsScreen> {
   }
 
   Future<void> _archive(Map<String, dynamic> h) async {
-    await context.read<Session>().api.post('/api/habits/${h['id']}/archive');
+    await context.read<OfflineRecords>().act(context.read<Session>().api,
+        'habits', (h['id'] as num).toInt(), 'archive');
     await _load();
   }
 
@@ -139,7 +155,8 @@ class _HabitsScreenState extends State<HabitsScreen> {
       ),
     );
     if (ok != true || !mounted) return;
-    await context.read<Session>().api.delete('/api/habits/${h['id']}');
+    await context.read<OfflineRecords>()
+        .remove(context.read<Session>().api, 'habits', (h['id'] as num).toInt());
     await _load();
   }
 

@@ -64,16 +64,17 @@ const offlineModules = <OfflineNote>[
   // them.
   OfflineNote('vault', 'Vault', null),
 
-  // Notes and Habits have screens of their own rather than going through
-  // ModuleListScreen, so nothing about them touches the offline store yet. The
-  // SERVER would accept them; the phone has no way to queue them. Listing them
-  // as working would be a promise the code does not keep.
-  OfflineNote('notes', 'Notes',
-      'This screen still reads from your computer. It is on the list to '
-          'change.'),
-  OfflineNote('habits', 'Habits',
-      'This screen still reads from your computer. It is on the list to '
-          'change.'),
+  // Wired by hand, like the vault. Habits needed a fourth kind of operation to
+  // be honest about: ticking is what a habit tracker is FOR, and one that
+  // cannot be ticked without the computer is not working offline.
+  OfflineNote('habits', 'Habits', null),
+
+  // Notes holds one caveat, and it is on the screen rather than here: buckets,
+  // labels and search are worked out by the computer, so only the plain list is
+  // held on this phone. Reproducing that filtering here would be a second
+  // implementation to keep in step, and it would quietly disagree about which
+  // notes are archived.
+  OfflineNote('notes', 'Notes', null),
 
   // And these three, each for a reason that is not going to change.
   OfflineNote('gallery', 'Photos',
