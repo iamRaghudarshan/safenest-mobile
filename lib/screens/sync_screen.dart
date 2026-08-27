@@ -63,7 +63,11 @@ class _SyncScreenState extends State<SyncScreen> {
 
   /// What happened, in words rather than five counters.
   String _sentence(SyncResult r) {
-    if (r.sent == 0) return 'Nothing was waiting';
+    if (r.sent == 0) {
+      return r.problems.isEmpty
+          ? 'Your records are up to date on this phone'
+          : r.problems.join(' · ');
+    }
     final parts = <String>[];
     if (r.saved > 0) parts.add('${r.saved} saved');
     if (r.already > 0) parts.add('${r.already} already there');
@@ -130,12 +134,16 @@ class _SyncScreenState extends State<SyncScreen> {
                   SizedBox(
                     width: double.infinity,
                     child: FilledButton.icon(
-                      onPressed: sync.running || waiting == 0 ? null : _run,
+                      // Enabled even with nothing waiting: Sync is two-way, so
+                      // pressing it with an empty outbox still brings the
+                      // computer's records down to this phone. "Nothing to
+                      // send" is not "nothing to do".
+                      onPressed: sync.running ? null : _run,
                       icon: const Icon(Icons.sync),
                       label: Text(sync.running
-                          ? 'Sending…'
+                          ? 'Syncing…'
                           : waiting == 0
-                              ? 'Nothing to send'
+                              ? 'Get my records'
                               : 'Sync now'),
                     ),
                   ),

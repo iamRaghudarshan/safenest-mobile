@@ -111,6 +111,37 @@ class OfflineRecords {
     ];
   }
 
+  /// Fill the cache for every module that works offline.
+  ///
+  /// THE OTHER HALF OF SYNC. Pushing what the phone typed is only one
+  /// direction; without this, "works offline" means "works offline for whatever
+  /// you happened to open recently", and a module never visited while connected
+  /// is simply empty when you need it. Somebody who turns the setting on before
+  /// a journey reasonably expects their records to be there.
+  ///
+  /// Best effort, module by module. One that fails leaves the rest alone and
+  /// keeps whatever copy it already had — a partial refresh is worth far more
+  /// than an all-or-nothing one that abandons nine modules because the tenth
+  /// timed out.
+  ///
+  /// Returns the modules it could not refresh, so the caller can say so rather
+  /// than implying everything is current.
+  Future<List<String>> refreshAll(Api api, {void Function(String)? onEach}) async {
+    final failed = <String>[];
+    for (final m in worksOffline) {
+      onEach?.call(m.label);
+      try {
+        final d = await api.get(_listPath(m.key));
+        if (_mayCache(m.key)) {
+          await _store.putList(m.key, _rows(d));
+        }
+      } catch (_) {
+        failed.add(m.label);
+      }
+    }
+    return failed;
+  }
+
   /// Create or edit a record.
   ///
   /// Returns where it ended up, so the screen can say "saved" or "saved on this

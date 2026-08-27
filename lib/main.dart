@@ -53,9 +53,10 @@ class _SafeNestAppState extends State<SafeNestApp> {
   /// writes the same queue -- two stores would mean two queues, and work
   /// entered on one screen would be invisible to the Sync button on another.
   late final _store = OfflineStore();
-  late final _sync = SyncService(store: _store, api: () => _session.api);
   late final _mode = OfflineMode();
   late final _records = OfflineRecords(store: _store, mode: _mode);
+  late final _sync = SyncService(
+      store: _store, api: () => _session.api, records: _records);
   Brand _brand = const Brand();
 
   /// Light, dark, or follow the phone. Remembered — a theme that resets on every

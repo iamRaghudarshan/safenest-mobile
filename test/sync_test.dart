@@ -359,7 +359,8 @@ void main() {
       expect(find.byIcon(Icons.schedule), findsNothing);
     });
 
-    testWidgets('with nothing waiting, the button is disabled', (tester) async {
+    testWidgets('with nothing waiting, the button still offers to pull',
+        (tester) async {
       tester.view.physicalSize = const Size(375, 667);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.reset);
@@ -372,8 +373,11 @@ void main() {
       await tester.pump();
 
       expect(find.text('Everything is on your computer'), findsOneWidget);
+      // Sync is two-way now: nothing to send is not nothing to do, so the
+      // button stays live and offers to fetch the computer's records.
+      expect(find.text('Get my records'), findsOneWidget);
       final btn = tester.widget<FilledButton>(find.byType(FilledButton));
-      expect(btn.onPressed, isNull);
+      expect(btn.onPressed, isNotNull);
     });
   });
 }

@@ -26,6 +26,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import '../api.dart';
+import 'records.dart';
 import 'store.dart';
 
 /// How one operation ended, in the words the owner needs.
@@ -95,12 +96,20 @@ class SyncService extends ChangeNotifier {
   // The lint wants `this._store` here. Dart forbids a named parameter whose
   // name starts with an underscore, so its suggestion does not compile.
   // ignore_for_file: prefer_initializing_formals
-  SyncService({required OfflineStore store, required Api Function() api})
-      : _store = store,
-        _api = api;
+  SyncService({
+    required OfflineStore store,
+    required Api Function() api,
+    OfflineRecords? records,
+  })  : _store = store,
+        _api = api,
+        _records = records;
 
   final OfflineStore _store;
   final Api Function() _api;
+
+  /// Optional, so the engine can be tested without one. When present, a sync
+  /// also brings the computer's records DOWN — see the pull below.
+  final OfflineRecords? _records;
 
   bool _running = false;
   int _done = 0;
@@ -188,9 +197,24 @@ class SyncService extends ChangeNotifier {
       _total = ops.length;
       notifyListeners();
       if (ops.isEmpty) {
-        _last = const SyncResult(
+        // Nothing to send is NOT nothing to do. Pressing Sync with an empty
+        // outbox should still bring the computer's records down — that is what
+        // somebody about to go out is asking for.
+        final problems = <String>[];
+        if (_records != null) {
+          _step = 'Getting your records';
+          notifyListeners();
+          final couldNot = await _records.refreshAll(_api(), onEach: (label) {
+            _step = 'Getting $label';
+            notifyListeners();
+          });
+          for (final m in couldNot) {
+            problems.add('Could not refresh $m');
+          }
+        }
+        _last = SyncResult(
             sent: 0, saved: 0, already: 0, conflicts: 0, refused: 0,
-            failed: 0, problems: []);
+            failed: 0, problems: problems);
         return _last!;
       }
 
@@ -280,6 +304,28 @@ class SyncService extends ChangeNotifier {
           }
         }
         notifyListeners();
+      }
+
+      // AND NOW THE OTHER DIRECTION. Sync means "make this phone and that
+      // computer agree", not "empty my outbox" — so once what was typed here
+      // has gone up, everything comes back down. Without it a module never
+      // opened while connected stays empty exactly when it is wanted, and
+      // "works offline" quietly means "works offline for whatever you happened
+      // to browse".
+      //
+      // After the push, deliberately: the pull replaces the cache wholesale, so
+      // running it first would overwrite rows with the server's older copy and
+      // then push edits on top of nothing.
+      if (_records != null) {
+        _step = 'Getting your records';
+        notifyListeners();
+        final couldNot = await _records.refreshAll(_api(), onEach: (label) {
+          _step = 'Getting $label';
+          notifyListeners();
+        });
+        for (final m in couldNot) {
+          problems.add('Could not refresh $m');
+        }
       }
 
       _last = SyncResult(
