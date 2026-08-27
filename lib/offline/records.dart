@@ -52,6 +52,24 @@ class OfflineRecords {
   bool _syncable(String module) =>
       offlineModules.any((m) => m.key == module && m.works);
 
+  /// Where a module's list comes from.
+  ///
+  /// The vault is the exception: `/api/vault` returns metadata only, by design,
+  /// so caching it would give a phone a list of titles and no passwords — the
+  /// offline vault would show every account and open none of them.
+  /// `/api/vault/sync` is the one that carries the secrets, and it is rate
+  /// limited and audited precisely because it does.
+  String _listPath(String module) =>
+      module == 'vault' ? '/api/vault/sync' : '/api/$module';
+
+  /// Whether this phone should be holding the vault at all.
+  ///
+  /// Only when the owner has switched Working offline on. A phone that never
+  /// leaves the house has no business carrying the passwords, and the bulk
+  /// endpoint is rate limited hard, so calling it on every casual visit to the
+  /// screen would spend the allowance and hand over the vault for nothing.
+  bool _mayCache(String module) => module != 'vault' || _mode.on;
+
   /// Fetch a module's rows, falling back to the last copy held on this phone.
   Future<Loaded> list(Api api, String module) async {
     if (!_syncable(module)) {
@@ -65,10 +83,13 @@ class OfflineRecords {
     // this; a screen that stalls for a timeout first has not honoured it.
     if (!_mode.on) {
       try {
-        final d = await api.get('/api/$module');
+        final d = await api.get(_listPath(module));
         final rows = _rows(d);
-        await _store.putList(module, rows);
-        return Loaded(await _merged(module), fromCache: false);
+        if (_mayCache(module)) {
+          await _store.putList(module, rows);
+        }
+        return Loaded(_mayCache(module) ? await _merged(module) : rows,
+            fromCache: false);
       } on ApiError {
         // Fall through to whatever is held here. An unreachable computer is the
         // normal case for this product, not an error worth a red screen.

@@ -1,22 +1,36 @@
-/// The vault: passwords, encrypted on the owner's own machine.
+/// The vault: passwords, encrypted on the owner's own machine — and now, at
+/// their explicit request, on this phone as well.
 ///
-/// WHY THIS SCREEN IS DELIBERATELY DULL
-/// The secret is AES-256-GCM on the server under a key that never leaves that
-/// computer. This app therefore does the least it possibly can: it lists titles
-/// and usernames, and asks for one password at a time, only when someone taps
-/// Reveal. That is the whole design.
+/// THIS SCREEN USED TO DO THE LEAST IT POSSIBLY COULD, and the reasoning is
+/// worth keeping because it is still true about the risk:
 ///
-/// What it must never do, and does not:
-///   * fetch the passwords with the list. A list endpoint that returned secrets
-///     would put every one of them in this phone's memory — and in any crash
-///     report — to render a screen that shows none of them.
-///   * cache a revealed secret. It is held while the sheet is open and dropped
-///     when it closes. There is no copy to leak afterwards.
-///   * write one to disk. Nothing here touches storage, secure or otherwise.
+/// > The secret is AES-256-GCM on the server under a key that never leaves that
+/// > computer. This app lists titles and usernames and asks for one password at
+/// > a time, only when someone taps Reveal. It never fetches passwords with the
+/// > list, never caches a revealed one, and never writes one to disk. So the
+/// > exposure of a stolen phone is the session token — revocable from the
+/// > computer by changing the password — and NOT the vault.
 ///
-/// So the exposure of a stolen phone is the session token, which can be revoked
-/// from the computer by changing the password — token_version kills every
-/// existing session. It is not the vault.
+/// **That last sentence is no longer true, deliberately.** The owner asked, and
+/// then asked again, for the vault to work with the computer switched off. The
+/// consequence was stated plainly and accepted: a lost or stolen phone now
+/// carries the passwords, and recovery means changing all of them. Revoking the
+/// session token no longer helps, because the copy on the phone does not need
+/// one.
+///
+/// What stands between "on the phone" and "readable by whoever finds it":
+///   * the payload is sealed by `OfflineStore` under a key held in the Keychain
+///     / EncryptedSharedPreferences — not beside the database, which is only as
+///     private as the filesystem;
+///   * the passwords arrive by `GET /api/vault/sync`, which is rate limited to
+///     three calls per fifteen minutes and audited as its own action, so
+///     draining a vault is both hard and loud;
+///   * they are cached only when the owner has switched Working offline on, or
+///     the phone has actually been offline. A device that never leaves the house
+///     never holds them.
+///
+/// Reveal still prefers the computer and falls back to the cached copy, so an
+/// installation that never syncs behaves exactly as it always did.
 library;
 
 import 'package:flutter/material.dart';
@@ -24,6 +38,7 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../api.dart';
+import '../offline/records.dart';
 import '../session.dart';
 import '../theme.dart';
 import '../widgets/brand_button.dart';
@@ -48,15 +63,22 @@ class _VaultScreenState extends State<VaultScreen> {
     _load();
   }
 
+  /// True when this list came from the phone rather than the computer.
+  bool _fromCache = false;
+
   Future<void> _load() async {
     setState(() => _loading = true);
     try {
-      final d = await context.read<Session>().api.get('/api/vault');
+      // Through the offline layer, which knows that the vault's list lives at
+      // /api/vault/sync when it is being cached -- /api/vault returns metadata
+      // only, so caching that would give an offline vault every title and no
+      // password at all.
+      final loaded = await context
+          .read<OfflineRecords>()
+          .list(context.read<Session>().api, 'vault');
       setState(() {
-        _items = [
-          for (final e in ((d as Map)['items'] as List? ?? const []))
-            Map<String, dynamic>.from(e as Map)
-        ];
+        _items = loaded.rows;
+        _fromCache = loaded.fromCache;
         _loading = false;
         _error = null;
       });
@@ -71,6 +93,11 @@ class _VaultScreenState extends State<VaultScreen> {
   Future<void> _reveal(Map<String, dynamic> item) async {
     String? secret;
     String? failure;
+    var fromPhone = false;
+
+    // THE COMPUTER FIRST, ALWAYS. Its copy is the true one, the request is
+    // audited there, and an installation that never syncs then behaves exactly
+    // as it always did. The phone's copy is the fallback, not the default.
     try {
       final d = await context
           .read<Session>()
@@ -80,7 +107,17 @@ class _VaultScreenState extends State<VaultScreen> {
         secret = '${d['password'] ?? d['secret'] ?? d['value'] ?? ''}';
       }
     } on ApiError catch (e) {
-      failure = e.message;
+      // Only when the computer could not be REACHED. A refusal is the computer
+      // answering -- no permission, no such item, rate limited -- and quietly
+      // producing a cached password instead would hide exactly the answer the
+      // owner needs to see.
+      final cached = e.status == 0 ? '${item['password'] ?? ''}' : '';
+      if (cached.isNotEmpty) {
+        secret = cached;
+        fromPhone = true;
+      } else {
+        failure = e.message;
+      }
     }
     if (!mounted) return;
 
@@ -93,6 +130,7 @@ class _VaultScreenState extends State<VaultScreen> {
         username: '${item['username'] ?? ''}',
         secret: secret,
         failure: failure,
+        fromPhone: fromPhone,
       ),
     );
     // Nothing is retained: `secret` goes out of scope with the sheet, and there
@@ -179,6 +217,24 @@ class _VaultScreenState extends State<VaultScreen> {
               ),
             ),
           ),
+          // The vault is the one list where a stale copy can send somebody to a
+          // login box with last month's password, so say it plainly.
+          if (_fromCache && !_loading)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(14, 0, 14, 8),
+              child: Row(children: [
+                const Icon(Icons.cloud_off, size: 15, color: kWarn),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    'From this phone — not checked with your computer',
+                    style: TextStyle(
+                        fontSize: 12,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant),
+                  ),
+                ),
+              ]),
+            ),
           Expanded(
             child: _loading
                 ? const SkeletonList()
@@ -280,11 +336,18 @@ class _RevealSheet extends StatefulWidget {
     required this.username,
     required this.secret,
     required this.failure,
+    this.fromPhone = false,
   });
   final String title;
   final String username;
   final String? secret;
   final String? failure;
+
+  /// True when the computer could not be reached and this is the copy held on
+  /// this phone. Said on the sheet, because a password shown without comment
+  /// implies it was just checked against the computer -- and if it was changed
+  /// there this morning, this one is wrong.
+  final bool fromPhone;
 
   @override
   State<_RevealSheet> createState() => _RevealSheetState();
@@ -308,6 +371,25 @@ class _RevealSheetState extends State<_RevealSheet> {
               const SizedBox(height: 4),
               Text(widget.username,
                   style: Theme.of(context).textTheme.bodySmall),
+            ],
+            // Where this password came from, when it was not the computer.
+            // Shown before the secret, not after: somebody about to type it
+            // into a login box should know it may be out of date first.
+            if (widget.fromPhone) ...[
+              const SizedBox(height: 12),
+              Row(children: [
+                const Icon(Icons.cloud_off, size: 15, color: kWarn),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    'From this phone — your computer could not be reached, so '
+                    'this may be out of date',
+                    style: TextStyle(
+                        fontSize: 12,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant),
+                  ),
+                ),
+              ]),
             ],
             const SizedBox(height: 18),
             if (widget.failure != null)

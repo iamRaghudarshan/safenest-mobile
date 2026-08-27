@@ -70,7 +70,7 @@ void main() {
       // are here only because their screens are not wired yet — the reason
       // text says which is which, and this test does not care, because what
       // matters is that neither kind is left unexplained.
-      expect(blocked.keys, containsAll(<String>['vault', 'gallery', 'documents']));
+      expect(blocked.keys, containsAll(<String>['gallery', 'documents']));
       for (final entry in blocked.entries) {
         expect(entry.value, isNotNull);
         expect(entry.value!.length, greaterThan(20),
@@ -79,8 +79,29 @@ void main() {
       }
     });
 
-    test('VAULT IS NEVER OFFLINE — the key never leaves the computer', () {
-      expect(worksOffline.map((m) => m.key), isNot(contains('vault')));
+    // The vault WAS excluded, and is now included at the owner's explicit
+    // request. What is pinned is no longer "it must be absent" but the two
+    // things that make its presence defensible.
+    test('vault is offline now — the owner asked for it', () {
+      expect(worksOffline.map((m) => m.key), contains('vault'));
+    });
+
+    test('the vault is only cached when Working offline is ON', () async {
+      final store = OfflineStore(secure: memSecure(), path: inMemoryDatabasePath);
+      await store.clearEverything();
+      final off = OfflineRecords(store: store, mode: OfflineMode());
+
+      // Mode off and the computer unreachable: it must not have written a
+      // vault to disk on the way past. A phone that never leaves the house
+      // should never be holding the passwords.
+      try {
+        await off.list(Api(baseUrl: 'http://127.0.0.1:1'), 'vault');
+      } catch (_) {/* unreachable is fine; the point is what was stored */}
+      final held = await store.read('vault');
+      expect(held, isEmpty,
+          reason: 'the vault must not be cached until the owner turns Working '
+              'offline on');
+      await store.close();
     });
 
     // THE TEST THAT WOULD HAVE CAUGHT IT. The first version of this listed the
@@ -88,25 +109,25 @@ void main() {
     // test — so the test agreed with the typo instead of with the app, and
     // To-dos silently stopped being an offline module while the screen went on
     // promising it was one. Compare against the REAL specs.
-    test('every module promised offline is a real module key', () {
-      final real = {for (final m in kModules) m.key};
+    // Screens that were wired to the offline store BY HAND, rather than
+    // inheriting it from ModuleListScreen. Every addition here is a real piece
+    // of work on a real screen — the list exists so that promising a module
+    // offline requires having done it, not merely having meant to.
+    const wiredByHand = {'vault'};
+
+    test('every module promised offline is genuinely wired to the store', () {
+      final generic = {for (final m in kModules) m.key};
       for (final m in worksOffline) {
-        expect(real, contains(m.key),
-            reason: '"${m.key}" is not a key in kModules — the offline layer '
-                'looks modules up by that key, so it would quietly do nothing');
+        expect(generic.contains(m.key) || wiredByHand.contains(m.key), isTrue,
+            reason: '"${m.key}" is promised offline but nothing about it '
+                'touches the offline store — it is neither a module of '
+                'ModuleListScreen nor a screen wired by hand');
       }
     });
 
-    test('and is one ModuleListScreen actually drives', () {
-      // Only that screen was wired to the store. Notes and Habits have screens
-      // of their own, so the SERVER would take them but the phone cannot queue
-      // them — they belong in the other half until their screens are wired.
-      final generic = {for (final m in kModules) m.key};
-      for (final m in worksOffline) {
-        expect(generic, contains(m.key),
-            reason: '${m.key} does not go through ModuleListScreen, so nothing '
-                'about it touches the offline store');
-      }
+    test('Notes and Habits are NOT promised — their screens are not wired', () {
+      // The server would take both. The phone has no way to queue them yet, so
+      // listing them as working would be a promise the code does not keep.
       expect(worksOffline.map((m) => m.key), isNot(contains('notes')));
       expect(worksOffline.map((m) => m.key), isNot(contains('habits')));
     });
@@ -116,7 +137,7 @@ void main() {
       // and refused there would queue work that can never be delivered.
       const serverSyncable = {
         'expenses', 'loans', 'cards', 'insurance', 'investments',
-        'reminders', 'todos', 'notes', 'habits',
+        'reminders', 'todos', 'notes', 'habits', 'vault',
       };
       for (final m in worksOffline) {
         expect(serverSyncable, contains(m.key),
@@ -164,16 +185,17 @@ void main() {
       expect(tester.takeException(), isNull);
     });
 
-    testWidgets('names Expenses as working and Vault as not', (tester) async {
+    testWidgets('lists Vault as working, and Photos as not', (tester) async {
       _phone(tester);
       await tester.pumpWidget(_wrap(const OfflineScreen()));
       await tester.pump();
 
-      await tester.scrollUntilVisible(find.text('Vault'), 200,
-          scrollable: find.byType(Scrollable).first);
       expect(find.text('Expenses'), findsOneWidget);
       expect(find.text('Vault'), findsOneWidget);
-      expect(find.textContaining('key never leaves'), findsOneWidget);
+      await tester.scrollUntilVisible(find.text('Photos'), 200,
+          scrollable: find.byType(Scrollable).first);
+      expect(find.text('Photos'), findsOneWidget);
+      expect(find.textContaining('too large to hold twice'), findsOneWidget);
     });
 
     testWidgets('the switch reflects the setting', (tester) async {
@@ -192,6 +214,7 @@ void main() {
 
   group('records go to the right place', () {
     test('a module that is not offline-capable is never queued', () async {
+      // gallery, not vault — the vault syncs now.
       final store = OfflineStore(secure: memSecure(), path: inMemoryDatabasePath);
       await store.clearEverything();
       final records = OfflineRecords(store: store, mode: OfflineMode());
@@ -200,7 +223,7 @@ void main() {
       // non-capable one must throw instead of quietly filing work that the
       // sync endpoint would refuse for ever.
       await expectLater(
-        records.save(Api(baseUrl: 'http://127.0.0.1:1'), 'vault',
+        records.save(Api(baseUrl: 'http://127.0.0.1:1'), 'gallery',
             body: {'title': 'x'}),
         throwsA(anything),
       );

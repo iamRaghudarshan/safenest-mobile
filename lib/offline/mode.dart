@@ -52,6 +52,18 @@ const offlineModules = <OfflineNote>[
   OfflineNote('reminders', 'Reminders', null),
   OfflineNote('todos', 'To-dos', null),
 
+  // THE VAULT, at the owner's explicit request, twice asked for. It was out at
+  // first because passwords decrypted on the computer should not rest on a
+  // phone -- and that risk has not gone away: a lost phone now carries them,
+  // and recovery is changing every password. What makes it defensible is where
+  // they land (sealed under a Keychain key) and how they travel (a bulk
+  // endpoint rate limited to 3 calls per 15 minutes and separately audited).
+  //
+  // Cached ONLY while Working offline is switched on -- see
+  // OfflineRecords._mayCache. A phone that never leaves the house never holds
+  // them.
+  OfflineNote('vault', 'Vault', null),
+
   // Notes and Habits have screens of their own rather than going through
   // ModuleListScreen, so nothing about them touches the offline store yet. The
   // SERVER would accept them; the phone has no way to queue them. Listing them
@@ -64,9 +76,6 @@ const offlineModules = <OfflineNote>[
           'change.'),
 
   // And these three, each for a reason that is not going to change.
-  OfflineNote('vault', 'Vault',
-      'Passwords are unlocked on your computer and the key never leaves it. '
-          'Keeping a usable copy on your phone would undo that.'),
   OfflineNote('gallery', 'Photos',
       'Your library is far too large to hold twice. Backing up photos already '
           'has its own screen.'),
