@@ -84,6 +84,12 @@ void main() {
 
   Api api() => Api(baseUrl: _url, token: token);
 
+  /// Unique to this run. These tests write to a REAL database that is not
+  /// reset between runs, so a fixed title matched rows left by the last three
+  /// runs and "exactly once" failed with three. The marker keeps each run
+  /// counting only its own records.
+  final tag = DateTime.now().millisecondsSinceEpoch.toString().substring(7);
+
   setUpAll(() async {
     // flutter_test installs an HttpOverrides that answers every request with a
     // fake 400, which is right for unit tests and fatal here — the whole point
@@ -128,7 +134,7 @@ void main() {
     final local = await store.nextLocalId('expenses');
     await store.enqueue(module: 'expenses', op: Op.create, localId: local,
         payload: {
-          'note': 'Live end-to-end',
+          'note': 'Live end-to-end $tag',
           'amount': 123,
           'category': 'Food',
           'txn_date': '2026-08-26',
@@ -142,7 +148,7 @@ void main() {
 
     final after = await serverExpenses();
     expect(after.length, before + 1);
-    expect(after.where((e) => e['note'] == 'Live end-to-end').length, 1);
+    expect(after.where((e) => e['note'] == 'Live end-to-end $tag').length, 1);
   });
 
   test('THE ONE THAT MATTERS: a replay does not make a second record',
@@ -150,7 +156,7 @@ void main() {
     final local = await store.nextLocalId('expenses');
     await store.enqueue(module: 'expenses', op: Op.create, localId: local,
         payload: {
-          'note': 'Replay me',
+          'note': 'Replay me $tag',
           'amount': 55,
           'category': 'Travel',
           'txn_date': '2026-08-26',
@@ -170,7 +176,7 @@ void main() {
     expect(second.already, 1,
         reason: 'the server must recognise the uuid it already honoured');
     expect(
-        (await serverExpenses()).where((e) => e['note'] == 'Replay me').length,
+        (await serverExpenses()).where((e) => e['note'] == 'Replay me $tag').length,
         1,
         reason: 'a retry after a dropped reply must not duplicate the record');
   });
@@ -179,7 +185,7 @@ void main() {
     final local = await store.nextLocalId('expenses');
     await store.enqueue(module: 'expenses', op: Op.create, localId: local,
         payload: {
-          'note': 'Edit me',
+          'note': 'Edit me $tag',
           'amount': 10,
           'category': 'Other',
           'txn_date': '2026-08-26',
@@ -187,7 +193,7 @@ void main() {
     await sync.run();
 
     final made = (await serverExpenses())
-        .firstWhere((e) => e['note'] == 'Edit me')['id'] as int;
+        .firstWhere((e) => e['note'] == 'Edit me $tag')['id'] as int;
 
     await store.enqueue(module: 'expenses', op: Op.update, serverId: made,
         payload: {'note': 'Edited offline'});
@@ -208,14 +214,14 @@ void main() {
     final local = await store.nextLocalId('expenses');
     await store.enqueue(module: 'expenses', op: Op.create, localId: local,
         payload: {
-          'note': 'Conflict me',
+          'note': 'Conflict me $tag',
           'amount': 10,
           'category': 'Other',
           'txn_date': '2026-08-26',
         });
     await sync.run();
     final made = (await serverExpenses())
-        .firstWhere((e) => e['note'] == 'Conflict me')['id'] as int;
+        .firstWhere((e) => e['note'] == 'Conflict me $tag')['id'] as int;
 
     // Based on a copy from long before whatever the server now holds.
     await store.enqueue(module: 'expenses', op: Op.update, serverId: made,
@@ -229,15 +235,80 @@ void main() {
         reason: 'the local version is kept for the owner to decide about');
     expect(
         (await serverExpenses()).firstWhere((e) => e['id'] == made)['note'],
-        'Conflict me',
+        'Conflict me $tag',
         reason: 'the server\'s value must stand until the owner says otherwise');
   });
 
-  test('the vault is refused even if something asks for it', () async {
+  test('the vault syncs now, as the owner asked', () async {
     await store.enqueue(
-        module: 'vault', op: Op.create, localId: 1, payload: {'title': 'nope'});
+        module: 'vault', op: Op.create, localId: 1,
+        payload: {'title': 'Live vault item', 'password': 'not-a-real-one'});
     final r = await sync.run();
-    expect(r.saved, 0);
-    expect(r.refused, 1);
+    expect(r.saved, 1, reason: '${r.problems}');
+  });
+
+  test('a scan queued offline reaches the computer as one document', () async {
+    // REAL JPEGs, copied in. The scan endpoint assembles pages with Pillow, so
+    // bytes that merely start with a JPEG header are refused — which this test
+    // discovered by failing, and which is exactly the kind of thing a fake
+    // fixture hides. Generate them with scratchpad/mkpages.py and pass the
+    // paths in with --dart-define=SCAN_PAGES=a.jpg;b.jpg
+    const given = String.fromEnvironment('SCAN_PAGES');
+    final sources = given.split(';').where((x) => x.isNotEmpty).toList();
+    expect(sources, isNotEmpty,
+        reason: 'pass --dart-define=SCAN_PAGES with real JPEG paths');
+
+    final pages = <String>[];
+    for (var i = 0; i < sources.length; i++) {
+      final dst = File(p.join(dir.path, 'page_${i + 1}.jpg'));
+      await dst.writeAsBytes(await File(sources[i]).readAsBytes());
+      pages.add(dst.path);
+    }
+
+    await store.enqueueFiles(
+      module: 'documents',
+      paths: pages,
+      fields: {'title': 'Live scan $tag', 'category': 'other', 'notes': ''},
+    );
+    expect(await store.pendingFileCount(), 1);
+
+    final r = await sync.run();
+    expect(r.blocked, isFalse, reason: r.blockedReason ?? '');
+    // Surface WHY if it did not land — a bare "length 0" says nothing about
+    // whether the client failed to send or the computer refused it.
+    expect(r.problems, isEmpty, reason: 'sync reported: ${r.problems}');
+
+    // Ask the SERVER, not the client's own report.
+    final listed = await api().get('/api/documents');
+    final items = ((listed as Map)['items'] as List)
+        .map((e) => Map<String, dynamic>.from(e as Map))
+        .where((e) => '${e['title']}' == 'Live scan $tag')
+        .toList();
+    expect(items, hasLength(1),
+        reason: 'three pages must arrive as ONE document, not three');
+
+    expect(await store.pendingFileCount(), 0,
+        reason: 'the queue clears only when the computer confirms it');
+    for (final path in pages) {
+      expect(await File(path).exists(), isFalse,
+          reason: 'pages are deleted only AFTER the upload is confirmed — but '
+              'they must actually be deleted then, or the phone fills up');
+    }
+  });
+
+  test('a queued scan whose pages have vanished is dropped, not retried for ever',
+      () async {
+    final gone = p.join(dir.path, 'not_here.jpg');
+    await store.enqueueFiles(
+      module: 'documents',
+      paths: [gone],
+      fields: {'title': 'Vanished scan'},
+    );
+
+    await sync.run();
+
+    expect(await store.pendingFileCount(), 0,
+        reason: 'nothing can upload pages that are no longer on disk, and a '
+            'row that can never succeed must not sit in the queue for ever');
   });
 }
