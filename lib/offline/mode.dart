@@ -80,8 +80,14 @@ const offlineModules = <OfflineNote>[
   OfflineNote('gallery', 'Photos',
       'Your library is far too large to hold twice. Backing up photos already '
           'has its own screen.'),
+  // Half offline, and the reason says which half. Scanning works with the
+  // computer switched off -- the pages are written to this phone and sent on
+  // the next sync. OPENING a document you saved earlier still needs the
+  // computer, because those files are fetched when you tap them; holding the
+  // whole library here is a different and much larger thing.
   OfflineNote('documents', 'Documents',
-      'Files are downloaded from your computer when you open them.'),
+      'You can scan without your computer — the pages wait here and go on the '
+          'next sync. Opening documents you saved earlier still needs it.'),
 ];
 
 Iterable<OfflineNote> get worksOffline =>

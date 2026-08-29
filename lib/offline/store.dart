@@ -149,6 +149,59 @@ class MergedRecord {
   final bool isLocalOnly;
 }
 
+/// Scans and other uploads waiting to go, held as FILES rather than payloads.
+///
+/// A scanned page is a few megabytes of JPEG. Putting that through the same
+/// journal as an expense would mean base64 inside an encrypted JSON blob inside
+/// a row — several times the size, all of it in memory at once, for something
+/// the filesystem already stores perfectly well. So the bytes stay on disk and
+/// this table remembers where they are and what they were for.
+///
+/// `paths` is a newline-joined list because one scan is often several pages and
+/// they must arrive as ONE document, not five.
+const _pendingFilesDDL = '''
+  CREATE TABLE pending_files (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    module      TEXT    NOT NULL,
+    client_uuid TEXT    NOT NULL UNIQUE,
+    paths       TEXT    NOT NULL,
+    fields      TEXT    NOT NULL,
+    state       TEXT    NOT NULL,
+    tries       INTEGER NOT NULL DEFAULT 0,
+    last_error  TEXT,
+    created_at  TEXT    NOT NULL
+  )''';
+
+/// One upload waiting on this phone.
+@immutable
+class PendingFile {
+  const PendingFile({
+    required this.id,
+    required this.module,
+    required this.clientUuid,
+    required this.paths,
+    required this.fields,
+    required this.state,
+    required this.tries,
+    required this.lastError,
+    required this.createdAt,
+  });
+
+  final int id;
+  final String module;
+  final String clientUuid;
+
+  /// Every page, in order. A scan is one document however many pages it has.
+  final List<String> paths;
+  final Map<String, dynamic> fields;
+  final OpState state;
+  final int tries;
+  final String? lastError;
+  final DateTime createdAt;
+
+  String get title => '${fields['title'] ?? 'Untitled'}';
+}
+
 class OfflineStore {
   /// [path] replaces where the database file goes, whole. A PATH and not a
   /// directory, so a test can pass sqflite's in-memory name — joining that onto
@@ -172,13 +225,16 @@ class OfflineStore {
     final file = _pathOverride ?? p.join(await getDatabasesPath(), 'offline.db');
     return openDatabase(
       file,
-      version: 2,
+      version: 3,
       // v2 added `pending.action`. An upgrade rather than a recreate, because
       // by the time this shipped there were phones holding queued work in a v1
       // database — and that queue is the only copy of it anywhere.
       onUpgrade: (db, from, to) async {
         if (from < 2) {
           await db.execute('ALTER TABLE pending ADD COLUMN action TEXT');
+        }
+        if (from < 3) {
+          await db.execute(_pendingFilesDDL);
         }
       },
       onCreate: (db, _) async {
@@ -214,6 +270,7 @@ class OfflineStore {
         // Local ids for records created offline. A separate counter rather than
         // reusing pending.seq, because one offline record can have several
         // operations and they all have to point at the same thing.
+        await db.execute(_pendingFilesDDL);
         await db.execute('''
           CREATE TABLE local_ids (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -486,6 +543,87 @@ class OfflineStore {
     ];
   }
 
+  // ------------------------------------------------------- files waiting
+
+  /// Queue an upload whose payload is files on disk — a scan, typically.
+  ///
+  /// The bytes are NOT copied into the database. They are already somewhere the
+  /// app can read; what is stored is where, and what they were for.
+  Future<String> enqueueFiles({
+    required String module,
+    required List<String> paths,
+    Map<String, dynamic> fields = const {},
+  }) async {
+    final db = await _open;
+    final uuid = _uuid.v4();
+    await db.insert('pending_files', {
+      'module': module,
+      'client_uuid': uuid,
+      'paths': paths.join('\n'),
+      'fields': jsonEncode(fields),
+      'state': OpState.pending.name,
+      'tries': 0,
+      'created_at': DateTime.now().toIso8601String(),
+    });
+    return uuid;
+  }
+
+  /// The stored fields, or an empty map if the row cannot be read.
+  ///
+  /// A queued scan whose metadata will not decode is still a scan worth
+  /// uploading — the pages are the point, and a missing title is recoverable
+  /// where a discarded document is not.
+  static Map<String, dynamic> _decodeFields(Object? raw) {
+    try {
+      return Map<String, dynamic>.from(jsonDecode('$raw') as Map);
+    } catch (_) {
+      return <String, dynamic>{};
+    }
+  }
+
+  Future<List<PendingFile>> pendingFiles() async {
+    final db = await _open;
+    final rows = await db.query('pending_files', orderBy: 'id ASC');
+    return [
+      for (final r in rows)
+        PendingFile(
+          id: r['id'] as int,
+          module: '${r['module']}',
+          clientUuid: '${r['client_uuid']}',
+          paths: '${r['paths']}'.split('\n').where((x) => x.isNotEmpty).toList(),
+          fields: _decodeFields(r['fields']),
+          state: OpState.values.firstWhere((s) => s.name == '${r['state']}',
+              orElse: () => OpState.pending),
+          tries: (r['tries'] as int?) ?? 0,
+          lastError: r['last_error'] as String?,
+          createdAt: DateTime.tryParse('${r['created_at']}') ?? DateTime.now(),
+        )
+    ];
+  }
+
+  Future<int> pendingFileCount() async {
+    final db = await _open;
+    final r = await db.rawQuery('SELECT COUNT(*) c FROM pending_files');
+    return (r.first['c'] as int?) ?? 0;
+  }
+
+  /// Forget one upload because the computer confirmed THAT one.
+  ///
+  /// Deletes the queue row; the caller removes the files, because only it knows
+  /// whether they were copies this app made or originals somebody else owns.
+  Future<void> fileConfirmed(int id) async {
+    final db = await _open;
+    await db.delete('pending_files', where: 'id = ?', whereArgs: [id]);
+  }
+
+  Future<void> fileFailed(int id, String reason) async {
+    final db = await _open;
+    await db.rawUpdate(
+        'UPDATE pending_files SET state = ?, tries = tries + 1, '
+        'last_error = ? WHERE id = ?',
+        [OpState.failed.name, reason, id]);
+  }
+
   Future<int> pendingCount() async {
     final db = await _open;
     final r = await db.rawQuery('SELECT COUNT(*) c FROM pending');
@@ -567,6 +705,7 @@ class OfflineStore {
     final db = await _open;
     await db.delete('cache');
     await db.delete('pending');
+    await db.delete('pending_files');
     await db.delete('local_ids');
   }
 

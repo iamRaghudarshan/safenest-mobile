@@ -22,8 +22,10 @@
 library;
 
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:path/path.dart' as p;
 
 import '../api.dart';
 import 'records.dart';
@@ -144,7 +146,9 @@ class SyncService extends ChangeNotifier {
   /// the alternative is an app that will not start.
   Future<void> refreshPending() async {
     try {
-      _pending = await _store.pendingCount();
+      // Records AND files. A scan waiting on this phone is exactly as
+      // unbacked-up as an expense, and the badge must count it.
+      _pending = await _store.pendingCount() + await _store.pendingFileCount();
     } catch (e) {
       debugPrint('[sync] could not read the queue: $e');
     }
@@ -200,7 +204,12 @@ class SyncService extends ChangeNotifier {
         // Nothing to send is NOT nothing to do. Pressing Sync with an empty
         // outbox should still bring the computer's records down — that is what
         // somebody about to go out is asking for.
-        final problems = <String>[];
+        //
+        // And an empty RECORD queue is not an empty queue: a scan waiting on
+        // this phone lives in a different table, and returning here without
+        // sending it would leave it stranded for ever with the button
+        // cheerfully reporting nothing to do.
+        final problems = <String>[...await _sendFiles()];
         if (_records != null) {
           _step = 'Getting your records';
           notifyListeners();
@@ -306,6 +315,11 @@ class SyncService extends ChangeNotifier {
         notifyListeners();
       }
 
+      // Scans and other files held on this phone, sent before the pull so the
+      // refreshed lists already contain them.
+      final fileProblems = await _sendFiles();
+      problems.addAll(fileProblems);
+
       // AND NOW THE OTHER DIRECTION. Sync means "make this phone and that
       // computer agree", not "empty my outbox" — so once what was typed here
       // has gone up, everything comes back down. Without it a module never
@@ -338,6 +352,60 @@ class SyncService extends ChangeNotifier {
       _step = '';
       await refreshPending();
     }
+  }
+
+  /// Upload whatever files are queued — scanned documents, typically.
+  ///
+  /// Separate from the JSON journal because the payload is megabytes on disk
+  /// rather than a record. Same discipline though: one at a time, cleared only
+  /// when the computer confirms THAT one, and the pages are deleted only after
+  /// it has. Until then they are the only copy.
+  Future<List<String>> _sendFiles() async {
+    final waiting = await _store.pendingFiles();
+    if (waiting.isEmpty) return const [];
+
+    final problems = <String>{};
+    for (var i = 0; i < waiting.length; i++) {
+      final f = waiting[i];
+      _step = 'Sending ${f.title}';
+      notifyListeners();
+      try {
+        final parts = <({String name, List<int> bytes})>[];
+        for (final path in f.paths) {
+          final file = File(path);
+          if (await file.exists()) {
+            parts.add((name: p.basename(path), bytes: await file.readAsBytes()));
+          }
+        }
+        if (parts.isEmpty) {
+          // The pages are gone from disk — cleared by the system, or the
+          // folder wiped. Nothing can be uploaded and retrying will not bring
+          // them back, so the row goes rather than failing for ever.
+          await _store.fileConfirmed(f.id);
+          problems.add('The pages for "${f.title}" are no longer on this phone');
+          continue;
+        }
+        await _api().postMultipartFiles(
+          '/api/${f.module}/scan',
+          fileField: 'files',
+          files: parts,
+          fields: {for (final e in f.fields.entries) e.key: '${e.value}'},
+        );
+        await _store.fileConfirmed(f.id);
+        // Only now. The upload is confirmed, so these are no longer the only
+        // copy and the space can go back.
+        for (final path in f.paths) {
+          try {
+            await File(path).delete();
+          } catch (_) {/* the row is gone either way */}
+        }
+      } catch (e) {
+        await _store.fileFailed(f.id, _reason(e));
+        problems.add('"${f.title}" could not be sent');
+      }
+    }
+    notifyListeners();
+    return problems.toList();
   }
 
   Map<String, dynamic> _wire(PendingOp o) => {

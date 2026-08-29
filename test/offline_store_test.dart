@@ -336,4 +336,73 @@ void main() {
       await reopened.close();
     });
   });
+
+  group('scans held on this phone', () {
+    test('a queued scan keeps every page, in order', () async {
+      final s = await _store();
+      await s.enqueueFiles(
+        module: 'documents',
+        paths: ['/tmp/1_front.jpg', '/tmp/2_back.jpg'],
+        fields: {'title': 'Passport', 'category': 'id'},
+      );
+      final waiting = (await s.pendingFiles()).single;
+      expect(waiting.paths, ['/tmp/1_front.jpg', '/tmp/2_back.jpg'],
+          reason: 'a scan is ONE document however many pages it has, and the '
+              'order is the document');
+      expect(waiting.fields['title'], 'Passport');
+      expect(waiting.title, 'Passport');
+      await s.close();
+    });
+
+    test('it counts towards what is waiting', () async {
+      final s = await _store();
+      expect(await s.pendingFileCount(), 0);
+      await s.enqueueFiles(module: 'documents', paths: ['/tmp/a.jpg']);
+      expect(await s.pendingFileCount(), 1,
+          reason: 'a scan waiting here is exactly as unbacked-up as an expense');
+      await s.close();
+    });
+
+    test('confirming removes exactly that one', () async {
+      final s = await _store();
+      await s.enqueueFiles(
+          module: 'documents', paths: ['/tmp/a.jpg'], fields: {'title': 'A'});
+      await s.enqueueFiles(
+          module: 'documents', paths: ['/tmp/b.jpg'], fields: {'title': 'B'});
+      final first = (await s.pendingFiles()).first;
+
+      await s.fileConfirmed(first.id);
+
+      final left = await s.pendingFiles();
+      expect(left, hasLength(1));
+      expect(left.single.title, 'B');
+      await s.close();
+    });
+
+    test('a failure KEEPS the scan, with the reason', () async {
+      final s = await _store();
+      await s.enqueueFiles(
+          module: 'documents', paths: ['/tmp/a.jpg'], fields: {'title': 'A'});
+      final f = (await s.pendingFiles()).single;
+
+      await s.fileFailed(f.id, 'the computer did not answer');
+
+      final after = (await s.pendingFiles()).single;
+      expect(after.state, OpState.failed);
+      expect(after.tries, 1);
+      expect(after.lastError, 'the computer did not answer');
+      expect(await s.pendingFileCount(), 1,
+          reason: 'the pages are the only copy until this is uploaded');
+      await s.close();
+    });
+
+    test('unreadable metadata does not lose the pages', () async {
+      final s = await _store();
+      await s.enqueueFiles(module: 'documents', paths: ['/tmp/a.jpg']);
+      final f = (await s.pendingFiles()).single;
+      expect(f.paths, hasLength(1),
+          reason: 'a missing title is recoverable; a discarded scan is not');
+      await s.close();
+    });
+  });
 }

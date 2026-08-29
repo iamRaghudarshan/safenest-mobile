@@ -14,7 +14,9 @@
 ///
 /// THE SERVER ALREADY EXPECTED THIS. `POST /api/documents/scan` takes
 /// `files: list[UploadFile]` — one already-enhanced JPEG per page, in order —
-/// and assembles them into ONE multi-page PDF, up to 30 pages and 25 MB. Its
+/// and assembles them into ONE multi-page PDF, up to 30 pages. (It was 25 MB
+/// too; that cap is gone — settings.document_max_mb, 0 by default, because a
+/// ceiling this app invents is one the owner cannot argue with.) Its
 /// docstring says "the client sends already-enhanced JPEGs", which is precisely
 /// what a native scanner hands back. Nothing on the phone had ever called it.
 ///
@@ -29,7 +31,10 @@ import 'package:cunning_document_scanner/cunning_document_scanner.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
 import '../api.dart';
+import '../offline/store.dart';
 import '../masters.dart';
 import '../dates.dart';
 import '../session.dart';
@@ -123,6 +128,7 @@ class _ScanScreenState extends State<ScanScreen> {
       return;
     }
     final session = context.read<Session>();
+    final store = context.read<OfflineStore>();
     final navigator = Navigator.of(context);
     final messenger = ScaffoldMessenger.of(context);
 
@@ -145,24 +151,63 @@ class _ScanScreenState extends State<ScanScreen> {
         return;
       }
 
-      await session.api.postMultipartFiles(
-        '/api/documents/scan',
-        fileField: 'files',
-        files: files,
-        fields: {
-          'title': title,
-          'category': _category,
-          'notes': _notes.text.trim(),
-          if (_expiry != null)
-            'expiry_date':
-                '${_expiry!.year}-${_expiry!.month.toString().padLeft(2, '0')}'
-                    '-${_expiry!.day.toString().padLeft(2, '0')}',
-        },
-      );
+      final fields = {
+        'title': title,
+        'category': _category,
+        'notes': _notes.text.trim(),
+        if (_expiry != null)
+          'expiry_date':
+              '${_expiry!.year}-${_expiry!.month.toString().padLeft(2, '0')}'
+                  '-${_expiry!.day.toString().padLeft(2, '0')}',
+      };
+
+      var queued = false;
+      try {
+        await session.api.postMultipartFiles(
+          '/api/documents/scan',
+          fileField: 'files',
+          files: files,
+          fields: fields,
+        );
+      } on ApiError catch (e) {
+        // A REFUSAL IS NOT AN OUTAGE -- the same rule the record modules use.
+        // The computer answering "no" is something the owner can act on now,
+        // and queueing it would hide that behind a sync destined to fail the
+        // same way. Only a failure to REACH it is held here.
+        if (e.status > 0) rethrow;
+        // WRITTEN TO DISK FIRST. The scanner hands back bytes in memory, and
+        // memory does not survive the app closing -- which is exactly what
+        // happens between scanning something on the way out and syncing it
+        // that evening. Until this reaches the computer these files are the
+        // only copy, so nothing deletes them; that happens after the upload
+        // is confirmed.
+        final dir = Directory(p.join(
+            (await getApplicationDocumentsDirectory()).path,
+            'pending_scans',
+            DateTime.now().millisecondsSinceEpoch.toString()));
+        await dir.create(recursive: true);
+        final paths = <String>[];
+        for (var i = 0; i < files.length; i++) {
+          final f = File(p.join(dir.path, '${i + 1}_${files[i].name}'));
+          await f.writeAsBytes(files[i].bytes);
+          paths.add(f.path);
+        }
+        await store.enqueueFiles(
+          module: 'documents',
+          paths: paths,
+          fields: fields,
+        );
+        queued = true;
+      }
+
       navigator.pop(true);
       messenger.showSnackBar(SnackBar(
-          content: Text('Saved — ${files.length} '
-              '${files.length == 1 ? "page" : "pages"} in one document')));
+          content: Text(queued
+              ? 'Saved on this phone — ${files.length} '
+                  '${files.length == 1 ? "page" : "pages"}, send it with Sync'
+              : 'Saved — ${files.length} '
+                  '${files.length == 1 ? "page" : "pages"} in one document'),
+          duration: Duration(seconds: queued ? 4 : 2)));
     } on ApiError catch (e) {
       setState(() {
         _error = e.message;
