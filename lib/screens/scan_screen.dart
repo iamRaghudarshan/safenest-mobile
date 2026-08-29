@@ -120,7 +120,43 @@ class _ScanScreenState extends State<ScanScreen> {
     }
   }
 
-  Future<void> _save() async {
+
+  /// Hold a scan on this phone until it can be sent.
+  ///
+  /// WRITTEN TO DISK, not kept in memory. The scanner hands back bytes, and
+  /// memory does not survive the app closing -- which is exactly what happens
+  /// between scanning something on the way out and syncing it that evening.
+  /// These files are the only copy until the upload is confirmed, so nothing
+  /// here deletes them; the sync does, and only afterwards.
+  Future<void> _queue(OfflineStore store,
+      List<({List<int> bytes, String name})> files,
+      Map<String, String> fields) async {
+    final dir = Directory(p.join(
+        (await getApplicationDocumentsDirectory()).path,
+        'pending_scans',
+        DateTime.now().millisecondsSinceEpoch.toString()));
+    await dir.create(recursive: true);
+    final paths = <String>[];
+    for (var i = 0; i < files.length; i++) {
+      final f = File(p.join(dir.path, '${i + 1}_${files[i].name}'));
+      await f.writeAsBytes(files[i].bytes);
+      paths.add(f.path);
+    }
+    await store.enqueueFiles(
+      module: 'documents',
+      paths: paths,
+      fields: fields,
+    );
+  }
+
+  /// Where the owner asked this document to go.
+  ///
+  /// A CHOICE, not a fallback. The app used to decide for them — try the
+  /// computer, keep it here if that failed — which is right when nobody is
+  /// looking but wrong when somebody is: a person about to leave the house
+  /// knows perfectly well that they want this held on the phone, and should
+  /// not have to wait for a timeout to get that.
+  Future<void> _save({required bool toComputer}) async {
     if (_pages.isEmpty) return;
     final title = _title.text.trim();
     if (title.isEmpty) {
@@ -163,40 +199,30 @@ class _ScanScreenState extends State<ScanScreen> {
 
       var queued = false;
       try {
+        if (!toComputer) {
+          // Asked for the phone. Do not touch the network at all -- reaching
+          // for it first and failing over would make "keep it here" mean
+          // "try there, then here", which is a different promise.
+          throw const _KeepHere();
+        }
         await session.api.postMultipartFiles(
           '/api/documents/scan',
           fileField: 'files',
           files: files,
           fields: fields,
         );
+      } on _KeepHere {
+        await _queue(store, files, fields);
+        queued = true;
       } on ApiError catch (e) {
         // A REFUSAL IS NOT AN OUTAGE -- the same rule the record modules use.
         // The computer answering "no" is something the owner can act on now,
         // and queueing it would hide that behind a sync destined to fail the
         // same way. Only a failure to REACH it is held here.
         if (e.status > 0) rethrow;
-        // WRITTEN TO DISK FIRST. The scanner hands back bytes in memory, and
-        // memory does not survive the app closing -- which is exactly what
-        // happens between scanning something on the way out and syncing it
-        // that evening. Until this reaches the computer these files are the
-        // only copy, so nothing deletes them; that happens after the upload
-        // is confirmed.
-        final dir = Directory(p.join(
-            (await getApplicationDocumentsDirectory()).path,
-            'pending_scans',
-            DateTime.now().millisecondsSinceEpoch.toString()));
-        await dir.create(recursive: true);
-        final paths = <String>[];
-        for (var i = 0; i < files.length; i++) {
-          final f = File(p.join(dir.path, '${i + 1}_${files[i].name}'));
-          await f.writeAsBytes(files[i].bytes);
-          paths.add(f.path);
-        }
-        await store.enqueueFiles(
-          module: 'documents',
-          paths: paths,
-          fields: fields,
-        );
+        // Could not REACH it, and they wanted the computer. Hold it rather
+        // than lose it, and say which happened.
+        await _queue(store, files, fields);
         queued = true;
       }
 
@@ -337,17 +363,32 @@ class _ScanScreenState extends State<ScanScreen> {
                       style: TextStyle(color: theme.colorScheme.error)),
                 ],
                 const SizedBox(height: 18),
+                // TWO DESTINATIONS, BOTH OFFERED. The app used to decide by
+                // trying the computer and falling back, which is right when
+                // nobody is watching and wrong when somebody is: a person
+                // about to leave the house knows they want this held on the
+                // phone, and should not wait out a timeout to get it.
                 BrandButton(
                   label: 'Save to my computer',
                   icon: Icons.save_outlined,
                   block: true,
                   busy: _busy,
-                  onPressed: _busy ? null : _save,
+                  onPressed: _busy ? null : () => _save(toComputer: true),
+                ),
+                const SizedBox(height: 10),
+                OutlinedButton.icon(
+                  onPressed: _busy ? null : () => _save(toComputer: false),
+                  icon: const Icon(Icons.phone_iphone, size: 18),
+                  label: const Text('Keep on this phone'),
+                  style: OutlinedButton.styleFrom(
+                    minimumSize: const Size.fromHeight(48),
+                  ),
                 ),
                 const SizedBox(height: 10),
                 Text(
-                    'The text is read off it on your computer, so you can search '
-                    'for it later by what it says.',
+                    'Saved to your computer, the text is read off it so you can '
+                    'search by what it says. Kept on this phone, it waits here '
+                    'and goes on the next sync.',
                     textAlign: TextAlign.center,
                     style: theme.textTheme.bodySmall),
               ],
@@ -504,3 +545,11 @@ class _Waiting extends StatelessWidget {
       ]);
 }
 
+/// Thrown to route a scan straight to the phone's queue.
+///
+/// An exception rather than a branch so both destinations leave through the
+/// same path -- the one that writes the files, updates the badge and reports
+/// which happened. Two parallel routes would drift.
+class _KeepHere implements Exception {
+  const _KeepHere();
+}

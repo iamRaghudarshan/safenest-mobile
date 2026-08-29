@@ -25,6 +25,11 @@ class SyncScreen extends StatefulWidget {
 
 class _SyncScreenState extends State<SyncScreen> {
   List<PendingOp>? _ops;
+
+  /// Scans and other files waiting. They live in their own table, and leaving
+  /// them out meant a queued document was counted but never shown — somebody
+  /// looking at "1 change waiting" had no way to see WHAT.
+  List<PendingFile> _files = const [];
   String? _error;
 
   @override
@@ -37,9 +42,21 @@ class _SyncScreenState extends State<SyncScreen> {
   Future<void> _load() async {
     try {
       final sync = context.read<SyncService>();
+      final store = context.read<OfflineStore>();
       await sync.refreshPending();
+      // ACTUALLY READ THE QUEUE. `_ops` was only ever set from the test hook,
+      // so in the real app the "Waiting" list was always empty: the screen
+      // reported a count and could not say what it was counting. A queued scan
+      // was invisible, which is the worst case — it is the one thing somebody
+      // would open this screen to check on.
+      final ops = await store.allPending();
+      final files = await store.pendingFiles();
       if (!mounted) return;
-      setState(() => _error = null);
+      setState(() {
+        _ops = ops;
+        _files = files;
+        _error = null;
+      });
     } catch (e) {
       if (mounted) setState(() => _error = '$e');
     }
@@ -83,7 +100,9 @@ class _SyncScreenState extends State<SyncScreen> {
   Widget build(BuildContext context) {
     final sync = context.watch<SyncService>();
     final cs = Theme.of(context).colorScheme;
-    final waiting = _ops?.length ?? sync.pending;
+    final waiting = (_ops?.length ?? 0) + _files.length > 0
+        ? (_ops?.length ?? 0) + _files.length
+        : sync.pending;
 
     return Scaffold(
       appBar: AppBar(title: const Text('Sync')),
@@ -155,11 +174,12 @@ class _SyncScreenState extends State<SyncScreen> {
             const SizedBox(height: 12),
             Text(_error!, style: const TextStyle(color: kDanger)),
           ],
-          if ((_ops ?? const []).isNotEmpty) ...[
+          if ((_ops ?? const []).isNotEmpty || _files.isNotEmpty) ...[
             const SizedBox(height: 18),
             Text('Waiting', style: Theme.of(context).textTheme.titleSmall),
             const SizedBox(height: 6),
-            for (final o in _ops!) _OpRow(op: o),
+            for (final f in _files) _FileRow(file: f),
+            for (final o in _ops ?? const <PendingOp>[]) _OpRow(op: o),
           ],
         ],
       ),
@@ -196,6 +216,30 @@ class _OpRow extends StatelessWidget {
       subtitle: op.lastError == null
           ? null
           : Text(op.lastError!, style: const TextStyle(fontSize: 12)),
+    );
+  }
+}
+
+/// One scan or file waiting to be sent.
+class _FileRow extends StatelessWidget {
+  const _FileRow({required this.file});
+  final PendingFile file;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final bad = file.state == OpState.failed;
+    final pages = file.paths.length;
+    return ListTile(
+      dense: true,
+      contentPadding: EdgeInsets.zero,
+      leading: Icon(bad ? Icons.error_outline : Icons.document_scanner_outlined,
+          color: bad ? kWarn : cs.onSurfaceVariant, size: 20),
+      title: Text(file.title),
+      subtitle: Text(
+        file.lastError ?? '$pages ${pages == 1 ? 'page' : 'pages'} on this phone',
+        style: const TextStyle(fontSize: 12),
+      ),
     );
   }
 }
