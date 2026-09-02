@@ -36,6 +36,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
 import 'api.dart';
+import 'offline/store.dart';
 import 'discover.dart';
 
 enum BackupState { idle, scanning, running, paused, done, failed }
@@ -85,10 +86,18 @@ class BackupProgress {
 }
 
 class BackupService extends ChangeNotifier {
-  BackupService(this._api);
+  // The lint wants `this._ledger`. Dart forbids a named parameter starting
+  // with an underscore, so its suggestion does not compile.
+  // ignore: prefer_initializing_formals
+  BackupService(this._api, {OfflineStore? ledger}) : _ledger = ledger;
 
   final Api _api;
+
+  /// Where "already backed up" is remembered. Optional so existing callers and
+  /// tests keep working; without it the old SharedPreferences list is used.
+  final OfflineStore? _ledger;
   static const _sentKey = 'backup.sent.ids';
+  static const _migratedKey = 'backup.ledger.migrated';
   // Set once the one-time "fill in durations for already-uploaded videos" pass has
   // run, so it never repeats its extra hashing on later backups.
   static const _backfillKey = 'backup.durations.backfilled';
@@ -156,17 +165,51 @@ class BackupService extends ChangeNotifier {
   Future<void> load() async {
     final prefs = await SharedPreferences.getInstance();
     _sent = (prefs.getStringList(_sentKey) ?? const <String>[]).toSet();
+
+    // Carry an older installation's list into the ledger once, then stop
+    // reading it. Those ids know nothing about modified time or size, so they
+    // go in with zeroes and are treated as "unchanged" -- upgrading must not
+    // make somebody re-hash a library the phone already knew about.
+    final led = _ledger;
+    if (led != null && _sent.isNotEmpty && !(prefs.getBool(_migratedKey) ?? false)) {
+      try {
+        await led.importBackedUpIds(_sent);
+        await prefs.setBool(_migratedKey, true);
+      } catch (_) {
+        // Not fatal: the run below still works from the old list.
+      }
+    }
   }
 
-  Future<void> _remember(String id) async {
-    _sent.add(id);
-    // Written in batches by the caller rather than per photo: 20,000 individual
-    // writes to disk during a first backup is its own performance problem.
+  /// Assets confirmed backed up this run, written per page rather than per
+  /// photo: twenty thousand individual writes during a first backup is its own
+  /// performance problem, which is why the list this replaces batched too.
+  final List<({String id, int modified, int size})> _ledgerBatch = [];
+
+  /// Remember an asset with enough about it to know it has not changed.
+  void _rememberAsset(AssetEntity a) {
+    _sent.add(a.id);
+    _ledgerBatch.add((
+      id: a.id,
+      modified: a.modifiedDateTime.millisecondsSinceEpoch,
+      size: a.width * a.height,
+    ));
   }
 
   Future<void> _flush() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setStringList(_sentKey, _sent.toList());
+    final led = _ledger;
+    if (led != null && _ledgerBatch.isNotEmpty) {
+      try {
+        await led.markBackedUp(List.of(_ledgerBatch));
+        _ledgerBatch.clear();
+      } catch (_) {
+        // Kept for the next flush rather than dropped: losing the record means
+        // reading those files again on the next run, which is the cost this
+        // whole ledger exists to avoid.
+      }
+    }
   }
 
   /// Forget what has already been sent, so the next run offers everything again.
@@ -198,6 +241,14 @@ class BackupService extends ChangeNotifier {
     _sent.clear();
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_sentKey);
+    // THE LEDGER IS THE SAME MEMORY IN A BETTER SHAPE, so it clears with it.
+    // Leaving it behind would make "offer everything again" offer nothing:
+    // the cheap skip would recognise every asset and the run would end
+    // reporting a clean success having sent not one photo.
+    try {
+      await _ledger?.clearBackedUp();
+      await prefs.remove(_migratedKey);
+    } catch (_) {/* the list above is cleared either way */}
     _emit(const BackupProgress(
         message: 'Ready to check every photo again. Nothing has been deleted '
             'from this phone.'));
@@ -514,6 +565,9 @@ class BackupService extends ChangeNotifier {
     if (shouldReoffer(serverCount, lastCount)) {
       _sent.clear();
       await prefs.remove(_sentKey);
+      try {
+        await _ledger?.clearBackedUp();
+      } catch (_) {/* the list above is cleared either way */}
     }
     if (serverCount != null) await prefs.setInt(_lastCountKey, serverCount);
 
@@ -562,6 +616,40 @@ class BackupService extends ChangeNotifier {
       if (_stop) break;
       final batch = await all.getAssetListRange(start: offset, end: offset + page);
       var todo = batch.where((a) => !_sent.contains(a.id)).toList();
+      // THE CHEAP SKIP, AND THE WHOLE REASON A REPEAT BACKUP IS NOW FAST.
+      //
+      // Deciding "have I sent this?" used to mean opening the file and hashing
+      // every byte before asking the computer -- a read of the entire library,
+      // tens of gigabytes, performed to ask a question. That is what "the
+      // backup keeps running for a long time" actually was.
+      //
+      // An asset whose id, modified time and size all match the ledger is
+      // skipped here without the file being touched at all. Hashing survives
+      // below for what is genuinely NEW, where the bytes have to be read anyway
+      // in order to upload them.
+      //
+      // Modified time and size are what make it safe: an id alone would skip a
+      // photo edited in place -- same id, different picture -- and it would
+      // never reach the computer.
+      final led = _ledger;
+      if (led != null && todo.isNotEmpty) {
+        try {
+          final known = await led.alreadyBackedUp([
+            for (final a in todo)
+              (
+                id: a.id,
+                modified: a.modifiedDateTime.millisecondsSinceEpoch,
+                size: a.width * a.height,
+              )
+          ]);
+          if (known.isNotEmpty) {
+            todo = todo.where((a) => !known.contains(a.id)).toList();
+          }
+        } catch (_) {
+          // A ledger that cannot be read is no reason to skip the backup: fall
+          // through and let the slower hash-and-ask path do its job.
+        }
+      }
       handledSkip += batch.length - todo.length;
 
       // ASK THE COMPUTER WHAT IT ALREADY HAS, before sending anything.
@@ -581,7 +669,7 @@ class BackupService extends ChangeNotifier {
         final known = await _serverAlreadyHas(todo);
         if (known.isNotEmpty) {
           for (final a in todo) {
-            if (known.contains(a.id)) await _remember(a.id);
+            if (known.contains(a.id)) _rememberAsset(a);
           }
           final before = todo.length;
           todo = todo.where((a) => !known.contains(a.id)).toList();
@@ -812,7 +900,7 @@ class BackupService extends ChangeNotifier {
       final r = await _upload(bytes, asset.title ?? '${asset.id}.jpg',
           durationMs: asset.duration > 0 ? asset.duration * 1000 : 0);
       if (r.status >= 200 && r.status < 300) {
-        await _remember(asset.id);
+        _rememberAsset(asset);
         // A video's poster comes from the phone, which decodes HEVC where the
         // computer's OpenCV cannot — without it every iPhone clip showed the
         // neutral "black" tile. Best effort, keyed by the same hash the server

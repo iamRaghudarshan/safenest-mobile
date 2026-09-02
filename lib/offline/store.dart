@@ -172,6 +172,38 @@ const _pendingFilesDDL = '''
     created_at  TEXT    NOT NULL
   )''';
 
+/// What this phone has already backed up, and enough about each item to know
+/// it has not changed since.
+///
+/// THE POINT OF THIS TABLE IS THE WORK IT AVOIDS. The backup used to decide
+/// "have I sent this?" by hashing the file — sha256 over every byte — and then
+/// asking the computer. That is a read of the entire photo library, tens of
+/// gigabytes, performed to ask a question. It is why a repeat backup "keeps
+/// running for a long time".
+///
+/// Google Photos does not do that, and neither does this now: an asset whose
+/// id, modified time and size all match a row here is skipped without the file
+/// being opened at all. Hashing is kept for what is genuinely NEW, where the
+/// file has to be read anyway to upload it.
+///
+/// `modified` and `size` are what make it safe. An id alone would skip a photo
+/// that had been edited in place — same id, different picture — and it would
+/// never reach the computer.
+///
+/// In SQLite rather than the StringList this replaces: twenty thousand ids in
+/// SharedPreferences is a multi-megabyte blob rewritten whole on every save and
+/// re-parsed at every launch.
+const _ledgerDDL = '''
+  CREATE TABLE backup_ledger (
+    asset_id TEXT PRIMARY KEY,
+    modified INTEGER NOT NULL DEFAULT 0,
+    size     INTEGER NOT NULL DEFAULT 0,
+    sent_at  TEXT    NOT NULL
+  )''';
+
+const _ledgerIndexDDL =
+    'CREATE INDEX idx_ledger_sent ON backup_ledger(sent_at)';
+
 /// One upload waiting on this phone.
 @immutable
 class PendingFile {
@@ -225,7 +257,7 @@ class OfflineStore {
     final file = _pathOverride ?? p.join(await getDatabasesPath(), 'offline.db');
     return openDatabase(
       file,
-      version: 3,
+      version: 4,
       // v2 added `pending.action`. An upgrade rather than a recreate, because
       // by the time this shipped there were phones holding queued work in a v1
       // database — and that queue is the only copy of it anywhere.
@@ -235,6 +267,10 @@ class OfflineStore {
         }
         if (from < 3) {
           await db.execute(_pendingFilesDDL);
+        }
+        if (from < 4) {
+          await db.execute(_ledgerDDL);
+          await db.execute(_ledgerIndexDDL);
         }
       },
       onCreate: (db, _) async {
@@ -271,6 +307,8 @@ class OfflineStore {
         // reusing pending.seq, because one offline record can have several
         // operations and they all have to point at the same thing.
         await db.execute(_pendingFilesDDL);
+        await db.execute(_ledgerDDL);
+        await db.execute(_ledgerIndexDDL);
         await db.execute('''
           CREATE TABLE local_ids (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -543,6 +581,90 @@ class OfflineStore {
     ];
   }
 
+  // --------------------------------------------------- what is backed up
+
+  /// Which of these assets are already backed up, unchanged.
+  ///
+  /// One query for the whole page rather than one per asset: the caller is
+  /// asking about two hundred at a time and a round trip each would put the
+  /// cost back where this table exists to remove it.
+  Future<Set<String>> alreadyBackedUp(
+      List<({String id, int modified, int size})> assets) async {
+    if (assets.isEmpty) return const {};
+    final db = await _open;
+    final ids = assets.map((a) => a.id).toList();
+    final marks = List.filled(ids.length, '?').join(',');
+    final rows = await db.rawQuery(
+        'SELECT asset_id, modified, size FROM backup_ledger '
+        'WHERE asset_id IN ($marks)', ids);
+
+    final held = {
+      for (final r in rows)
+        '${r['asset_id']}': (
+          modified: (r['modified'] as int?) ?? 0,
+          size: (r['size'] as int?) ?? 0,
+        )
+    };
+
+    return {
+      for (final a in assets)
+        if (held.containsKey(a.id) &&
+            // A row written before this carried modified/size has zeroes; treat
+            // it as a match so an existing installation is not made to re-hash
+            // its whole library the first time it runs this version.
+            (held[a.id]!.modified == 0 ||
+                (held[a.id]!.modified == a.modified &&
+                    held[a.id]!.size == a.size)))
+          a.id
+    };
+  }
+
+  /// Record a page of assets as backed up, in one transaction.
+  Future<void> markBackedUp(
+      List<({String id, int modified, int size})> assets) async {
+    if (assets.isEmpty) return;
+    final db = await _open;
+    final now = DateTime.now().toIso8601String();
+    await db.transaction((tx) async {
+      final batch = tx.batch();
+      for (final a in assets) {
+        batch.insert(
+          'backup_ledger',
+          {'asset_id': a.id, 'modified': a.modified, 'size': a.size,
+           'sent_at': now},
+          conflictAlgorithm: ConflictAlgorithm.replace,
+        );
+      }
+      await batch.commit(noResult: true);
+    });
+  }
+
+  Future<int> backedUpCount() async {
+    final db = await _open;
+    final r = await db.rawQuery('SELECT COUNT(*) c FROM backup_ledger');
+    return (r.first['c'] as int?) ?? 0;
+  }
+
+  /// Forget everything backed up, so the next run offers the whole library.
+  Future<void> clearBackedUp() async {
+    final db = await _open;
+    await db.delete('backup_ledger');
+  }
+
+  /// Carry an older installation's list of ids across.
+  ///
+  /// Those came from SharedPreferences and know only the id — no modified time,
+  /// no size. They are stored with zeroes, which `alreadyBackedUp` treats as
+  /// "matches", so upgrading does not make somebody re-hash their whole library
+  /// to learn what the phone already knew.
+  Future<void> importBackedUpIds(Iterable<String> ids) async {
+    final list = ids.toList();
+    if (list.isEmpty) return;
+    await markBackedUp([
+      for (final id in list) (id: id, modified: 0, size: 0)
+    ]);
+  }
+
   // ------------------------------------------------------- files waiting
 
   /// Queue an upload whose payload is files on disk — a scan, typically.
@@ -706,6 +828,7 @@ class OfflineStore {
     await db.delete('cache');
     await db.delete('pending');
     await db.delete('pending_files');
+    await db.delete('backup_ledger');
     await db.delete('local_ids');
   }
 

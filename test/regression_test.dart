@@ -14,6 +14,7 @@ import 'package:safenest/screens/collections_home.dart';
 import 'package:safenest/screens/gallery_screen.dart';
 import 'package:safenest/screens/library_tabs.dart';
 import 'package:safenest/screens/photos_home.dart';
+import 'package:safenest/offline/store.dart';
 import 'package:safenest/session.dart';
 import 'package:safenest/theme.dart';
 
@@ -69,8 +70,15 @@ void main() {
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.reset);
 
-      await tester.pumpWidget(ChangeNotifierProvider<Session>(
-        create: (_) => Session(),
+      // PhotosHome builds the BackupService, which now takes the offline
+      // store as its ledger -- that ledger is what makes a repeat backup fast
+      // instead of re-hashing the whole library, so it is not optional in the
+      // real app and the test provides it rather than the code degrading.
+      await tester.pumpWidget(MultiProvider(
+        providers: [
+          ChangeNotifierProvider<Session>(create: (_) => Session()),
+          Provider<OfflineStore>(create: (_) => OfflineStore()),
+        ],
         child: MaterialApp(
           theme: buildTheme(const Brand(), Brightness.light),
           home: const PhotosHome(),

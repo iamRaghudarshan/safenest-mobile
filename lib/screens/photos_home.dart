@@ -19,6 +19,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../backup.dart';
+import '../offline/store.dart';
 import '../session.dart';
 import '../theme.dart';
 import '../widgets/brand_button.dart';
@@ -54,7 +55,9 @@ class _PhotosHomeState extends State<PhotosHome> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _backup ??= (BackupService(context.read<Session>().api)..load());
+    _backup ??= (BackupService(context.read<Session>().api,
+        ledger: context.read<OfflineStore>())
+      ..load());
   }
 
   @override

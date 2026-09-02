@@ -27,6 +27,7 @@ import 'package:photo_manager/photo_manager.dart';
 import 'package:provider/provider.dart';
 
 import '../backup.dart';
+import '../offline/store.dart';
 import '../session.dart';
 import '../theme.dart';
 import '../widgets/backup_flight.dart';
@@ -55,7 +56,12 @@ class _BackupScreenState extends State<BackupScreen> {
   void initState() {
     super.initState();
     if (widget.debugProgress != null) return;
-    final s = widget.service ?? BackupService(context.read<Session>().api);
+    // The ledger is what makes a repeat backup fast -- without it the
+    // service falls back to hashing the whole library to ask what is
+    // already there. Passing it is not optional in the real app.
+    final s = widget.service ??
+        BackupService(context.read<Session>().api,
+            ledger: context.read<OfflineStore>());
     _owns = widget.service == null;
     s.addListener(_onChange);
     if (_owns) s.load();
