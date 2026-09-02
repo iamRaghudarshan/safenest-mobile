@@ -915,8 +915,14 @@ class BackupService extends ChangeNotifier {
       // Send the real duration: the computer reads it off the video with OpenCV,
       // which is unreliable on iPhone HEVC and left every clip showing "0:01".
       // `asset.duration` is seconds (0 for a photo).
-      final r = await _upload(bytes, asset.title ?? '${asset.id}.jpg',
-          durationMs: asset.duration > 0 ? asset.duration * 1000 : 0);
+      // Large files go up in resumable pieces so a break does not send them
+      // again from nothing; photos keep the one-shot path, which has been
+      // driven hard and works.
+      final label = asset.title ?? '${asset.id}.jpg';
+      final ms = asset.duration > 0 ? asset.duration * 1000 : 0;
+      final r = bytes.length >= _resumeFrom
+          ? await _uploadResumable(bytes, label, asset.id, durationMs: ms)
+          : await _upload(bytes, label, durationMs: ms);
       if (r.status >= 200 && r.status < 300) {
         _rememberAsset(asset);
         // A video's poster comes from the phone, which decodes HEVC where the
@@ -1002,5 +1008,76 @@ class BackupService extends ChangeNotifier {
     } catch (_) {
       return (status: 0, body: const <String, dynamic>{});
     }
+  }
+
+  /// Anything at least this big goes up in pieces that can be resumed.
+  ///
+  /// Photos do not need it: a few megabytes either arrives or does not, and
+  /// the one-shot path above has been driven hard and works. Videos are the
+  /// whole problem -- a 300 MB clip that died at 280 MB used to start again
+  /// from nothing, which on a home upstream measured at 0.76 MB/s means it
+  /// never finishes however many times it is retried.
+  static const _resumeFrom = 16 * 1024 * 1024;
+
+  /// Send a large file in pieces, continuing from whatever the computer holds.
+  ///
+  /// The upload id comes from the ASSET, not from this attempt. A fresh id
+  /// each time would orphan the half-sent copy on the computer and start again
+  /// from zero -- the very thing this exists to stop.
+  Future<({int status, Map<String, dynamic> body})> _uploadResumable(
+      Uint8List bytes, String name, String assetId,
+      {int durationMs = 0}) async {
+    final id = 'a${assetId.replaceAll(RegExp(r'[^A-Za-z0-9]'), '')}';
+    final total = bytes.length;
+    final safe = name
+        .replaceAll(RegExp(r'[\r\n"\\]'), '_')
+        .replaceAll(RegExp(r'[\x00-\x1f]'), '_');
+    final q = 'upload_id=$id&filename=$safe'
+        '${durationMs > 0 ? '&duration_ms=$durationMs' : ''}';
+
+    var sent = 0;
+    try {
+      final st = await _net.get('/api/gallery/upload/status?upload_id=$id');
+      final have = (st is Map ? (st['received'] as num?)?.toInt() : null) ?? 0;
+      // A part at least as big as the file means the asset changed under the
+      // same id. Continuing from there would splice two different videos
+      // together, so throw it away and start again.
+      if (have > 0 && have < total) {
+        sent = have;
+      } else if (have >= total) {
+        await _net.post('/api/gallery/upload/abandon?upload_id=$id', null);
+      }
+    } catch (_) {
+      // No status route means an older computer. Fall back to one shot rather
+      // than failing -- the album_id lesson in one line: never assume the far
+      // end is as new as this app.
+      return _upload(bytes, name, durationMs: durationMs);
+    }
+
+    const chunk = 4 * 1024 * 1024;
+    while (sent < total) {
+      if (_stop) return (status: 0, body: const <String, dynamic>{});
+      final end = (sent + chunk) > total ? total : sent + chunk;
+      final last = end == total;
+      final r = await _postUploadRaw(
+        '/api/gallery/upload/chunk?$q&offset=$sent&total=${last ? total : 0}',
+        bytes.sublist(sent, end),
+        'application/octet-stream',
+      );
+      if (r.status == 409) {
+        // The computer holds a different amount than we believed. Ask it
+        // rather than guessing; if it agrees with us then the disagreement is
+        // not one we can resolve and the failure is reported honestly.
+        final st = await _net.get('/api/gallery/upload/status?upload_id=$id');
+        final have = (st is Map ? (st['received'] as num?)?.toInt() : null) ?? 0;
+        if (have == sent) return r;
+        sent = have;
+        continue;
+      }
+      if (r.status != 200) return r;
+      sent = end;
+      if (last) return r;
+    }
+    return (status: 0, body: const <String, dynamic>{});
   }
 }
