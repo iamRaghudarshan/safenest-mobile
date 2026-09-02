@@ -832,6 +832,13 @@ class BackupService extends ChangeNotifier {
       _blame(asset, switch (r.status) {
         0 => 'your computer could not be reached. Check it is awake and that '
             'the address in Profile is right.',
+        // A TIMEOUT IS NOT UNREACHABLE. Both used to arrive here as 0, so a
+        // large video that simply needed longer was reported as a computer
+        // that was asleep -- and somebody spent their time checking a machine
+        // that had been awake throughout. Videos are almost always what this
+        // is, so the advice names the thing that actually helps.
+        kTimedOut => 'it took too long to send. Large videos need a fast '
+            'connection - try again on the same wifi as your computer.',
         401 => 'your session has expired. Sign out and back in.',
         402 => 'the licence on your computer needs attention — photos cannot '
             'be added until it does.',

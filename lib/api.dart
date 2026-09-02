@@ -16,11 +16,20 @@
 /// Profile screen advertised somebody else's domain as "your web address".
 library;
 
+import 'dart:async';
 import 'dart:convert';
+
+import 'package:flutter/foundation.dart';
 import 'dart:typed_data' show BytesBuilder;
 import 'dart:io';
 
 import 'package:http/http.dart' as http;
+
+/// An upload that ran out of time rather than failing to connect.
+///
+/// Negative so it can never collide with an HTTP status, and distinct from 0,
+/// which means "could not reach it at all".
+const int kTimedOut = -2;
 
 class ApiError implements Exception {
   ApiError(this.status, this.message, {this.offline = false, this.licence});
@@ -301,6 +310,27 @@ class Api {
   /// worked: /api/gallery/upload answers 200 for a photo it already had, with
   /// `duplicate: true` in the body. Counting that as a new upload is how a
   /// backup reported thousands sent while the gallery gained none.
+  /// How long to allow for a body of this size.
+  ///
+  /// A FLAT FIVE MINUTES WAS THE BUG. backup.dart measured 51 MB in 67 seconds
+  /// over the tunnel -- about 0.76 MB/s on a home upstream -- so a 250 MB clip
+  /// needs five and a half minutes and timed out at five. Worse, every
+  /// exception here became `status: 0`, which the backup screen reports as
+  /// "your computer could not be reached", sending somebody to check a network
+  /// that was working perfectly. Reported by a customer: 1,137 photos through,
+  /// 22 videos refused, all blamed on reachability.
+  ///
+  /// Allows 100 KB/s, which is well below the measured rate, with a five-minute
+  /// floor. A timeout is a last resort against something genuinely stuck, not a
+  /// budget for how fast an upload ought to be.
+  @visibleForTesting
+  static Duration uploadTimeout(int bytes) => _uploadTimeout(bytes);
+
+  static Duration _uploadTimeout(int bytes) {
+    final seconds = bytes ~/ 100000;
+    return Duration(seconds: seconds < 300 ? 300 : seconds);
+  }
+
   Future<({int status, Map<String, dynamic> body})> postRawResult(
       String path, List<int> body, String contentType) async {
     try {
@@ -311,7 +341,7 @@ class Api {
                 if (token != null) 'Authorization': 'Bearer $token',
               },
               body: body)
-          .timeout(const Duration(minutes: 5));
+          .timeout(_uploadTimeout(body.length));
       Map<String, dynamic> parsed = const {};
       try {
         final d = jsonDecode(res.body);
@@ -321,6 +351,12 @@ class Api {
         // status code says succeeded.
       }
       return (status: res.statusCode, body: parsed);
+    } on TimeoutException {
+      // NOT the same as unreachable, and saying so matters: one means check
+      // the network, the other means the file is large or the link is slow.
+      // Collapsing both into 0 is what had a customer checking a computer that
+      // was awake the whole time.
+      return (status: kTimedOut, body: const <String, dynamic>{});
     } catch (_) {
       return (status: 0, body: const <String, dynamic>{});
     }
