@@ -184,7 +184,16 @@ class BackupService extends ChangeNotifier {
   /// Assets confirmed backed up this run, written per page rather than per
   /// photo: twenty thousand individual writes during a first backup is its own
   /// performance problem, which is why the list this replaces batched too.
-  final List<({String id, int modified, int size})> _ledgerBatch = [];
+  final List<({String id, int modified, int signature})> _ledgerBatch = [];
+
+  /// Cheap identity for an asset, from metadata the phone already holds.
+  ///
+  /// Width, height and duration. NOT the byte size, which would be a better
+  /// signal and costs the one thing the ledger exists to avoid: opening the
+  /// file. Duration is in because a re-encoded video very often keeps its
+  /// dimensions, and without it a shortened clip would look unchanged.
+  static int _signatureOf(AssetEntity a) =>
+      (a.width * 31 + a.height) * 31 + a.duration;
 
   /// Remember an asset with enough about it to know it has not changed.
   void _rememberAsset(AssetEntity a) {
@@ -192,7 +201,7 @@ class BackupService extends ChangeNotifier {
     _ledgerBatch.add((
       id: a.id,
       modified: a.modifiedDateTime.millisecondsSinceEpoch,
-      size: a.width * a.height,
+      signature: _signatureOf(a),
     ));
   }
 
@@ -612,6 +621,15 @@ class BackupService extends ChangeNotifier {
           message: 'Backing up…',
         ));
 
+    // NEWEST FIRST, and it is the ordering Google Photos uses for a reason.
+    //
+    // The library comes back newest-first from the platform, and this used to
+    // walk it from offset 0 upward -- which IS newest-first. Stated here rather
+    // than left to be rediscovered: if a future change sorts the album or
+    // reverses this loop, the photos taken this morning would be protected only
+    // after everything from 2019 had finished, and on a first backup over a
+    // home connection that is hours. The most recent pictures are the ones not
+    // yet anywhere else, so they are the ones that matter most.
     for (var offset = 0; offset < count; offset += page) {
       if (_stop) break;
       final batch = await all.getAssetListRange(start: offset, end: offset + page);
@@ -639,7 +657,7 @@ class BackupService extends ChangeNotifier {
               (
                 id: a.id,
                 modified: a.modifiedDateTime.millisecondsSinceEpoch,
-                size: a.width * a.height,
+                signature: _signatureOf(a),
               )
           ]);
           if (known.isNotEmpty) {

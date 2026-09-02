@@ -21,9 +21,9 @@ Future<OfflineStore> _store() async {
   return s;
 }
 
-({String id, int modified, int size}) _a(String id,
-        {int modified = 1000, int size = 500}) =>
-    (id: id, modified: modified, size: size);
+({String id, int modified, int signature}) _a(String id,
+        {int modified = 1000, int signature = 500}) =>
+    (id: id, modified: modified, signature: signature);
 
 void main() {
   setUpAll(() {
@@ -51,19 +51,19 @@ void main() {
 
     test('a photo EDITED IN PLACE is not skipped', () async {
       final s = await _store();
-      await s.markBackedUp([_a('p1', modified: 1000, size: 500)]);
+      await s.markBackedUp([_a('p1', modified: 1000, signature: 500)]);
       // Same id, later modified time: the picture changed.
-      final known = await s.alreadyBackedUp([_a('p1', modified: 2000, size: 500)]);
+      final known = await s.alreadyBackedUp([_a('p1', modified: 2000, signature: 500)]);
       expect(known, isEmpty,
           reason: 'an id alone would skip it and the new version would never '
               'reach the computer — this is why modified time is stored');
       await s.close();
     });
 
-    test('a photo whose size changed is not skipped', () async {
+    test('a re-encoded video is not skipped — duration is in the signature', () async {
       final s = await _store();
-      await s.markBackedUp([_a('p1', size: 500)]);
-      expect(await s.alreadyBackedUp([_a('p1', size: 900)]), isEmpty);
+      await s.markBackedUp([_a('p1', signature: 500)]);
+      expect(await s.alreadyBackedUp([_a('p1', signature: 900)]), isEmpty);
       await s.close();
     });
 

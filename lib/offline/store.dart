@@ -186,9 +186,15 @@ const _pendingFilesDDL = '''
 /// being opened at all. Hashing is kept for what is genuinely NEW, where the
 /// file has to be read anyway to upload it.
 ///
-/// `modified` and `size` are what make it safe. An id alone would skip a photo
-/// that had been edited in place — same id, different picture — and it would
-/// never reach the computer.
+/// `modified` and `signature` are what make it safe. An id alone would skip a
+/// photo edited in place — same id, different picture — and it would never
+/// reach the computer.
+///
+/// **`signature` is cheap metadata, NOT a byte count.** Width, height and
+/// duration, combined. The real file size would be a better signal and costs
+/// exactly the thing this table exists to avoid: opening the file. These three
+/// come from the library index the phone already holds, so the check stays
+/// free, and together with the modified time they catch every ordinary edit.
 ///
 /// In SQLite rather than the StringList this replaces: twenty thousand ids in
 /// SharedPreferences is a multi-megabyte blob rewritten whole on every save and
@@ -196,8 +202,8 @@ const _pendingFilesDDL = '''
 const _ledgerDDL = '''
   CREATE TABLE backup_ledger (
     asset_id TEXT PRIMARY KEY,
-    modified INTEGER NOT NULL DEFAULT 0,
-    size     INTEGER NOT NULL DEFAULT 0,
+    modified  INTEGER NOT NULL DEFAULT 0,
+    signature INTEGER NOT NULL DEFAULT 0,
     sent_at  TEXT    NOT NULL
   )''';
 
@@ -257,7 +263,7 @@ class OfflineStore {
     final file = _pathOverride ?? p.join(await getDatabasesPath(), 'offline.db');
     return openDatabase(
       file,
-      version: 4,
+      version: 5,
       // v2 added `pending.action`. An upgrade rather than a recreate, because
       // by the time this shipped there were phones holding queued work in a v1
       // database — and that queue is the only copy of it anywhere.
@@ -269,6 +275,17 @@ class OfflineStore {
           await db.execute(_pendingFilesDDL);
         }
         if (from < 4) {
+          await db.execute(_ledgerDDL);
+          await db.execute(_ledgerIndexDDL);
+        }
+        if (from < 5) {
+          // v4 stored a pixel count in a column called `size`, which was both
+          // misleading and weaker than it needed to be. Rebuilt rather than
+          // renamed: the values themselves change meaning, so keeping them
+          // would silently compare a new signature against an old pixel count
+          // and re-offer every photo anyway. Dropping is the honest version of
+          // the same outcome, and costs one re-check.
+          await db.execute('DROP TABLE IF EXISTS backup_ledger');
           await db.execute(_ledgerDDL);
           await db.execute(_ledgerIndexDDL);
         }
@@ -589,20 +606,20 @@ class OfflineStore {
   /// asking about two hundred at a time and a round trip each would put the
   /// cost back where this table exists to remove it.
   Future<Set<String>> alreadyBackedUp(
-      List<({String id, int modified, int size})> assets) async {
+      List<({String id, int modified, int signature})> assets) async {
     if (assets.isEmpty) return const {};
     final db = await _open;
     final ids = assets.map((a) => a.id).toList();
     final marks = List.filled(ids.length, '?').join(',');
     final rows = await db.rawQuery(
-        'SELECT asset_id, modified, size FROM backup_ledger '
+        'SELECT asset_id, modified, signature FROM backup_ledger '
         'WHERE asset_id IN ($marks)', ids);
 
     final held = {
       for (final r in rows)
         '${r['asset_id']}': (
           modified: (r['modified'] as int?) ?? 0,
-          size: (r['size'] as int?) ?? 0,
+          signature: (r['signature'] as int?) ?? 0,
         )
     };
 
@@ -614,14 +631,14 @@ class OfflineStore {
             // its whole library the first time it runs this version.
             (held[a.id]!.modified == 0 ||
                 (held[a.id]!.modified == a.modified &&
-                    held[a.id]!.size == a.size)))
+                    held[a.id]!.signature == a.signature)))
           a.id
     };
   }
 
   /// Record a page of assets as backed up, in one transaction.
   Future<void> markBackedUp(
-      List<({String id, int modified, int size})> assets) async {
+      List<({String id, int modified, int signature})> assets) async {
     if (assets.isEmpty) return;
     final db = await _open;
     final now = DateTime.now().toIso8601String();
@@ -630,8 +647,8 @@ class OfflineStore {
       for (final a in assets) {
         batch.insert(
           'backup_ledger',
-          {'asset_id': a.id, 'modified': a.modified, 'size': a.size,
-           'sent_at': now},
+          {'asset_id': a.id, 'modified': a.modified,
+           'signature': a.signature, 'sent_at': now},
           conflictAlgorithm: ConflictAlgorithm.replace,
         );
       }
@@ -661,7 +678,7 @@ class OfflineStore {
     final list = ids.toList();
     if (list.isEmpty) return;
     await markBackedUp([
-      for (final id in list) (id: id, modified: 0, size: 0)
+      for (final id in list) (id: id, modified: 0, signature: 0)
     ]);
   }
 
