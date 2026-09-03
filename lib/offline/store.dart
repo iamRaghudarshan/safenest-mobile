@@ -210,6 +210,33 @@ const _ledgerDDL = '''
 const _ledgerIndexDDL =
     'CREATE INDEX idx_ledger_sent ON backup_ledger(sent_at)';
 
+/// A file's sha256, remembered so it is computed once and not once per run.
+///
+/// THE COST THIS REMOVES IS THE REAL ONE. Asking the computer "do you already
+/// have this?" needs the file's hash, and computing it reads every byte. For a
+/// photo that then uploads, that read was going to happen anyway. For anything
+/// that FAILS to upload -- a video too big for a home upstream, say -- it
+/// happens again on the next run, and the next, for ever: the file is never in
+/// the sent list, so it is re-hashed every time and never gets any closer.
+/// Twenty-two failed videos is several gigabytes read off the phone per run,
+/// before a single byte is uploaded. That is what "the backup keeps running a
+/// long time" was.
+///
+/// SEPARATE from backup_ledger on purpose. That table means "this is on the
+/// computer"; this one means "this is what the file hashes to". Putting an
+/// unsent asset in the ledger to hold its hash would make the cheap skip
+/// believe it was backed up, and it would never be sent at all.
+///
+/// `modified` and `signature` are carried so an edited file is re-hashed rather
+/// than answered from a stale digest.
+const _hashesDDL = '''
+  CREATE TABLE asset_hashes (
+    asset_id  TEXT PRIMARY KEY,
+    modified  INTEGER NOT NULL DEFAULT 0,
+    signature INTEGER NOT NULL DEFAULT 0,
+    hash      TEXT NOT NULL
+  )''';
+
 /// One upload waiting on this phone.
 @immutable
 class PendingFile {
@@ -263,7 +290,7 @@ class OfflineStore {
     final file = _pathOverride ?? p.join(await getDatabasesPath(), 'offline.db');
     return openDatabase(
       file,
-      version: 5,
+      version: 6,
       // v2 added `pending.action`. An upgrade rather than a recreate, because
       // by the time this shipped there were phones holding queued work in a v1
       // database — and that queue is the only copy of it anywhere.
@@ -288,6 +315,9 @@ class OfflineStore {
           await db.execute('DROP TABLE IF EXISTS backup_ledger');
           await db.execute(_ledgerDDL);
           await db.execute(_ledgerIndexDDL);
+        }
+        if (from < 6) {
+          await db.execute(_hashesDDL);
         }
       },
       onCreate: (db, _) async {
@@ -326,6 +356,7 @@ class OfflineStore {
         await db.execute(_pendingFilesDDL);
         await db.execute(_ledgerDDL);
         await db.execute(_ledgerIndexDDL);
+        await db.execute(_hashesDDL);
         await db.execute('''
           CREATE TABLE local_ids (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -666,6 +697,7 @@ class OfflineStore {
   Future<void> clearBackedUp() async {
     final db = await _open;
     await db.delete('backup_ledger');
+    await db.delete('asset_hashes');
   }
 
   /// Carry an older installation's list of ids across.
@@ -680,6 +712,50 @@ class OfflineStore {
     await markBackedUp([
       for (final id in list) (id: id, modified: 0, signature: 0)
     ]);
+  }
+
+  /// Hashes already computed for these assets, where the file has not changed.
+  Future<Map<String, String>> knownHashes(
+      List<({String id, int modified, int signature})> assets) async {
+    if (assets.isEmpty) return const {};
+    final db = await _open;
+    final ids = assets.map((a) => a.id).toList();
+    final marks = List.filled(ids.length, '?').join(',');
+    final rows = await db.rawQuery(
+        'SELECT asset_id, modified, signature, hash FROM asset_hashes '
+        'WHERE asset_id IN ($marks)', ids);
+    final held = {for (final r in rows) '${r['asset_id']}': r};
+    final out = <String, String>{};
+    for (final a in assets) {
+      final r = held[a.id];
+      if (r == null) continue;
+      // An edited file must be re-hashed. A stale digest would have the
+      // computer answer about a photo that no longer exists.
+      if ((r['modified'] as int?) == a.modified &&
+          (r['signature'] as int?) == a.signature) {
+        out[a.id] = '${r['hash']}';
+      }
+    }
+    return out;
+  }
+
+  /// Remember what a file hashed to, so it is never hashed twice.
+  Future<void> rememberHashes(
+      List<({String id, int modified, int signature, String hash})> rows) async {
+    if (rows.isEmpty) return;
+    final db = await _open;
+    await db.transaction((tx) async {
+      final batch = tx.batch();
+      for (final r in rows) {
+        batch.insert(
+          'asset_hashes',
+          {'asset_id': r.id, 'modified': r.modified,
+           'signature': r.signature, 'hash': r.hash},
+          conflictAlgorithm: ConflictAlgorithm.replace,
+        );
+      }
+      await batch.commit(noResult: true);
+    });
   }
 
   // ------------------------------------------------------- files waiting
@@ -846,6 +922,7 @@ class OfflineStore {
     await db.delete('pending');
     await db.delete('pending_files');
     await db.delete('backup_ledger');
+    await db.delete('asset_hashes');
     await db.delete('local_ids');
   }
 

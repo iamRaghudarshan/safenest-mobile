@@ -125,4 +125,75 @@ void main() {
       await s.close();
     });
   });
+
+  group('a file is hashed once, not once per run', () {
+    // THE ACTUAL CAUSE of "the backup keeps running a long time". Asking the
+    // computer "do you have this?" needs a hash, and a hash reads every byte.
+    // Anything that FAILS to upload never enters the sent list, so it was
+    // re-hashed on every run for ever -- 22 failed videos is gigabytes read off
+    // the phone before a single byte is uploaded.
+    test('nothing is known before anything is hashed', () async {
+      final s = await _store();
+      expect(await s.knownHashes([_a('p1')]), isEmpty);
+      await s.close();
+    });
+
+    test('a remembered hash comes back without touching the file', () async {
+      final s = await _store();
+      await s.rememberHashes([
+        (id: 'p1', modified: 1000, signature: 500, hash: 'abc123'),
+      ]);
+      expect(await s.knownHashes([_a('p1')]), {'p1': 'abc123'});
+      await s.close();
+    });
+
+    test('an EDITED file is re-hashed rather than answered from a stale one',
+        () async {
+      final s = await _store();
+      await s.rememberHashes([
+        (id: 'p1', modified: 1000, signature: 500, hash: 'abc123'),
+      ]);
+      // Same id, later modified time: the bytes changed, so the old digest
+      // describes a photo that no longer exists.
+      expect(await s.knownHashes([_a('p1', modified: 2000)]), isEmpty);
+      await s.close();
+    });
+
+    test('a re-encoded video is re-hashed — signature is checked too', () async {
+      final s = await _store();
+      await s.rememberHashes([
+        (id: 'v1', modified: 1000, signature: 500, hash: 'abc123'),
+      ]);
+      expect(await s.knownHashes([_a('v1', signature: 900)]), isEmpty);
+      await s.close();
+    });
+
+    test('THE ONE THAT MATTERS: a failed upload is not re-hashed next run',
+        () async {
+      final s = await _store();
+      // It was hashed, asked about, and the upload then failed -- so it is NOT
+      // in the ledger. The hash must still be remembered, or the next run reads
+      // the whole file again to learn what it already knew.
+      await s.rememberHashes([
+        (id: 'bigvideo', modified: 1000, signature: 500, hash: 'deadbeef'),
+      ]);
+      expect(await s.alreadyBackedUp([_a('bigvideo')]), isEmpty,
+          reason: 'it is genuinely not backed up and must still be offered');
+      expect(await s.knownHashes([_a('bigvideo')]), {'bigvideo': 'deadbeef'},
+          reason: 'but its hash is known, so the file is never read again');
+      await s.close();
+    });
+
+    test('the two tables mean different things and must not be conflated',
+        () async {
+      final s = await _store();
+      await s.rememberHashes([
+        (id: 'p1', modified: 1000, signature: 500, hash: 'abc'),
+      ]);
+      // Holding a hash must NEVER make the cheap skip believe it was sent, or
+      // the photo would never be uploaded at all.
+      expect(await s.alreadyBackedUp([_a('p1')]), isEmpty);
+      await s.close();
+    });
+  });
 }

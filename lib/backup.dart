@@ -274,7 +274,45 @@ class BackupService extends ChangeNotifier {
   /// to answer — or one that is simply having a bad moment.
   Future<Set<String>> _serverAlreadyHas(List<AssetEntity> assets) async {
     final byHash = <String, String>{};   // hash -> asset id
+
+    // HASH ONCE, NOT ONCE PER RUN. This is what "the backup keeps running a
+    // long time" actually was.
+    //
+    // Asking the computer "do you already have this?" needs the file's hash,
+    // and computing one reads every byte. For a photo that then uploads, that
+    // read was going to happen anyway. For anything that FAILS to upload -- a
+    // large video on a home upstream -- it happens again on every run for ever:
+    // the file never enters the sent list, so it is re-hashed each time and
+    // never gets any closer. Twenty-two failed videos is several gigabytes read
+    // off the phone before a single byte is uploaded.
+    //
+    // A remembered hash is keyed to the file's modified time and dimensions, so
+    // an edited photo is re-hashed rather than answered from a stale digest.
+    final led = _ledger;
+    final cached = led == null
+        ? const <String, String>{}
+        : await () async {
+            try {
+              return await led.knownHashes([
+                for (final a in assets)
+                  (
+                    id: a.id,
+                    modified: a.modifiedDateTime.millisecondsSinceEpoch,
+                    signature: _signatureOf(a),
+                  )
+              ]);
+            } catch (_) {
+              return const <String, String>{};
+            }
+          }();
+
+    final fresh = <({String id, int modified, int signature, String hash})>[];
     for (final a in assets) {
+      final known = cached[a.id];
+      if (known != null) {
+        byHash[known] = a.id;
+        continue;
+      }
       try {
         final f = await a.originFile;
         if (f == null || !await f.exists()) continue;
@@ -282,10 +320,24 @@ class BackupService extends ChangeNotifier {
         // megabytes and holding one in memory to hash it is how a phone runs
         // out, which is the thing this whole file keeps having to avoid.
         final digest = await sha256.bind(f.openRead()).first;
-        byHash[digest.toString()] = a.id;
+        final hex = digest.toString();
+        byHash[hex] = a.id;
+        fresh.add((
+          id: a.id,
+          modified: a.modifiedDateTime.millisecondsSinceEpoch,
+          signature: _signatureOf(a),
+          hash: hex,
+        ));
       } catch (_) {
         // Unreadable here means unreadable at upload time too, and _send will
         // report it properly with a reason.
+      }
+    }
+    if (led != null && fresh.isNotEmpty) {
+      try {
+        await led.rememberHashes(fresh);
+      } catch (_) {
+        // Only costs a re-hash next time; never a reason to fail the backup.
       }
     }
     if (byHash.isEmpty) return const {};
