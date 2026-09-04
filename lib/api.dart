@@ -426,6 +426,28 @@ class Api {
     // looking at the app instead of at the machine. The web client already drew
     // this distinction; it was not carried across, and it cost a sign-in that
     // looked like a broken app.
+    // A STORAGE fault is a 503, and it is not a reachability problem. The
+    // computer answered; it answered saying it cannot read the disk the records
+    // are on. Claimed before the gateway branch below, which would otherwise
+    // tell somebody whose USB drive has failed to check that their computer is
+    // switched on -- sending them to the one place the fault is not.
+    if (res.statusCode == 503 && data is Map && data['storage'] is Map) {
+      final s = Map<String, dynamic>.from(data['storage'] as Map);
+      final where = (s['volume'] ?? s['folder'] ?? 'another disk').toString();
+      final reason = (s['reason'] ?? 'unreadable').toString();
+      throw ApiError(
+        503,
+        reason == 'missing'
+            ? 'Your records are kept on $where, which is not connected to your '
+                'computer. Nothing has been deleted — plug it back in.'
+            : reason == 'readonly'
+                ? 'Your records are on $where, which is refusing to be written '
+                    'to. Nothing has been deleted.'
+                : 'Your records are on $where, which your computer cannot read. '
+                    'Nothing has been deleted. It needs looking at on the '
+                    'computer itself.',
+      );
+    }
     if (res.statusCode == 502 || res.statusCode == 503 || res.statusCode == 504) {
       throw ApiError(res.statusCode,
           'Your computer is not answering. Check that it is switched on and '
