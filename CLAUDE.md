@@ -132,6 +132,19 @@ behaviour: slower, never wrong.
 
 ## 6. Which SafeNest — the address is never assumed
 
+> **Status, 17 September 2026.** The publisher's own copy moved to
+> **`app.safenesthub.in`** (new machine; the old `safenest.raghudarshan.online`
+> is still live and must stay until its licences are reissued). **This app needed
+> no code change for that**, which is the design below working as intended — the
+> address is typed in, never compiled in. Enter the new one in the app and sign
+> in.
+>
+> **Do NOT change the iOS bundle id in §7.** It reads like the old URL and is
+> not one: it is a reverse-DNS identifier. Changing it creates a new TestFlight
+> app and orphans every existing install.
+>
+> The desktop handover notes live in `D:\AI PROinmate-react\CLAUDE.md` §14.
+
 Every customer runs their own copy on their own machine. **There is no default
 address and no fallback.** A hard-coded one was a real bug in the desktop
 product, where every customer's screen advertised the publisher's own domain as
