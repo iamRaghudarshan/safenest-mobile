@@ -93,20 +93,47 @@ class _AutoBackupCardState extends State<AutoBackupCard> {
           ),
           if (_on) ...[
             const Divider(height: 1),
-            SwitchListTile(
-              value: _wifiOnly,
+            // Two named choices rather than one switch. "Only on Wi-Fi — off"
+            // makes you work out what the other state is, and the wrong guess
+            // here spends somebody's data allowance on a camera roll. Naming
+            // both sides is the difference between choosing and finding out.
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 10, 16, 2),
+              child: Row(children: [
+                const Icon(Icons.wifi, size: 20),
+                const SizedBox(width: 12),
+                Text('Back up over', style: theme.textTheme.titleSmall),
+              ]),
+            ),
+            // RadioGroup, not the per-tile groupValue/onChanged pair: those were
+            // deprecated after Flutter 3.32 and this project's analyze is kept
+            // clean, so a warning here would be noise the next person has to
+            // decide about.
+            RadioGroup<bool>(
+              groupValue: _wifiOnly,
               onChanged: (v) async {
+                if (v == null) return;
                 setState(() => _wifiOnly = v);
                 await _set(kAutoWifiOnly, v);
               },
-              secondary: const Icon(Icons.wifi),
-              title: const Text('Only on Wi-Fi'),
-              subtitle: Text(
-                _wifiOnly
-                    ? 'Waits for Wi-Fi. A camera roll is measured in gigabytes.'
-                    : 'Will use mobile data. Watch your allowance.',
-                style: theme.textTheme.bodySmall,
-              ),
+              child: Column(children: [
+                RadioListTile<bool>(
+                  value: true,
+                  dense: true,
+                  title: const Text('Wi-Fi only'),
+                  subtitle: Text('Waits for Wi-Fi. A camera roll is measured in '
+                      'gigabytes, so this is the safe choice.',
+                      style: theme.textTheme.bodySmall),
+                ),
+                RadioListTile<bool>(
+                  value: false,
+                  dense: true,
+                  title: const Text('Wi-Fi or mobile data'),
+                  subtitle: Text('Backs up wherever there is a connection. Your '
+                      'data allowance pays for it.',
+                      style: theme.textTheme.bodySmall),
+                ),
+              ]),
             ),
             SwitchListTile(
               value: _chargingOnly,
