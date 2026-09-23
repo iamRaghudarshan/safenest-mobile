@@ -10,6 +10,7 @@ library;
 
 import 'dart:io' show Platform;
 
+import 'package:battery_plus/battery_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -27,6 +28,7 @@ class _AutoBackupCardState extends State<AutoBackupCard> {
   bool _wifiOnly = true;
   bool _chargingOnly = false;
   bool _loaded = false;
+  bool _saver = false;
   ({DateTime at, String result})? _last;
 
   @override
@@ -38,8 +40,15 @@ class _AutoBackupCardState extends State<AutoBackupCard> {
   Future<void> _load() async {
     final prefs = await SharedPreferences.getInstance();
     final last = await BackgroundBackup.lastRun();
+    // Best effort. A phone that will not answer this question is not a reason
+    // to show nothing; it just means the warning cannot be offered.
+    bool saver = false;
+    try {
+      saver = await Battery().isInBatterySaveMode;
+    } catch (_) {}
     if (!mounted) return;
     setState(() {
+      _saver = saver;
       _on = prefs.getBool(kAutoEnabled) ?? false;
       _wifiOnly = prefs.getBool(kAutoWifiOnly) ?? true;
       _chargingOnly = prefs.getBool(kAutoChargingOnly) ?? false;
@@ -151,6 +160,34 @@ class _AutoBackupCardState extends State<AutoBackupCard> {
                 style: theme.textTheme.bodySmall,
               ),
             ),
+            // The reason it is not running, when there is one. iOS suspends
+            // BGTaskScheduler outright in Low Power Mode and Android's battery
+            // saver restricts background work the same way. The task is not
+            // broken in either case — it is not being allowed to start, and
+            // until now nothing on screen said so, which left the person to
+            // guess. It was reported as "not working when the screen is off".
+            if (_saver) ...[
+              const Divider(height: 1),
+              ListTile(
+                dense: true,
+                leading: Icon(Icons.battery_saver_outlined,
+                    color: theme.colorScheme.error, size: 20),
+                title: Text(
+                  Platform.isIOS ? 'Low Power Mode is on' : 'Battery saver is on',
+                  style: theme.textTheme.bodyMedium
+                      ?.copyWith(fontWeight: FontWeight.w600),
+                ),
+                subtitle: Text(
+                  Platform.isIOS
+                      ? 'iOS does not run background tasks in Low Power Mode, so '
+                          'this will not back up on its own until you turn it off.'
+                      : 'Battery saver stops background work, so this may not run '
+                          'until you turn it off.',
+                  style: theme.textTheme.bodySmall,
+                ),
+                isThreeLine: true,
+              ),
+            ],
             const Divider(height: 1),
             ListTile(
               dense: true,

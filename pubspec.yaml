@@ -92,6 +92,13 @@ dependencies:
   # because a backup crashed is a flat battery blamed on this app.
   wakelock_plus: ^1.2.8
 
+  # Reading Low Power Mode / Battery Saver, so the app can say why automatic
+  # backup is not running instead of leaving somebody to guess. iOS suspends
+  # BGTaskScheduler entirely in Low Power Mode and Android's battery saver
+  # restricts background work the same way -- in both cases the task is not
+  # broken, it is not being allowed to start, and nothing on screen said so.
+  battery_plus: ^6.2.1
+
   # Runs the backup when nobody is looking at the app.
   #
   # One package for two completely different systems: Android WorkManager, which
