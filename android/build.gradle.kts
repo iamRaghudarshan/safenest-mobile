@@ -114,6 +114,25 @@ subprojects {
     }
 }
 
+// ...and the same for JAVA, because some plugins go the other way.
+//
+// The block above pins every plugin's Kotlin to 17. workmanager_android pins
+// its own JAVA to 1.8, so forcing only one side produced the mirror image of
+// the error it was written to prevent:
+//
+//     Inconsistent JVM-target compatibility detected for tasks
+//     'compileReleaseJavaWithJavac' (1.8) and 'compileReleaseKotlin' (17)
+//
+// Gradle does not care WHICH way round the mismatch is, only that the two
+// disagree. Pinning both ends means a plugin cannot introduce this again by
+// choosing either target for itself.
+subprojects {
+    tasks.withType<JavaCompile>().configureEach {
+        sourceCompatibility = JavaVersion.VERSION_17.toString()
+        targetCompatibility = JavaVersion.VERSION_17.toString()
+    }
+}
+
 subprojects {
     project.evaluationDependsOn(":app")
 }
