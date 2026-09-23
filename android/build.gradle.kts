@@ -171,8 +171,26 @@ subprojects {
             }
         }
     }
-    plugins.withId("com.android.library") { forceJava17() }
-    plugins.withId("com.android.application") { forceJava17() }
+    // AFTER the subproject has been evaluated, not when the plugin is applied.
+    //
+    // android-1.63.4 failed with the same message again AND the warning above
+    // stayed silent, which is what identified this: the reflection was finding
+    // the setter and invoking it successfully, and the value was then being
+    // overwritten. plugins.withId fires as the Android plugin is applied,
+    // which is before the module's own `android { compileOptions { ... } }`
+    // block runs — so workmanager_android set itself back to 1.8 immediately
+    // after we set it to 17.
+    //
+    // state.executed is checked because evaluationDependsOn(":app") below
+    // forces some projects to be evaluated during configuration, and calling
+    // afterEvaluate on one of those throws "Cannot run Project.afterEvaluate
+    // when the project is already evaluated" — the failure the compileSdk
+    // override above documents.
+    val schedule = {
+        if (state.executed) forceJava17() else afterEvaluate { forceJava17() }
+    }
+    plugins.withId("com.android.library") { schedule() }
+    plugins.withId("com.android.application") { schedule() }
 }
 
 subprojects {
