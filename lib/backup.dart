@@ -16,7 +16,17 @@
 ///   * It is resumable by construction. Each asset has a stable id; the ids
 ///     already sent are remembered, so a second run over 20,000 photos costs a
 ///     list comparison rather than 20,000 uploads.
-///   * It can run while the app is in the background, which a web page cannot.
+///
+/// WHAT IT CANNOT DO, despite what this comment used to claim
+/// It does NOT run in the background. There is no WorkManager task, no
+/// BGTaskScheduler identifier, no foreground service, and UIBackgroundModes
+/// carries only `remote-notification` for push. A run holds a wakelock, which
+/// keeps the SCREEN awake and nothing more, and PhotosHome.dispose() stops the
+/// service — so pressing Back during a backup ends it. A full first run means
+/// leaving the phone unlocked on this screen.
+///
+/// This said the opposite for months. Anyone reading it would reasonably have
+/// built on top of a guarantee that was never implemented.
 ///
 /// PACED ON PURPOSE
 /// Four at a time, matching the server: measured at 7.81 photos/sec against a
@@ -144,8 +154,13 @@ class BackupService extends ChangeNotifier {
       RegExp(r'https?://(192\.168\.|10\.|172\.(1[6-9]|2\d|3[01])\.)')
           .hasMatch(url);
 
-  /// Ids already accepted by the server. This is what makes a repeat run cheap
-  /// and is why the backup can be left on a nightly automation without shame.
+  /// Ids already accepted by the server. This is what makes a repeat run cheap:
+  /// a second pass over 20,000 photos is a set comparison, not 20,000 uploads.
+  ///
+  /// It does NOT mean the backup is automated. Nothing in this app schedules a
+  /// run — there is no timer, no launch-time pass and no PhotoManager change
+  /// listener. Someone has to press the button. The cheap repeat is what would
+  /// MAKE an automation practical, if one is ever built.
   Set<String> _sent = {};
   bool _stop = false;
 

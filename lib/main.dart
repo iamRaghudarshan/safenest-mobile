@@ -27,6 +27,7 @@ import 'offline/sync.dart';
 import 'session.dart';
 import 'theme.dart';
 import 'screens/sign_in_screen.dart';
+import 'background.dart';
 import 'screens/home_screen.dart';
 import 'widgets/licence_notice.dart';
 import 'widgets/nature_backdrop.dart';
@@ -36,6 +37,11 @@ Future<void> main() async {
   // Load the person's appearance choices before the first frame, so a saved
   // "plain background" shows immediately rather than flashing the nature scene.
   await Customize.ensureLoaded();
+  // Claims the background entry point. Cheap, schedules nothing on its own —
+  // a phone with automatic backup switched off registers a callback the OS
+  // never calls. Before runApp because iOS requires every BGTask identifier to
+  // be registered during launch, not after the first frame.
+  await BackgroundBackup.initialise();
   runApp(const SafeNestApp());
 }
 

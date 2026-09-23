@@ -4,7 +4,7 @@ publish_to: "none"
 # Kept in step with the VERSION file. CI overrides both with --build-name/-number,
 # but a LOCAL build reads this â€” left at 0.1.0 it made the in-app update check
 # (lib/update.dart) think every server build was newer.
-version: 1.62.0+1
+version: 1.63.0+1
 
 environment:
   sdk: ^3.12.2
@@ -91,6 +91,15 @@ dependencies:
   # Released the moment the run ends, in a finally. A phone left awake all night
   # because a backup crashed is a flat battery blamed on this app.
   wakelock_plus: ^1.2.8
+
+  # Runs the backup when nobody is looking at the app.
+  #
+  # One package for two completely different systems: Android WorkManager, which
+  # survives reboots and enforces the wifi/charging constraints itself, and iOS
+  # BGTaskScheduler, which does not promise WHEN it will run and only grants
+  # time the system feels like giving. That asymmetry is real and is not hidden
+  # -- see background.dart, and the honest wording on the settings row.
+  workmanager: ^0.5.2
 
   # --- gallery, Google Photos shaped ---
   photo_view: ^0.15.0             # pinch-zoom in the lightbox

@@ -7,8 +7,13 @@
 /// It does NOT start on its own. An app that copies somebody's entire camera
 /// roll the moment it is opened is exactly what people are right to distrust,
 /// and this product's whole argument is that it is not that. The owner presses
-/// the button, or schedules it, and can stop it at any point — stopping loses
-/// nothing, because what has already been sent is remembered.
+/// the button and can stop it at any point — stopping loses nothing, because
+/// what has already been sent is remembered.
+///
+/// There is no scheduling. This line used to say "or schedules it", and no such
+/// thing exists anywhere in the app: a photo taken today is backed up only when
+/// somebody next opens this screen and taps. That is the single largest gap
+/// between this and any phone backup people have used before.
 ///
 /// WHAT THIS SCREEN OWES THE PERSON, and did not pay
 /// The engine can now say WHY a run failed — an expired session, a lapsed
@@ -30,6 +35,7 @@ import '../backup.dart';
 import '../offline/store.dart';
 import '../session.dart';
 import '../theme.dart';
+import '../widgets/auto_backup_card.dart';
 import '../widgets/backup_flight.dart';
 import '../widgets/brand_button.dart';
 import '../widgets/pill.dart';
@@ -364,6 +370,11 @@ class _BackupScreenState extends State<BackupScreen> {
               ghost: p.retryable > 0,
               onPressed: () => _service?.runFullBackup(),
             ),
+
+            // Directly under the manual button on purpose. The two are the
+            // same job, and someone who has just watched a backup finish is
+            // exactly the person who wants it to happen without them next time.
+            const AutoBackupCard(),
 
             // THE WAY BACK from photos removed at the computer.
             //

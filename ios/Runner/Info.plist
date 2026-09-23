@@ -123,6 +123,14 @@
 	</dict>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
+	<!-- Every BGTask identifier the app may schedule must be declared here.
+	     iOS refuses to register one that is missing, and the refusal is a
+	     console line at launch, not a crash — so an undeclared identifier
+	     looks exactly like "background backup just never runs". -->
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>safenest.backup.auto</string>
+	</array>
 	<key>UIBackgroundModes</key>
 	<array>
 		<!-- So a push that arrives while the app is closed is delivered to the
@@ -130,6 +138,16 @@
 		     they refer to, and without this iOS hands over the alert and drops
 		     the payload. -->
 		<string>remote-notification</string>
+		<!-- Backing up without the app open. Both are needed and they are not
+		     alternatives: `fetch` is the short wake iOS grants now and then, and
+		     `processing` is the longer one it grants when the phone is charging
+		     and idle, which is the only window big enough for a real backup.
+
+		     Neither is a promise. iOS decides when, from how often the app is
+		     opened and its own battery budget, and it may decide never. The
+		     settings row in the app says so rather than implying a schedule. -->
+		<string>fetch</string>
+		<string>processing</string>
 	</array>
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>

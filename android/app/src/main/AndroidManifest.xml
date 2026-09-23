@@ -4,16 +4,55 @@
     <uses-permission android:name="android.permission.INTERNET" />
 
     <!-- Reading the photo library. Android 13 split the old blanket storage
-         permission into per-type ones, so both are declared: READ_MEDIA_IMAGES
-         for 13 and later, and READ_EXTERNAL_STORAGE capped at 12 for older
-         phones. Declaring only one leaves the other half of the market unable
-         to back anything up, which is the whole feature. -->
+         permission into per-type ones, so all of them are declared:
+         READ_MEDIA_IMAGES and READ_MEDIA_VIDEO for 13 and later, and
+         READ_EXTERNAL_STORAGE capped at 12 for older phones. Declaring only one
+         leaves the other half of the market unable to back anything up, which
+         is the whole feature.
+
+         READ_MEDIA_VIDEO was missing until September 2026, and the failure was
+         silent in the worst way. The scan asks PhotoManager for
+         RequestType.common — photos AND videos — but a permission that is not
+         declared can never be granted, so on Android 13+ videos were simply
+         never enumerated. Never enumerated means never counted, never failed,
+         and never listed among the reasons something did not go. The backup
+         screen said "Backed up. 0 new" over a camera roll full of unbacked-up
+         video. -->
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32" />
 
     <!-- Notably NOT requested: WRITE_EXTERNAL_STORAGE, location, contacts or
          anything else. The app reads photos and sends them to one address. -->
+
+    <!-- Backing up without the app open (see lib/background.dart).
+
+         WorkManager needs all four, and each one is load-bearing:
+           RECEIVE_BOOT_COMPLETED  re-registers the schedule after a restart.
+                                   Without it automatic backup works until the
+                                   first reboot and then silently never again,
+                                   which is the worst possible failure for a
+                                   backup: it looks fine.
+           FOREGROUND_SERVICE      a long upload has to be a foreground service
+                                   or Android kills it partway.
+           ..._DATA_SYNC           Android 14 requires a TYPE as well, and
+                                   refuses to start the service without one.
+                                   dataSync is what "upload the user's files"
+                                   is; mediaPlayback would be a lie.
+           POST_NOTIFICATIONS      Android 13+ will not show the foreground
+                                   service's own notification otherwise, and a
+                                   foreground service with no visible
+                                   notification is exactly what the OS stops.
+
+         ACCESS_NETWORK_STATE is what lets WorkManager honour "wifi only"
+         itself, so the constraint is enforced by the system rather than by us
+         checking after the upload has already started. -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
     <!-- Installing a downloaded update APK from inside the app. Android 8+ gates
          this per-source: the user is sent to Settings once to allow "install
