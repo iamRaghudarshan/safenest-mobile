@@ -128,7 +128,7 @@ class BackgroundBackup {
   /// schedule anything — [apply] does that.
   static Future<void> initialise() async {
     try {
-      await Workmanager().initialize(callbackDispatcher, isInDebugMode: false);
+      await Workmanager().initialize(callbackDispatcher);
     } catch (e) {
       // A platform without the plugin (or a test) must not stop the app
       // starting. Automatic backup is a convenience; the manual button is the
@@ -151,7 +151,7 @@ class BackgroundBackup {
         // The floor Android enforces anyway. Asking for less does not get less.
         frequency: const Duration(hours: 1),
         initialDelay: const Duration(minutes: 15),
-        existingWorkPolicy: ExistingWorkPolicy.replace,
+        existingWorkPolicy: ExistingPeriodicWorkPolicy.replace,
         constraints: Constraints(
           // unmetered = wifi. The alternative is uploading somebody's whole
           // camera roll over their mobile data without being asked, which is

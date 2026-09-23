@@ -1,6 +1,6 @@
 import Flutter
 import UIKit
-import workmanager
+import workmanager_apple
 
 @main
 @objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate {
@@ -10,32 +10,25 @@ import workmanager
   ) -> Bool {
     // Automatic photo backup (see lib/background.dart).
     //
-    // BOTH of these are required and they cover different windows:
+    // Claims the BGTask identifier declared in Info.plist under
+    // BGTaskSchedulerPermittedIdentifiers. iOS insists every identifier is
+    // registered BEFORE launch finishes — register it later and the call
+    // throws. If either half is missing (the plist entry or this line) iOS
+    // declines quietly at launch: no crash, nothing in the UI, the feature
+    // simply never runs.
     //
-    //   registerTask       claims the BGProcessingTask identifier. iOS insists
-    //                      every identifier is registered BEFORE the app
-    //                      finishes launching — register it later and the call
-    //                      throws. The same string must also appear in
-    //                      Info.plist under BGTaskSchedulerPermittedIdentifiers;
-    //                      if either half is missing, iOS declines quietly at
-    //                      launch and the feature simply never runs, with no
-    //                      crash and nothing in the UI to explain it.
+    // The module is `workmanager_apple`, not `workmanager`: the plugin became
+    // federated at 0.10, and the iOS half moved into its own package. The
+    // previous version of this file imported the old module and called
+    // `registerTask(withIdentifier:)`, which no longer exists.
     //
-    //   setMinimumBackgroundFetchInterval
-    //                      turns on the older, shorter background-fetch wake.
-    //                      BGProcessingTask only runs when the phone is
-    //                      charging and idle, which on a phone that is used all
-    //                      day and charged overnight can be one window in 24
-    //                      hours. Fetch gives a few minutes far more often.
-    //                      Neither alone is enough; together they are as close
-    //                      to "it just backs up" as iOS permits a third party
-    //                      to get.
-    //
-    // None of this is a guarantee. iOS decides when, and may decide never — the
-    // manual button stays for exactly that reason.
-    WorkmanagerPlugin.registerTask(withIdentifier: "safenest.backup.auto")
-    UIApplication.shared.setMinimumBackgroundFetchInterval(
-      UIApplication.backgroundFetchIntervalMinimum)
+    // registerLaunchHandlers() as well, for the UIScene lifecycle: Flutter
+    // registers plugins during scene connection, i.e. after this method has
+    // returned, so the plugin's own callback can be too late to re-register a
+    // handler for a task scheduled in a previous session. It is a no-op when
+    // nothing is scheduled.
+    WorkmanagerPlugin.registerPeriodicTask(withIdentifier: "safenest.backup.auto")
+    WorkmanagerPlugin.registerLaunchHandlers()
 
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
   }

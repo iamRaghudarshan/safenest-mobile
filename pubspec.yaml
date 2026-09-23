@@ -4,7 +4,7 @@ publish_to: "none"
 # Kept in step with the VERSION file. CI overrides both with --build-name/-number,
 # but a LOCAL build reads this â€” left at 0.1.0 it made the in-app update check
 # (lib/update.dart) think every server build was newer.
-version: 1.63.1+1
+version: 1.63.2+1
 
 environment:
   sdk: ^3.12.2
@@ -99,7 +99,7 @@ dependencies:
   # BGTaskScheduler, which does not promise WHEN it will run and only grants
   # time the system feels like giving. That asymmetry is real and is not hidden
   # -- see background.dart, and the honest wording on the settings row.
-  workmanager: ^0.5.2
+  workmanager: ^0.10.1
 
   # --- gallery, Google Photos shaped ---
   photo_view: ^0.15.0             # pinch-zoom in the lightbox
