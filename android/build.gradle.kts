@@ -117,20 +117,62 @@ subprojects {
 // ...and the same for JAVA, because some plugins go the other way.
 //
 // The block above pins every plugin's Kotlin to 17. workmanager_android pins
-// its own JAVA to 1.8, so forcing only one side produced the mirror image of
-// the error it was written to prevent:
+// its own JAVA to 1.8, so forcing only one side produces the mirror image of
+// the error that block exists to prevent:
 //
 //     Inconsistent JVM-target compatibility detected for tasks
 //     'compileReleaseJavaWithJavac' (1.8) and 'compileReleaseKotlin' (17)
 //
-// Gradle does not care WHICH way round the mismatch is, only that the two
-// disagree. Pinning both ends means a plugin cannot introduce this again by
-// choosing either target for itself.
+// SET ON THE ANDROID EXTENSION, NOT ON THE JavaCompile TASKS. The first
+// attempt did the obvious thing —
+//
+//     tasks.withType<JavaCompile>().configureEach {
+//         sourceCompatibility = "17"; targetCompatibility = "17" }
+//
+// — and changed nothing: the build failed again with the identical message.
+// The Android Gradle Plugin owns those tasks and configures them from
+// `android { compileOptions { ... } }`, so a value written straight onto the
+// task is overwritten by AGP, and its consistency check reads the extension
+// anyway. The extension is the only place that counts.
+//
+// Reflection for the same reason the compileSdk override above uses it: the
+// AGP classes are not on this file's buildscript classpath, because Flutter
+// applies them through settings.gradle.kts.
 subprojects {
-    tasks.withType<JavaCompile>().configureEach {
-        sourceCompatibility = JavaVersion.VERSION_17.toString()
-        targetCompatibility = JavaVersion.VERSION_17.toString()
+    val forceJava17 = {
+        extensions.findByName("android")?.let { android ->
+            try {
+                val opts = android.javaClass.getMethod("getCompileOptions").invoke(android)
+                listOf("setSourceCompatibility", "setTargetCompatibility").forEach { name ->
+                    // Two signatures, and which one exists depends on the AGP
+                    // version: the Groovy-friendly setSourceCompatibility(Object)
+                    // and the typed setSourceCompatibility(JavaVersion). Asking
+                    // for only one and catching NoSuchMethodException would look
+                    // exactly like "applied fine" while doing nothing.
+                    val applied = listOf(Any::class.java, JavaVersion::class.java).any { sig ->
+                        try {
+                            opts.javaClass.getMethod(name, sig)
+                                .invoke(opts, JavaVersion.VERSION_17)
+                            true
+                        } catch (_: NoSuchMethodException) {
+                            false
+                        }
+                    }
+                    if (!applied) {
+                        logger.warn("$name not found on ${opts.javaClass.name} " +
+                                    "for ${project.path}")
+                    }
+                }
+            } catch (e: Exception) {
+                // Said out loud rather than swallowed, for the reason the
+                // compileSdk override above gives: a silent no-op here shows
+                // up much later as a JVM-target error blaming a plugin.
+                logger.warn("Java 17 override did NOT apply to ${project.path}: $e")
+            }
+        }
     }
+    plugins.withId("com.android.library") { forceJava17() }
+    plugins.withId("com.android.application") { forceJava17() }
 }
 
 subprojects {
