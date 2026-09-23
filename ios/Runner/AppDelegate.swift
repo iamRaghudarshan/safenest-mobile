@@ -27,7 +27,24 @@ import workmanager_apple
     // returned, so the plugin's own callback can be too late to re-register a
     // handler for a task scheduled in a previous session. It is a no-op when
     // nothing is scheduled.
-    WorkmanagerPlugin.registerPeriodicTask(withIdentifier: "safenest.backup.auto")
+    // registerBGProcessingTask, NOT registerPeriodicTask.
+    //
+    // This is what limited a real backup to 39 photos. registerPeriodicTask
+    // asks iOS for a BGAppRefreshTask, which is meant for topping up a feed
+    // and is granted about THIRTY SECONDS. Measured on a real iPhone against
+    // the server: two wakes, 16:03:52-16:04:25 and 16:58:23-16:58:54, six
+    // items each, 33 and 31 seconds. The task was working perfectly and being
+    // stopped mid-upload every single time.
+    //
+    // BGProcessingTask is the one meant for long maintenance work. iOS gives
+    // it minutes rather than seconds and schedules it when the phone is idle,
+    // and the plugin maps our constraints onto its requiresNetworkConnectivity
+    // and requiresExternalPower. A photo library is exactly the work it is for.
+    //
+    // Still not unlimited, and still iOS's decision when to run it — the
+    // backup resumes from its ledger on the next wake, which is why a large
+    // library completes across several rather than in one.
+    WorkmanagerPlugin.registerBGProcessingTask(withIdentifier: "safenest.backup.auto")
     WorkmanagerPlugin.registerLaunchHandlers()
 
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)

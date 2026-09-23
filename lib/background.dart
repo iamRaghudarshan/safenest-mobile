@@ -27,6 +27,7 @@ library;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:photo_manager/photo_manager.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:workmanager/workmanager.dart';
 
@@ -38,13 +39,23 @@ import 'offline/store.dart';
 /// copy of this task would mean two backups racing over one library.
 const _taskName = 'safenest.backup.auto';
 const _uniqueName = 'safenest-auto-backup';
+/// A single run, fired as soon as the setting is switched on.
+///
+/// Android will not schedule a PERIODIC task more often than every 15 minutes,
+/// so without this, turning the setting on does nothing observable for a
+/// quarter of an hour. That is indistinguishable from a broken feature, and it
+/// was reported as one.
+const _kickName = 'safenest-auto-backup-now';
 
 /// Settings, in plain preferences: none of these is a credential.
 const kAutoEnabled = 'backup.auto';
 const kAutoWifiOnly = 'backup.auto.wifiOnly';
 const kAutoChargingOnly = 'backup.auto.chargingOnly';
-/// When the last automatic run finished, so the settings row can say something
-/// truthful instead of implying a schedule iOS never agreed to.
+/// When a run last STARTED, written the moment the task wakes. This is the
+/// difference between "it ran and found nothing" and "it has never run at
+/// all", which from the outside look identical and have completely different
+/// causes. Without it, a task that never fires and a task that fires and does
+/// nothing are the same blank row.
 const kAutoLastRun = 'backup.auto.lastRun';
 const kAutoLastResult = 'backup.auto.lastResult';
 
@@ -71,11 +82,19 @@ void callbackDispatcher() {
   Workmanager().executeTask((task, _) async {
     try {
       return await _runOnce();
-    } catch (e) {
+    } catch (e, st) {
       // Never throw out of here. A thrown task is retried with backoff by
       // WorkManager, and a permanent fault (signed out, server gone) would
       // then be retried forever on somebody's battery.
-      debugPrint('[auto-backup] failed: $e');
+      //
+      // RECORDED, not only printed. debugPrint is stripped from a release
+      // build, so an exception here left absolutely nothing behind — no log,
+      // no row, no clue why automatic backup did nothing.
+      debugPrint('[auto-backup] failed: $e\n$st');
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        await _note(prefs, 'Stopped by an error: $e');
+      } catch (_) {}
       return true;
     }
   });
@@ -83,19 +102,41 @@ void callbackDispatcher() {
 
 Future<bool> _runOnce() async {
   final prefs = await SharedPreferences.getInstance();
+  // Stamped FIRST, before anything can go wrong. Every early return below then
+  // leaves a row saying what happened, instead of the silence that made this
+  // impossible to tell apart from "the task never fired".
+  await prefs.reload();
+  await _stamp(prefs);
+
   if (prefs.getBool(kAutoEnabled) != true) {
-    // Switched off between scheduling and running. Cancel rather than just
-    // returning, so a phone whose owner turned this off does not keep waking
-    // for a task that will do nothing.
     await Workmanager().cancelByUniqueName(_uniqueName);
+    await _note(prefs, 'Switched off');
     return true;
   }
 
   final url = await _secure.read(key: _kUrl);
   final token = await _secure.read(key: _kToken);
   if (url == null || url.isEmpty || token == null || token.isEmpty) {
-    // Signed out. Not an error and not worth retrying.
     await _note(prefs, 'Not signed in');
+    return true;
+  }
+
+  // getPermissionState, NOT requestPermissionExtend.
+  //
+  // This is the bug that made automatic backup do nothing at all. Asking for
+  // permission needs an Activity to put the dialog on, and a background task
+  // has no Activity — so the request came back denied, runFullBackup() gave
+  // up at its permission gate, and the run recorded "Nothing new". The photos
+  // were there and the app was allowed to read them; nobody was awake to be
+  // asked.
+  //
+  // getPermissionState reads what was already granted and never prompts. If
+  // access genuinely has not been given, that is for the screen with a button
+  // on it, not for a task running while the phone is in someone's pocket.
+  final perm = await PhotoManager.getPermissionState(
+      requestOption: const PermissionRequestOption());
+  if (!perm.hasAccess) {
+    await _note(prefs, 'Not allowed to see your photos \u2014 open the app and grant access');
     return true;
   }
 
@@ -109,18 +150,22 @@ Future<bool> _runOnce() async {
             ? '${p.done} backed up, ${p.failed} could not be sent'
             : p.done > 0
                 ? '${p.done} backed up'
-                : 'Nothing new');
+                : 'Nothing new to back up');
   } finally {
-    // The service holds a wakelock for the length of a run and releases it in
-    // its own finally; disposing here releases the listeners this isolate made.
     service.dispose();
   }
   return true;
 }
 
+Future<void> _stamp(SharedPreferences prefs) async {
+  await prefs.setInt(kAutoLastRun, DateTime.now().millisecondsSinceEpoch);
+  await prefs.setString(kAutoLastResult, 'Running\u2026');
+}
+
 Future<void> _note(SharedPreferences prefs, String result) async {
   await prefs.setString(kAutoLastResult, result);
   await prefs.setInt(kAutoLastRun, DateTime.now().millisecondsSinceEpoch);
+  debugPrint('[auto-backup] $result');
 }
 
 class BackgroundBackup {
@@ -177,6 +222,38 @@ class BackgroundBackup {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(kAutoEnabled, on);
     await apply();
+    if (on) await kick();
+  }
+
+  /// Run once, soon, without waiting for the schedule.
+  ///
+  /// Android refuses to schedule a PERIODIC task more often than every 15
+  /// minutes, so switching the setting on produced nothing observable for a
+  /// quarter of an hour — which is indistinguishable from a feature that does
+  /// not work, and was reported as one. This gives the switch an answer.
+  ///
+  /// Still subject to the same constraints: on Wi-Fi only, it waits for Wi-Fi.
+  /// A "run now" that ignored the network setting would be the one thing the
+  /// setting exists to prevent.
+  static Future<void> kick() async {
+    final prefs = await SharedPreferences.getInstance();
+    if ((prefs.getBool(kAutoEnabled) ?? false) != true) return;
+    try {
+      await Workmanager().registerOneOffTask(
+        _kickName,
+        _taskName,
+        initialDelay: const Duration(seconds: 10),
+        existingWorkPolicy: ExistingWorkPolicy.replace,
+        constraints: Constraints(
+          networkType: (prefs.getBool(kAutoWifiOnly) ?? true)
+              ? NetworkType.unmetered
+              : NetworkType.connected,
+          requiresCharging: prefs.getBool(kAutoChargingOnly) ?? false,
+        ),
+      );
+    } catch (e) {
+      debugPrint('[auto-backup] kick failed: $e');
+    }
   }
 
   static Future<bool> isEnabled() async =>

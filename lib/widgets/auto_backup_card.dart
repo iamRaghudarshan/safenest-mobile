@@ -58,9 +58,10 @@ class _AutoBackupCardState extends State<AutoBackupCard> {
   }
 
   String get _cadence => Platform.isIOS
-      ? 'iOS decides when this runs — usually while charging, and it can be '
-          'many hours. It is a convenience, not a guarantee, so keep using the '
-          'button above when you want something backed up now.'
+      ? 'iOS decides when this runs, usually while the phone is idle or '
+          'charging. Each turn is limited, so a big library finishes over '
+          'several — it picks up where it stopped. Use the button above when '
+          'you want something backed up now.'
       : 'Runs about once an hour in the background, and starts again by itself '
           'after the phone restarts.';
 
