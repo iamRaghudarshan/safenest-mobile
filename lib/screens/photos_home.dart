@@ -22,6 +22,7 @@ import '../backup.dart';
 import '../offline/store.dart';
 import '../session.dart';
 import '../theme.dart';
+import '../widgets/backup_blocked_banner.dart';
 import '../widgets/brand_button.dart';
 import 'backup_screen.dart';
 import 'collections_home.dart';
@@ -116,6 +117,10 @@ class _PhotosHomeState extends State<PhotosHome> {
         ],
       ),
       body: Column(children: [
+        // Where the photos are, which is where somebody notices that new
+        // ones have stopped arriving. Renders nothing unless automatic
+        // backup is on AND the phone is refusing to run it.
+        const BackupBlockedBanner(),
         Padding(
           // Room above and below, so the switcher is not jammed against the app
           // bar (it read as "no padding") and sits as a clear band of its own.

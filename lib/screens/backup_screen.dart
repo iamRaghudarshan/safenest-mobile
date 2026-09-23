@@ -35,6 +35,7 @@ import '../backup.dart';
 import '../offline/store.dart';
 import '../session.dart';
 import '../theme.dart';
+import '../widgets/backup_blocked_banner.dart';
 import '../widgets/auto_backup_card.dart';
 import '../widgets/backup_flight.dart';
 import '../widgets/brand_button.dart';
@@ -109,6 +110,9 @@ class _BackupScreenState extends State<BackupScreen> {
       body: ListView(
         padding: const EdgeInsets.fromLTRB(18, 8, 18, 32),
         children: [
+          // Repeated here as well as on the gallery: this is the screen
+          // somebody opens when they have noticed nothing is happening.
+          const BackupBlockedBanner(),
           Center(
             child: Container(
               width: 92,
