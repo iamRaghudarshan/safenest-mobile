@@ -14,9 +14,15 @@
 /// to recognise a document by its shape, a list to compare dates and sizes.
 /// The choice is remembered.
 ///
-/// Categories stand in for Drive's folders. The server already files documents
-/// by category — id, bill, medical and so on — and inventing a second folder
-/// tree on the phone would mean two organisations of the same drawer.
+/// CATEGORIES AND FOLDERS ARE BOTH HERE NOW, and the earlier note in this file
+/// said they should not be. That note was right when it was written: the server
+/// had only categories, so a folder tree on the phone would have been a second
+/// organisation of the same drawer, invented locally and true nowhere else.
+///
+/// The server has real folders now. So the phone shows the ONE tree the server
+/// keeps, and categories go on being what they already were — a cross-cutting
+/// label, like a colour, not a place. Browsing is by folder; the category chips
+/// filter whatever is in view.
 library;
 
 import 'dart:io';
@@ -57,6 +63,19 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
   static const _viewKey = 'documents.view.grid';
   String _category = 'all';
   String _query = '';
+
+  /// Which folder is open. 0 is the TOP LEVEL, which is a real place — not
+  /// "no filter". Searching leaves the tree entirely, because a search limited
+  /// to the folder somebody happens to be standing in is the complaint every
+  /// file manager that did it has had.
+  int _folder = 0;
+  List<Map<String, dynamic>> _folders = const [];
+  List<Map<String, dynamic>> _path = const [];
+
+  /// Multi-select. A Set because every rebuild asks "is this one picked?" once
+  /// per row, and a list would make that a scan.
+  final Set<int> _picked = <int>{};
+  bool get _selecting => _picked.isNotEmpty;
   String? _error;
   final _search = TextEditingController();
 
@@ -152,15 +171,34 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
   Future<void> _load() async {
     setState(() => _loading = true);
     try {
+      // Searching or filtering by category looks through the WHOLE tree;
+      // browsing shows one folder. They are different questions, and the
+      // single endpoint answers whichever it is given.
+      final searching = _query.isNotEmpty || _category != 'all';
       final d = await context.read<Session>().api.get('/api/documents', {
         if (_category != 'all') 'category': _category,
         if (_query.isNotEmpty) 'q': _query,
+        if (!searching) 'folder': '$_folder',
       });
       setState(() {
+        final root = d as Map;
         _docs = [
-          for (final e in ((d as Map)['items'] as List? ?? const []))
+          for (final e in (root['items'] as List? ?? const []))
             Map<String, dynamic>.from(e as Map)
         ];
+        _folders = [
+          for (final e in (root['folders'] as List? ?? const []))
+            Map<String, dynamic>.from(e as Map)
+        ];
+        _path = [
+          for (final e in (root['path'] as List? ?? const []))
+            Map<String, dynamic>.from(e as Map)
+        ];
+        // Anything selected that is no longer on screen would make a bulk
+        // action fire on rows nobody can see — which is exactly the case
+        // where nobody can check what they are about to do.
+        _picked.removeWhere(
+            (id) => !_docs.any((d) => (d['id'] as num).toInt() == id));
         _loading = false;
         _error = null;
       });
@@ -174,6 +212,254 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
 
   String _abs(String u) =>
       u.startsWith('http') ? u : '${context.read<Session>().baseUrl ?? ''}$u';
+
+  // ------------------------------------------------------------ folders
+
+  void _openFolder(int id) {
+    setState(() {
+      _folder = id;
+      _picked.clear();
+    });
+    _load();
+  }
+
+  Future<void> _newFolder() async {
+    final controller = TextEditingController();
+    final name = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('New folder'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          maxLength: 160,
+          decoration: const InputDecoration(hintText: 'Bank statements'),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          FilledButton(
+              onPressed: () => Navigator.pop(ctx, controller.text.trim()),
+              child: const Text('Create')),
+        ],
+      ),
+    );
+    if (name == null || name.isEmpty || !mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await context.read<Session>().api.post('/api/documents/folders', {
+        'name': name,
+        'parent_id': _folder == 0 ? null : _folder,
+      });
+      await _load();
+    } on ApiError catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text(e.message)));
+    }
+  }
+
+  Future<void> _renameFolder(Map<String, dynamic> f) async {
+    // Opens with the CURRENT name. An empty box turns a rename into "type the
+    // whole thing again", which is not what the word means.
+    final controller = TextEditingController(text: '${f['name'] ?? ''}');
+    final name = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Rename folder'),
+        content: TextField(
+            controller: controller, autofocus: true, maxLength: 160),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          FilledButton(
+              onPressed: () => Navigator.pop(ctx, controller.text.trim()),
+              child: const Text('Rename')),
+        ],
+      ),
+    );
+    if (name == null || name.isEmpty || !mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await context
+          .read<Session>()
+          .api
+          .put('/api/documents/folders/${f['id']}', {'name': name});
+      await _load();
+    } on ApiError catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text(e.message)));
+    }
+  }
+
+  Future<void> _trashFolder(Map<String, dynamic> f) async {
+    final docs = (f['documents'] as num?)?.toInt() ?? 0;
+    final subs = (f['folders'] as num?)?.toInt() ?? 0;
+    // Says what it will take with it. A folder delete that quietly binned
+    // forty documents would be a nasty surprise, and the count is the only
+    // thing that makes the confirmation worth reading.
+    final extra = (docs == 0 && subs == 0)
+        ? ''
+        : ' and ${[
+            if (docs > 0) '$docs document${docs == 1 ? '' : 's'}',
+            if (subs > 0) '$subs folder${subs == 1 ? '' : 's'}',
+          ].join(' and ')} inside it';
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Move to the recycle bin?'),
+        content: Text('“${f['name']}”$extra will go to the recycle bin.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Keep')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Move it')),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await context
+          .read<Session>()
+          .api
+          .delete('/api/documents/folders/${f['id']}');
+      await _load();
+    } on ApiError catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text(e.message)));
+    }
+  }
+
+  // ------------------------------------------------------------ selection
+
+  void _toggle(int id) => setState(() {
+        if (!_picked.remove(id)) _picked.add(id);
+      });
+
+  Future<void> _bulk(String action, String said) async {
+    if (_picked.isEmpty) return;
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final r = await context.read<Session>().api.post(
+          '/api/documents/bulk', {'ids': _picked.toList(), 'action': action});
+      // Reports what CHANGED, not what was asked for. The two differ when a
+      // document was already starred, and "4 starred" over 2 real changes is
+      // the kind of small lie that makes people stop believing the counts.
+      final n = (r is Map ? (r['changed'] as num?)?.toInt() : null) ?? 0;
+      messenger.showSnackBar(SnackBar(content: Text('$n $said')));
+      setState(_picked.clear);
+      await _load();
+    } on ApiError catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text(e.message)));
+    }
+  }
+
+  Future<void> _moveSelected() async {
+    final target = await _pickFolder();
+    if (target == null || !mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await context.read<Session>().api.post('/api/documents/move', {
+        'ids': _picked.toList(),
+        'folder_id': target.$1,
+      });
+      messenger.showSnackBar(
+          SnackBar(content: Text('${_picked.length} moved to ${target.$2}')));
+      setState(_picked.clear);
+      await _load();
+    } on ApiError catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text(e.message)));
+    }
+  }
+
+  /// A flat list of every folder, indented by depth. Returns (id, name), with
+  /// a null id meaning the top level.
+  Future<(int?, String)?> _pickFolder() async {
+    List<Map<String, dynamic>> all = const [];
+    try {
+      final r = await context.read<Session>().api.get('/api/documents/folders');
+      all = [
+        for (final e in ((r as Map)['items'] as List? ?? const []))
+          Map<String, dynamic>.from(e as Map)
+      ];
+    } on ApiError catch (_) {
+      // An empty list still lets somebody move things to the top level, which
+      // is more useful than refusing to open the sheet.
+    }
+    if (!mounted) return null;
+
+    int depthOf(Map<String, dynamic> f) {
+      var n = 0;
+      var cur = f['parent_id'];
+      final seen = <int>{};
+      // Bounded, and cycle-aware: a loop in the tree would otherwise hang the
+      // sheet rather than the request that made it.
+      while (cur is num && n < 32 && seen.add(cur.toInt())) {
+        n++;
+        final parent = all.firstWhere(
+          (x) => (x['id'] as num).toInt() == cur,
+          orElse: () => const {},
+        );
+        cur = parent['parent_id'];
+      }
+      return n;
+    }
+
+    return showModalBottomSheet<(int?, String)>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) => SafeArea(
+        child: ListView(
+          shrinkWrap: true,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.home_outlined),
+              title: const Text('Documents (top level)'),
+              onTap: () => Navigator.pop(ctx, (null, 'the top level')),
+            ),
+            for (final f in all)
+              ListTile(
+                contentPadding: EdgeInsets.only(
+                    left: 16 + depthOf(f) * 18.0, right: 16),
+                leading: const Icon(Icons.folder_outlined),
+                title: Text('${f['name']}'),
+                onTap: () => Navigator.pop(
+                    ctx, ((f['id'] as num).toInt(), '${f['name']}')),
+              ),
+            if (all.isEmpty)
+              const Padding(
+                padding: EdgeInsets.all(20),
+                child: Text('No folders yet. Make one first.'),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _shareSelected() async {
+    if (_picked.isEmpty) return;
+    final messenger = ScaffoldMessenger.of(context);
+    final chosen = _docs
+        .where((d) => _picked.contains((d['id'] as num).toInt()))
+        .toList();
+    messenger.showSnackBar(const SnackBar(content: Text('Preparing…')));
+    final err = await shareFromServer(
+      context.read<Session>().api,
+      items: [
+        for (final d in chosen)
+          (
+            path: '${d['file_url']}',
+            name: '${d['title'] ?? 'document'}.${d['ext'] ?? 'bin'}',
+          ),
+      ],
+    );
+    if (!mounted) return;
+    if (err != null) {
+      messenger.showSnackBar(SnackBar(content: Text(err)));
+    } else {
+      setState(_picked.clear);
+    }
+  }
 
   /// Extensions the server can show as text or rows. Kept in step with
   /// TEXT_EXT / CSV_EXT / OFFICE_EXT in backend/app/routers/documents.py.
@@ -404,6 +690,11 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
               ],
             ),
           ),
+          // The way back up. Hidden while searching, because results come
+          // from the WHOLE tree and a breadcrumb over them would name a
+          // folder most of the results are not in.
+          if (_query.isEmpty && _category == 'all') _crumbs(),
+          if (_selecting) _selectionBar(),
           Expanded(
             child: _loading
                 ? const SkeletonList()
@@ -419,7 +710,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                           ]),
                         ),
                       )
-                    : _docs.isEmpty
+                    : (_docs.isEmpty && _folders.isEmpty)
                         ? const Center(
                             child: Padding(
                               padding: EdgeInsets.all(36),
@@ -448,6 +739,116 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
     );
   }
 
+  Widget _crumbs() {
+    return SizedBox(
+      height: 40,
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        children: [
+          TextButton(
+            onPressed: _folder == 0 ? null : () => _openFolder(0),
+            child: const Text('Documents'),
+          ),
+          for (final c in _path) ...[
+            const Icon(Icons.chevron_right, size: 16),
+            TextButton(
+              onPressed: () => _openFolder((c['id'] as num).toInt()),
+              child: Text('${c['name']}'),
+            ),
+          ],
+          TextButton.icon(
+            onPressed: _newFolder,
+            icon: const Icon(Icons.create_new_folder_outlined, size: 18),
+            label: const Text('New folder'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _selectionBar() {
+    return Material(
+      color: Theme.of(context).colorScheme.secondaryContainer,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+        child: Row(
+          children: [
+            IconButton(
+              icon: const Icon(Icons.close),
+              tooltip: 'Clear selection',
+              onPressed: () => setState(_picked.clear),
+            ),
+            Expanded(
+              child: Text('${_picked.length} selected',
+                  style: const TextStyle(fontWeight: FontWeight.w600)),
+            ),
+            IconButton(
+                icon: const Icon(Icons.star_border),
+                tooltip: 'Star',
+                onPressed: () => _bulk('star', 'starred')),
+            IconButton(
+                icon: const Icon(Icons.ios_share),
+                tooltip: 'Share',
+                onPressed: _shareSelected),
+            IconButton(
+                icon: const Icon(Icons.drive_file_move_outline),
+                tooltip: 'Move to a folder',
+                onPressed: _moveSelected),
+            IconButton(
+                icon: const Icon(Icons.delete_outline),
+                tooltip: 'Move to recycle bin',
+                onPressed: () =>
+                    _bulk('trash', 'moved to the recycle bin')),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// One folder, as a row. Rename and delete sit behind a long press rather
+  /// than two more buttons per row: a wall of folders should read as folders.
+  Widget _folderTile(Map<String, dynamic> f) {
+    final docs = (f['documents'] as num?)?.toInt() ?? 0;
+    final subs = (f['folders'] as num?)?.toInt() ?? 0;
+    return ListTile(
+      leading: const Icon(Icons.folder, size: 30),
+      title: Text('${f['name']}',
+          maxLines: 2, overflow: TextOverflow.ellipsis),
+      subtitle: Text(
+        [
+          if (subs > 0) '$subs folder${subs == 1 ? '' : 's'}',
+          if (docs > 0) '$docs item${docs == 1 ? '' : 's'}',
+          if (subs == 0 && docs == 0) 'Empty',
+        ].join(' · '),
+        style: const TextStyle(fontSize: 12),
+      ),
+      onTap: () => _openFolder((f['id'] as num).toInt()),
+      onLongPress: () async {
+        final choice = await showModalBottomSheet<String>(
+          context: context,
+          showDragHandle: true,
+          builder: (ctx) => SafeArea(
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              ListTile(
+                leading: const Icon(Icons.drive_file_rename_outline),
+                title: const Text('Rename'),
+                onTap: () => Navigator.pop(ctx, 'rename'),
+              ),
+              ListTile(
+                leading: const Icon(Icons.delete_outline),
+                title: const Text('Move to recycle bin'),
+                onTap: () => Navigator.pop(ctx, 'trash'),
+              ),
+            ]),
+          ),
+        );
+        if (choice == 'rename') await _renameFolder(f);
+        if (choice == 'trash') await _trashFolder(f);
+      },
+    );
+  }
+
   Widget _gridView() => GridView.builder(
         padding: const EdgeInsets.all(12),
         gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
@@ -456,30 +857,70 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
           mainAxisSpacing: 12,
           childAspectRatio: 0.78,
         ),
-        itemCount: _docs.length,
-        itemBuilder: (ctx, i) {
-          final d = _docs[i];
+        itemCount: _folders.length + _docs.length,
+        itemBuilder: (ctx, index) {
+          if (index < _folders.length) {
+            final f = _folders[index];
+            return InkWell(
+              onTap: () => _openFolder((f['id'] as num).toInt()),
+              borderRadius: BorderRadius.circular(14),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Icon(Icons.folder, size: 46),
+                  const SizedBox(height: 6),
+                  Text('${f['name']}',
+                      maxLines: 2,
+                      textAlign: TextAlign.center,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                          fontWeight: FontWeight.w600, fontSize: 13)),
+                ],
+              ),
+            );
+          }
+          final d = _docs[index - _folders.length];
+          final picked = _picked.contains((d['id'] as num).toInt());
           return InkWell(
-            onTap: () => _canPreview(d) ? _preview(d) : _open(d),
+            onTap: () => _selecting
+                ? _toggle((d['id'] as num).toInt())
+                : (_canPreview(d) ? _preview(d) : _open(d)),
+            onLongPress: () => _toggle((d['id'] as num).toInt()),
             borderRadius: BorderRadius.circular(14),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Expanded(
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(14),
-                    child: Container(
-                      width: double.infinity,
-                      color: Theme.of(ctx).colorScheme.surfaceContainerHighest,
-                      child: Image.network(
-                        _abs('${d['thumb_url']}'),
-                        fit: BoxFit.cover,
-                        cacheWidth: 400,
-                        errorBuilder: (a, b, c) =>
-                            Center(child: Icon(_icon(d), size: 40)),
+                  child: Stack(fit: StackFit.expand, children: [
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(14),
+                      child: Container(
+                        width: double.infinity,
+                        color: Theme.of(ctx).colorScheme.surfaceContainerHighest,
+                        child: Image.network(
+                          _abs('${d['thumb_url']}'),
+                          fit: BoxFit.cover,
+                          cacheWidth: 400,
+                          errorBuilder: (a, b, c) =>
+                              Center(child: Icon(_icon(d), size: 40)),
+                        ),
                       ),
                     ),
-                  ),
+                    // Shown only when ticked. A permanent circle on every
+                    // tile turns a wall of documents into a wall of controls.
+                    if (picked)
+                      Positioned(
+                        right: 6,
+                        top: 6,
+                        child: CircleAvatar(
+                          radius: 13,
+                          backgroundColor:
+                              Theme.of(ctx).colorScheme.primary,
+                          child: const Icon(Icons.check,
+                              size: 16, color: Colors.white),
+                        ),
+                      ),
+                  ]),
                 ),
                 const SizedBox(height: 8),
                 Text('${d['title'] ?? 'Document'}',
@@ -496,16 +937,25 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
 
   Widget _listView() => ListView.builder(
         padding: const EdgeInsets.fromLTRB(14, 4, 14, 90),
-        itemCount: _docs.length,
-        itemBuilder: (ctx, i) {
+        itemCount: _folders.length + _docs.length,
+        itemBuilder: (ctx, index) {
+          if (index < _folders.length) return _folderTile(_folders[index]);
+          final i = index - _folders.length;
           final d = _docs[i];
           final tint = _tint(d);
           final cat = '${d['category'] ?? ''}';
           return Padding(
             padding: const EdgeInsets.only(bottom: 10),
             child: BrandCard(
-              onTap: () => _canPreview(d) ? _preview(d) : _open(d),
-              onLongPress: () => _actions(d),
+              // Once ANYTHING is selected a tap picks rather than opens.
+              // Mixing the two is how somebody selects four documents and
+              // loses the lot by tapping the fifth.
+              onTap: () => _selecting
+                  ? _toggle((d['id'] as num).toInt())
+                  : (_canPreview(d) ? _preview(d) : _open(d)),
+              onLongPress: () => _selecting
+                  ? _toggle((d['id'] as num).toInt())
+                  : _actions(d),
               padding: const EdgeInsets.fromLTRB(14, 12, 12, 12),
               child: Row(children: [
                 // A PDF and a photo are different things to open, so they are

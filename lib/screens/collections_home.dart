@@ -22,6 +22,7 @@ import 'package:provider/provider.dart';
 
 import '../api.dart';
 import '../session.dart';
+import 'suggestions_strip.dart';
 import '../theme.dart';
 import 'documents_screen.dart';
 import 'library_tabs.dart';
@@ -205,6 +206,13 @@ class CollectionsHomeState extends State<CollectionsHome> {
       child: ListView(
         padding: const EdgeInsets.only(bottom: 28),
         children: [
+          // Above the albums, because a suggestion is a thing to decide and
+          // the sections below are things to browse. It draws nothing when
+          // there is nothing to offer.
+          SuggestionsStrip(
+            api: context.read<Session>().api,
+            onMade: load,
+          ),
           if (_people.isNotEmpty) _peopleSection(),
           _albumsSection(),
           _collectionsSection(),
