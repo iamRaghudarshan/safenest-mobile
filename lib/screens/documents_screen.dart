@@ -32,6 +32,7 @@ import '../api.dart';
 import '../dates.dart';
 import '../session.dart';
 import '../sharing.dart';
+import 'doc_preview.dart';
 import 'scan_screen.dart';
 import '../masters.dart';
 import '../theme.dart';
@@ -174,6 +175,35 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
   String _abs(String u) =>
       u.startsWith('http') ? u : '${context.read<Session>().baseUrl ?? ''}$u';
 
+  /// Extensions the server can show as text or rows. Kept in step with
+  /// TEXT_EXT / CSV_EXT / OFFICE_EXT in backend/app/routers/documents.py.
+  ///
+  /// Duplicated here ON PURPOSE rather than asked for: the listing already
+  /// carries `is_text`, and this is only the fallback for a row that predates
+  /// that field. Opening the preview and having it 415 is a worse first
+  /// impression than not offering it.
+  static const _previewable = {
+    'txt', 'md', 'log', 'json', 'xml', 'yml', 'yaml', 'ini', 'conf',
+    'csv', 'tsv', 'docx', 'xlsx', 'pptx',
+  };
+
+  bool _canPreview(Map<String, dynamic> doc) =>
+      doc['is_text'] == true ||
+      _previewable.contains((doc['ext'] ?? '').toString().toLowerCase());
+
+  /// Read it in the app. Falls back to downloading, which is what every
+  /// non-image did before.
+  void _preview(Map<String, dynamic> doc) {
+    Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => DocPreviewScreen(
+        api: context.read<Session>().api,
+        id: (doc['id'] as num).toInt(),
+        title: (doc['title'] ?? 'Document').toString(),
+        onDownload: () => _open(doc),
+      ),
+    ));
+  }
+
   /// Opened by downloading first, then handing the file to whatever the phone
   /// uses for PDFs. The media URL is signed and expiring, so a viewer that
   /// fetched it later — or a second time — would get nothing.
@@ -213,6 +243,13 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
             subtitle: const Text('Sends the file itself, not a link'),
             onTap: () => Navigator.pop(ctx, 'share'),
           ),
+          if (_canPreview(doc))
+            ListTile(
+              leading: const Icon(Icons.article_outlined),
+              title: const Text('Read here'),
+              subtitle: const Text('Without downloading it'),
+              onTap: () => Navigator.pop(ctx, 'preview'),
+            ),
           ListTile(
             leading: const Icon(Icons.open_in_new),
             title: const Text('Open'),
@@ -223,6 +260,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
     );
     if (choice == null || !mounted) return;
     if (choice == 'open') return _open(doc);
+    if (choice == 'preview') return _preview(doc);
 
     final messenger = ScaffoldMessenger.of(context);
     final api = context.read<Session>().api;
@@ -422,7 +460,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
         itemBuilder: (ctx, i) {
           final d = _docs[i];
           return InkWell(
-            onTap: () => _open(d),
+            onTap: () => _canPreview(d) ? _preview(d) : _open(d),
             borderRadius: BorderRadius.circular(14),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -466,7 +504,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
           return Padding(
             padding: const EdgeInsets.only(bottom: 10),
             child: BrandCard(
-              onTap: () => _open(d),
+              onTap: () => _canPreview(d) ? _preview(d) : _open(d),
               onLongPress: () => _actions(d),
               padding: const EdgeInsets.fromLTRB(14, 12, 12, 12),
               child: Row(children: [

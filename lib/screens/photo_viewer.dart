@@ -27,6 +27,9 @@ import '../widgets/video_page.dart';
 import '../theme.dart';
 import '../dates.dart';
 import '../session.dart';
+import 'gallery_screen.dart' show Photo;
+import 'photo_editor.dart';
+import 'video_trim.dart';
 import 'gallery_screen.dart';
 
 class PhotoViewer extends StatefulWidget {
@@ -131,6 +134,41 @@ class _PhotoViewerState extends State<PhotoViewer> {
           .showSnackBar(SnackBar(content: Text(e.message)));
     }
   }
+
+  /// Crop, rotate, filter or draw on it — or, for a video, trim it.
+  ///
+  /// The editor returns the UPDATED item, and the viewer swaps it in rather
+  /// than waiting for the grid behind to reload: the media URL keeps the same
+  /// filename after an edit, so without a fresh one the browser-side cache
+  /// would show the old picture and Save would appear to have done nothing.
+  Future<void> _edit() async {
+    final p = _photos[_index];
+    final updated = await Navigator.of(context).push<Object?>(
+      MaterialPageRoute(
+        builder: (_) => p.isVideo
+            ? VideoTrimScreen(
+                api: context.read<Session>().api,
+                photoId: p.id,
+                videoUrl: _abs(p.url),
+                durationMs: p.durationMs ?? 0,
+                initial: p.edit,
+              )
+            : PhotoEditorScreen(
+                api: context.read<Session>().api,
+                photoId: p.id,
+                imageUrl: _abs(p.url),
+                initial: p.edit,
+              ),
+      ),
+    );
+    if (updated is! Map || !mounted) return;
+    final fresh = Photo.fromJson(updated.cast<String, dynamic>());
+    setState(() => _photos[_index] = fresh);
+    widget.onChanged?.call();
+  }
+
+  String _abs(String u) =>
+      u.startsWith('http') ? u : '${context.read<Session>().baseUrl ?? ''}$u';
 
   /// Send this photo out of the app.
   ///
@@ -248,6 +286,10 @@ class _PhotoViewerState extends State<PhotoViewer> {
                         icon: Icons.ios_share,
                         label: 'Share',
                         onTap: _share),
+                    _Action(
+                        icon: p.isVideo ? Icons.content_cut : Icons.tune,
+                        label: p.isVideo ? 'Trim' : 'Edit',
+                        onTap: _edit),
                     _Action(
                         icon: Icons.info_outline,
                         label: 'Details',
