@@ -74,12 +74,23 @@ on:
 jobs:
   android:
     name: Android
-    # OFF unless asked for. It has failed on every run so far, and every one of
-    # those still consumed the account's Actions minutes — which is part of why
-    # they ran out mid-afternoon and the iOS builds stopped with them. A job that
-    # cannot succeed should not be spending the budget the working one needs.
+    # OFF unless asked for — but NOT any longer because it cannot work.
     #
-    # Turn it back on with the workflow_dispatch input once it is actually fixed.
+    # It used to fail on every run, and every failure still spent the account's
+    # Actions minutes, which is part of why they ran out mid-afternoon and took
+    # the iOS builds with them. That was the reason for this gate.
+    #
+    # IT SUCCEEDS NOW. Run 141 (tag android-1.64.0) produced a 21 MB artifact
+    # holding a 43 MB app-release.apk: valid zip, AndroidManifest present,
+    # libflutter.so and libapp.so present, and signed — no META-INF/*.RSA,
+    # because it is signed with schemes v2 and v4, which live in the APK
+    # Signing Block rather than in the zip listing. Checked from the artifact
+    # rather than inferred from a green tick.
+    #
+    # The gate is LEFT IN PLACE deliberately: a `v*` tag spends a macOS runner
+    # at ten times the rate, and adding an Android job to it doubles what every
+    # release costs. An `android-*` tag is the cheap, explicit way to ask.
+    # Whoever wants Android on every release should flip this knowingly.
     #
     # `android-*` tags build it too, and dispatching needs an Actions:write
     # token this project deliberately does not keep — so a tag is the only way
