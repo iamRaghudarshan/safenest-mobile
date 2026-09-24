@@ -96,9 +96,12 @@ class _AlbumsTabState extends State<AlbumsTab> {
         itemCount: _albums.length,
         itemBuilder: (ctx, i) {
           final a = _albums[i];
+          final smart = a['smart'] == true;
           return _Cover(
             title: '${a['name'] ?? 'Album'}',
             count: (a['count'] ?? 0) as int,
+            note: smart ? '${a['rule_text'] ?? 'saved search'}' : null,
+            badge: smart ? Icons.search : null,
             imageUrl: a['cover_url'] == null
                 ? null
                 : _abs(ctx, '${a['cover_url']}'),
@@ -113,7 +116,11 @@ class _AlbumsTabState extends State<AlbumsTab> {
                       // empty grid. The photos come from the main index with an
                       // album filter, which is what the web app uses too.
                       path: '/api/gallery?album=${a['id']}',
-                      albumId: a['id'] as int?,
+                      // A SAVED SEARCH has no membership to edit: nothing was
+                      // ever filed into it, so "add" would write to a list
+                      // this view does not read and "remove" would look
+                      // broken when the rule put the photo straight back.
+                      albumId: smart ? null : a['id'] as int?,
                     ),
                   ),
                 )
@@ -1479,12 +1486,24 @@ class _Cover extends StatelessWidget {
     required this.imageUrl,
     required this.onTap,
     required this.square,
+    this.note,
+    this.badge,
   });
   final String title;
   final int count;
   final String? imageUrl;
   final VoidCallback onTap;
   final bool square;
+
+  /// Replaces the photo count. Used for a SAVED SEARCH, where the rule is the
+  /// useful line: an album that fills itself for reasons nobody can see is one
+  /// people stop trusting, and when it shows the wrong photos this is the only
+  /// way to tell why.
+  final String? note;
+
+  /// A small mark over the cover, saying this album answers a question rather
+  /// than holding a list.
+  final IconData? badge;
 
   @override
   Widget build(BuildContext context) {
@@ -1502,20 +1521,37 @@ class _Cover extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Expanded(
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(square ? 999 : 14),
-              child: AspectRatio(
-                aspectRatio: 1,
-                child: imageUrl == null
-                    ? placeholder
-                    : Image.network(
-                        imageUrl!,
-                        fit: BoxFit.cover,
-                        cacheWidth: 400,
-                        errorBuilder: (a, b, c) => placeholder,
-                      ),
+            child: Stack(children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(square ? 999 : 14),
+                child: AspectRatio(
+                  aspectRatio: 1,
+                  child: imageUrl == null
+                      ? placeholder
+                      : Image.network(
+                          imageUrl!,
+                          fit: BoxFit.cover,
+                          cacheWidth: 400,
+                          errorBuilder: (a, b, c) => placeholder,
+                        ),
+                ),
               ),
-            ),
+              if (badge != null)
+                Positioned(
+                  left: 6,
+                  top: 6,
+                  child: Container(
+                    width: 22,
+                    height: 22,
+                    alignment: Alignment.center,
+                    decoration: const BoxDecoration(
+                      color: Color(0x8C000000),
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(badge, size: 13, color: Colors.white),
+                  ),
+                ),
+            ]),
           ),
           const SizedBox(height: 8),
           Text(
@@ -1526,7 +1562,11 @@ class _Cover extends StatelessWidget {
             style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
           ),
           Text(
-            '$count',
+            // The RULE where there is one, because it says why these photos
+            // are here; the count otherwise.
+            note ?? '$count',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
             textAlign: square ? TextAlign.center : TextAlign.start,
             style: Theme.of(context).textTheme.bodySmall,
           ),

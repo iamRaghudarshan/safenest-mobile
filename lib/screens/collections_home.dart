@@ -26,6 +26,7 @@ import 'suggestions_strip.dart';
 import '../theme.dart';
 import 'documents_screen.dart';
 import 'library_tabs.dart';
+import 'labels_screen.dart';
 import 'places_screen.dart';
 import 'trash_screen.dart';
 import 'cleanup_screen.dart';
@@ -438,6 +439,20 @@ class CollectionsHomeState extends State<CollectionsHome> {
         emptyNote: 'Tap the heart on a photo',
         onTap: () => _open(const CollectionScreen(
             title: 'Favourites', path: '/api/gallery?fav=1')),
+      ),
+      // Browsing by what is IN the photo. Beside Places rather than under
+      // search, because both answer "show me the ones that are about X" —
+      // and neither needs the word typed first.
+      _Tile(
+        icon: Icons.label_outline,
+        colour: const Color(0xFF7C5CFF),
+        title: 'What is in them',
+        // count 0 makes the tile print its emptyNote, not the unit — so the
+        // subtitle goes there. Passing `unit` instead left it reading
+        // "Empty", which is both wrong and discouraging.
+        count: 0,
+        emptyNote: 'beach, chart, dog…',
+        onTap: () => _open(const LabelsScreen()),
       ),
       if (_located > 0)
         _Tile(
