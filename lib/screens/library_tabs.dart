@@ -793,8 +793,14 @@ class _PeopleTabState extends State<PeopleTab> {
   Future<void> _load() async {
     setState(() => _loading = true);
     try {
-      final d = await context.read<Session>().api.get('/api/people',
-          {'min_photos': _onlyRepeat ? '2' : '1'});
+      // quality=1 keeps out the ones whose best face is a hand, an ear, a
+      // carving or a full profile — measured, not guessed. "Everyone" drops
+      // both filters at once, because somebody who turns one off wants to
+      // see what is being kept from them, not a second hidden rule.
+      final d = await context.read<Session>().api.get('/api/people', {
+        'min_photos': _onlyRepeat ? '2' : '1',
+        'quality': _onlyRepeat ? '1' : '0',
+      });
       setState(() {
         _people = [
           for (final p in ((d as Map)['people'] as List? ?? const []))

@@ -1149,7 +1149,7 @@ class _GalleryScreenState extends State<GalleryScreen>
       // poster or a statue rather than somebody you would filter by. The
       // People screen still offers everyone.
       final r = await context.read<Session>().api
-          .get('/api/people?limit=40&min_photos=2');
+          .get('/api/people?limit=40&min_photos=2&quality=1');
       final list = (r is Map ? r['people'] as List? : null) ?? const [];
       if (!mounted) return;
       setState(() => _people = [
