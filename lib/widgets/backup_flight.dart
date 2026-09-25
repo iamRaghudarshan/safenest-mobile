@@ -11,21 +11,39 @@
 /// dependency, another few hundred kilobytes in the download, and one more
 /// thing to have gone stale when the brand colour changes.
 ///
+/// THE PARCELS ARE THE REAL PHOTOGRAPHS. They used to be coloured squares
+/// with a mountain-and-sun glyph drawn on them, which is a picture OF a
+/// backup rather than a picture of yours. Handed the thumbnails actually in
+/// flight, it flies those instead, and the animation stops being decoration:
+/// it is the only place on the screen that shows the photo leaving. The
+/// drawn tile stays as the fallback for the moment before a thumbnail has
+/// decoded, and for anything that cannot produce one.
+///
 /// It STOPS when the backup stops. An animation that keeps looping after a run
 /// has finished says the work is still going on, and someone watching it will
 /// wait for something that already happened.
 library;
 
 import 'dart:math' as math;
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 
 
 class BackupFlight extends StatefulWidget {
-  const BackupFlight({super.key, required this.running});
+  const BackupFlight({
+    super.key,
+    required this.running,
+    this.photos = const [],
+  });
 
   /// Whether photos are actually moving right now.
   final bool running;
+
+  /// The thumbnails in flight, to fly instead of drawn tiles. Empty is
+  /// perfectly normal — before the first has decoded, and on the retry
+  /// screen — and the painter falls back to the drawn tile.
+  final List<ui.Image> photos;
 
   @override
   State<BackupFlight> createState() => _BackupFlightState();
@@ -75,6 +93,7 @@ class _BackupFlightState extends State<BackupFlight>
           painter: _FlightPainter(
             t: _c.value,
             running: widget.running,
+            photos: widget.photos,
             dark: dark,
             line: Theme.of(context).colorScheme.outlineVariant,
             ink: Theme.of(context).colorScheme.onSurface,
@@ -91,6 +110,7 @@ class _FlightPainter extends CustomPainter {
   _FlightPainter({
     required this.t,
     required this.running,
+    required this.photos,
     required this.dark,
     required this.line,
     required this.ink,
@@ -99,6 +119,7 @@ class _FlightPainter extends CustomPainter {
 
   final double t;
   final bool running;
+  final List<ui.Image> photos;
   final bool dark;
   final Color line;
   final Color ink;
@@ -172,8 +193,11 @@ class _FlightPainter extends CustomPainter {
         // A slight tilt that settles as it lands, so the tiles feel carried
         // rather than slid along a rail.
         final tilt = math.sin(p * math.pi * 2) * 0.12 * (1 - p);
+        // One parcel per photo in flight where there are any, so four
+        // uploads really are four tiles carrying four different pictures.
+        final image = photos.isEmpty ? null : photos[i % photos.length];
         _photo(canvas, Offset(x, midY - lift), fade, _hues[i % _hues.length],
-            tilt);
+            tilt, image);
       }
     }
 
@@ -182,8 +206,8 @@ class _FlightPainter extends CustomPainter {
     _label(canvas, 'Your computer', Offset(rightX, midY + 30), soft);
   }
 
-  void _photo(
-      Canvas canvas, Offset at, double opacity, Color hue, double tilt) {
+  void _photo(Canvas canvas, Offset at, double opacity, Color hue,
+      double tilt, ui.Image? image) {
     const w = 22.0;
     const h = w * 0.8;
 
@@ -221,20 +245,55 @@ class _FlightPainter extends CustomPainter {
           ..style = PaintingStyle.stroke
           ..strokeWidth = 1.3);
 
-    // A mountain and a sun, so the parcel reads as a photograph rather than as
-    // an abstract square.
-    final glyph = Paint()..color = Colors.white.withValues(alpha: 0.95 * opacity);
-    canvas.drawCircle(const Offset(-5, -3), 1.9, glyph);
-    final tri = Path()
-      ..moveTo(-7.5, 5.5)
-      ..lineTo(-1, -1.5)
-      ..lineTo(3, 2.5)
-      ..lineTo(5.5, 0)
-      ..lineTo(7.5, 5.5)
-      ..close();
-    canvas.drawPath(tri, glyph);
+    if (image != null) {
+      // The real photograph, clipped into the tile and cropped to fill it
+      // rather than squashed — a stretched thumbnail is worse than the drawn
+      // glyph it replaced.
+      canvas.save();
+      canvas.clipRRect(r);
+      final src = _cover(image, w / h);
+      canvas.drawImageRect(image, src, rect,
+          Paint()..color = Colors.white.withValues(alpha: opacity));
+      canvas.restore();
+      // The rim again, over the picture, so overlapping tiles still read as
+      // two.
+      canvas.drawRRect(
+          r,
+          Paint()
+            ..color = Colors.white.withValues(alpha: 0.9 * opacity)
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 1.3);
+    } else {
+      // A mountain and a sun, so a parcel with no thumbnail yet still reads
+      // as a photograph rather than as an abstract square.
+      final glyph =
+          Paint()..color = Colors.white.withValues(alpha: 0.95 * opacity);
+      canvas.drawCircle(const Offset(-5, -3), 1.9, glyph);
+      final tri = Path()
+        ..moveTo(-7.5, 5.5)
+        ..lineTo(-1, -1.5)
+        ..lineTo(3, 2.5)
+        ..lineTo(5.5, 0)
+        ..lineTo(7.5, 5.5)
+        ..close();
+      canvas.drawPath(tri, glyph);
+    }
 
     canvas.restore();
+  }
+
+  /// The largest centred rectangle of `image` with the tile's aspect ratio,
+  /// so the picture is cropped to fit rather than distorted.
+  static Rect _cover(ui.Image image, double aspect) {
+    final iw = image.width.toDouble();
+    final ih = image.height.toDouble();
+    if (iw <= 0 || ih <= 0) return Rect.fromLTWH(0, 0, iw, ih);
+    if (iw / ih > aspect) {
+      final w = ih * aspect;
+      return Rect.fromLTWH((iw - w) / 2, 0, w, ih);
+    }
+    final h = iw / aspect;
+    return Rect.fromLTWH(0, (ih - h) / 2, iw, h);
   }
 
   void _phone(Canvas canvas, Offset c, Color colour) {
@@ -311,6 +370,9 @@ class _FlightPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _FlightPainter old) =>
-      old.t != t || old.running != running || old.dark != dark;
+      old.t != t ||
+      old.running != running ||
+      old.dark != dark ||
+      !identical(old.photos, photos);
 }
 

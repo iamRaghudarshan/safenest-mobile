@@ -40,6 +40,7 @@ import '../widgets/auto_backup_card.dart';
 import '../widgets/backup_flight.dart';
 import '../widgets/brand_button.dart';
 import '../widgets/pill.dart';
+import '../widgets/uploading_now.dart';
 
 class BackupScreen extends StatefulWidget {
   const BackupScreen({super.key, this.debugProgress, this.service});
@@ -68,6 +69,12 @@ class _BackupScreenState extends State<BackupScreen> {
   BackupService? _service;
   bool _owns = false;   // only stop a service we created — a shared one keeps going
 
+  /// Decoded thumbnails of whatever is in flight, shared by the strip and
+  /// the flight animation. One cache, because both want the same pictures
+  /// and decoding them twice several times a second would be the reason the
+  /// backup screen made the backup slower.
+  final ThumbCache _thumbs = ThumbCache();
+
   @override
   void initState() {
     super.initState();
@@ -88,6 +95,9 @@ class _BackupScreenState extends State<BackupScreen> {
 
   @override
   void dispose() {
+    // Native image memory: a ui.Image is not something the garbage collector
+    // hurries over.
+    _thumbs.dispose();
     _service?.removeListener(_onChange);
     if (_owns) _service?.stop();   // a shared service must survive for the gallery
     super.dispose();
@@ -174,7 +184,19 @@ class _BackupScreenState extends State<BackupScreen> {
           //
           // Only animates while something is moving. A loop that carries on
           // after a finished run tells someone to keep waiting.
-          BackupFlight(running: running),
+          // It flies the REAL photographs now. ListenableBuilder because the
+          // thumbnails arrive one at a time, off the photo library, after the
+          // upload has already started.
+          ListenableBuilder(
+            listenable: _thumbs,
+            builder: (_, _) => BackupFlight(
+              running: running,
+              photos: [
+                for (final it in p.inFlight)
+                  if (_thumbs[it.id] != null) _thumbs[it.id]!,
+              ],
+            ),
+          ),
 
           const SizedBox(height: 10),
 
@@ -232,13 +254,25 @@ class _BackupScreenState extends State<BackupScreen> {
                           fontWeight: FontWeight.w600,
                           color: theme.colorScheme.onSurfaceVariant)),
                 ],
-                // THE FILE GOING UP RIGHT NOW, by name and by percentage.
+                // THE PHOTOGRAPHS GOING UP RIGHT NOW.
                 //
-                // The counter above cannot move while a single large video is
-                // sending, and on a long 4K clip that is minutes of a screen
-                // that looks frozen. This is the line that says the difference
-                // between slow and stuck.
+                // Photos go four at a time, so this is a row rather than one
+                // line: four thumbnails with four percentages, which is the
+                // only thing on the screen that answers "which of my photos
+                // is this". The name-and-percentage line below still covers
+                // the single-video case, where there is one thing in the air
+                // and its filename is worth reading.
                 if (p.state == BackupState.running &&
+                    p.inFlight.isNotEmpty) ...[
+                  const SizedBox(height: 14),
+                  ListenableBuilder(
+                    listenable: _thumbs,
+                    builder: (_, _) =>
+                        UploadingNow(items: p.inFlight, cache: _thumbs),
+                  ),
+                ],
+                if (p.state == BackupState.running &&
+                    p.inFlight.length == 1 &&
                     p.currentLabel.isNotEmpty &&
                     p.currentFraction != null) ...[
                   const SizedBox(height: 12),

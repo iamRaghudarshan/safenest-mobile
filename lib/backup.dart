@@ -1016,7 +1016,14 @@ class BackupService extends ChangeNotifier {
           done: ok,
           failed: bad,
           message: 'Trying $total photo${total == 1 ? '' : 's'} again…',
+          inFlight: _inFlight.values.toList(growable: false),
         ));
+    // The retry screen showed no per-photo progress at all, which is the
+    // worst place to omit it: these are the ones that already failed once,
+    // and a person watching a retry wants to see it actually trying.
+    onFileStart = (_, _) => report();
+    onFileProgress = (_, _) => report();
+    onFileDone = report;
     report();
 
     for (var i = 0; i < queue.length; i += _concurrency) {
