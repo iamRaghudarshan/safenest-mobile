@@ -601,6 +601,17 @@ class _PeopleTabState extends State<PeopleTab> {
                   'somebody else'),
               onTap: () => Navigator.pop(ctx, 'faces'),
             ),
+            // "This is me" — the one person the library can treat specially.
+            //
+            // Cleared from everybody else by the server, because two "me"s
+            // makes "photos of me" meaningless and the second one is always
+            // the mistake.
+            if (!_isUnnamed(p))
+              ListTile(
+                leading: const Icon(Icons.account_circle_outlined),
+                title: const Text('This is me'),
+                onTap: () => Navigator.pop(ctx, 'me'),
+              ),
             ListTile(
               leading: const Icon(Icons.person_remove_outlined, color: kDanger),
               title: const Text('Remove this person'),
@@ -616,6 +627,7 @@ class _PeopleTabState extends State<PeopleTab> {
     if (choice == null || !mounted) return;
     if (choice == 'name') return _name(p);
     if (choice == 'faces') return _reviewFaces(p);
+    if (choice == 'me') return _markMe(p);
 
     final ok = await showDialog<bool>(
       context: context,
@@ -644,6 +656,22 @@ class _PeopleTabState extends State<PeopleTab> {
       await _load();
     } on ApiError catch (e) {
       messenger.showSnackBar(SnackBar(content: Text(e.message)));
+    }
+  }
+
+  Future<void> _markMe(Map<String, dynamic> p) async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await context.read<Session>().api
+          .post('/api/people/${p['id']}/me', const {});
+      messenger.showSnackBar(
+          SnackBar(content: Text('${p['name']} is you')));
+      await _load();
+    } on ApiError catch (e) {
+      messenger.showSnackBar(SnackBar(
+          content: Text(e.status == 404
+              ? 'Your computer needs its SafeNest updated for this.'
+              : e.message)));
     }
   }
 

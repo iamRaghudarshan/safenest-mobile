@@ -40,6 +40,8 @@ import '../dates.dart';
 import '../session.dart';
 import '../sharing.dart';
 import 'doc_preview.dart';
+import 'doc_recent.dart';
+import 'doc_trash.dart';
 import 'doc_versions.dart';
 import 'scan_screen.dart';
 import '../masters.dart';
@@ -606,12 +608,51 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
             subtitle: const Text('Earlier copies, kept when you replace it'),
             onTap: () => Navigator.pop(ctx, 'versions'),
           ),
+          const Divider(height: 1),
+          ListTile(
+            leading: Icon((doc['is_favourite'] ?? 0) == 1
+                ? Icons.star
+                : Icons.star_outline),
+            title:
+                Text((doc['is_favourite'] ?? 0) == 1 ? 'Remove star' : 'Star'),
+            onTap: () => Navigator.pop(ctx, 'star'),
+          ),
+          ListTile(
+            leading: const Icon(Icons.file_upload_outlined),
+            title: const Text('Replace file'),
+            subtitle: const Text('The one it replaces is kept as a version'),
+            onTap: () => Navigator.pop(ctx, 'replace'),
+          ),
+          ListTile(
+            leading: const Icon(Icons.copy_all_outlined),
+            title: const Text('Make a copy'),
+            onTap: () => Navigator.pop(ctx, 'copy'),
+          ),
+          ListTile(
+            leading: const Icon(Icons.label_outline),
+            title: const Text('Change the type'),
+            subtitle: Text('${doc['kind'] ?? ''}'.isEmpty
+                ? 'Not classified'
+                : _kindLabel('${doc['kind']}')),
+            onTap: () => Navigator.pop(ctx, 'kind'),
+          ),
+          ListTile(
+            leading: const Icon(Icons.auto_fix_high),
+            title: const Text('Fill in from the scan'),
+            subtitle: const Text('Dates and numbers read out of the text'),
+            onTap: () => Navigator.pop(ctx, 'suggest'),
+          ),
         ]),
       ),
     );
     if (choice == null || !mounted) return;
     if (choice == 'open') return _open(doc);
     if (choice == 'preview') return _preview(doc);
+    if (choice == 'star') return _star(doc);
+    if (choice == 'replace') return _replace(doc);
+    if (choice == 'copy') return _copy(doc);
+    if (choice == 'kind') return _setKind(doc);
+    if (choice == 'suggest') return _suggestions(doc);
     if (choice == 'versions') {
       final changed = await Navigator.of(context).push<bool>(
         MaterialPageRoute(
@@ -636,6 +677,279 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
         items: [(path: '${doc['file_url']}', name: name)]);
     if (problem != null && mounted) {
       messenger.showSnackBar(SnackBar(content: Text(problem)));
+    }
+  }
+
+  Future<void> _openTrash() async {
+    final changed = await Navigator.of(context).push<bool>(MaterialPageRoute(
+      builder: (_) => DocTrashScreen(api: context.read<Session>().api),
+    ));
+    // A restored document has to reappear in the list behind without the
+    // person going looking for a refresh.
+    if (changed == true && mounted) await _load();
+  }
+
+  Future<void> _openRecent() async {
+    await Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => DocRecentScreen(
+        api: context.read<Session>().api,
+        // Opening is this screen's job — it owns downloading, the temp file
+        // and the handoff to whatever app reads that type. A second copy of
+        // that code is a second thing to keep right.
+        onOpen: _open,
+      ),
+    ));
+    // Starring or replacing from Recent changes rows shown here.
+    if (mounted) await _load();
+  }
+
+  /// Star, or unstar.
+  ///
+  /// The route TOGGLES and answers the new state, so the row is updated from
+  /// the reply rather than from a guess — two taps in quick succession would
+  /// otherwise leave the star showing the opposite of the truth.
+  Future<void> _star(Map<String, dynamic> doc) async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final r = await context
+          .read<Session>()
+          .api
+          .post('/api/documents/${doc['id']}/favourite', const {});
+      final on = (r is Map ? (r['is_favourite'] as num?)?.toInt() : null) ?? 0;
+      messenger.showSnackBar(SnackBar(
+          content: Text(on == 1 ? 'Starred' : 'No longer starred')));
+      if (mounted) await _load();
+    } on ApiError catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text(e.message)));
+    }
+  }
+
+  /// Duplicate a document.
+  ///
+  /// A real copy of the bytes, which is what people mean by "copy" — the
+  /// alternative, two rows pointing at one file, means deleting either copy
+  /// destroys both.
+  Future<void> _copy(Map<String, dynamic> doc) async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await context
+          .read<Session>()
+          .api
+          .post('/api/documents/${doc['id']}/copy', const {});
+      messenger.showSnackBar(const SnackBar(content: Text('Copied')));
+      if (mounted) await _load();
+    } on ApiError catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text(e.message)));
+    }
+  }
+
+  /// Correct what kind of document this is.
+  ///
+  /// The classifier suggests; this is how a person disagrees. The server
+  /// records that the answer came from a human, which is what stops the next
+  /// indexing pass quietly putting the guess back — without that this would
+  /// appear to work and then undo itself overnight.
+  Future<void> _setKind(Map<String, dynamic> doc) async {
+    final api = context.read<Session>().api;
+    final messenger = ScaffoldMessenger.of(context);
+    List<String> kinds = const [];
+    try {
+      final r = await api.get('/api/documents/kinds');
+      kinds = [for (final e in ((r as Map)['items'] as List? ?? const [])) '$e'];
+    } on ApiError catch (e) {
+      messenger.showSnackBar(SnackBar(
+          content: Text(e.status == 404
+              ? 'Your computer needs its SafeNest updated for this.'
+              : e.message)));
+      return;
+    }
+    if (!mounted) return;
+
+    final current = '${doc['kind'] ?? ''}';
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (ctx) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          const Padding(
+            padding: EdgeInsets.fromLTRB(20, 0, 20, 8),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Text('What kind of document is this?',
+                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+            ),
+          ),
+          Flexible(
+            child: ListView(
+              shrinkWrap: true,
+              children: [
+                for (final k in kinds)
+                  ListTile(
+                    leading: Icon(k == current
+                        ? Icons.radio_button_checked
+                        : Icons.radio_button_unchecked),
+                    title: Text(_kindLabel(k)),
+                    onTap: () => Navigator.pop(ctx, k),
+                  ),
+                // Clearing is a real answer, not an escape hatch: plenty of
+                // paperwork is none of the kinds on the list, and leaving a
+                // wrong label on is worse than leaving it blank.
+                ListTile(
+                  leading: Icon(current.isEmpty
+                      ? Icons.radio_button_checked
+                      : Icons.radio_button_unchecked),
+                  title: const Text('None of these'),
+                  onTap: () => Navigator.pop(ctx, ''),
+                ),
+              ],
+            ),
+          ),
+        ]),
+      ),
+    );
+    if (choice == null || !mounted) return;
+    try {
+      await api.post('/api/documents/${doc['id']}/kind',
+          {'kind': choice.isEmpty ? null : choice});
+      if (mounted) await _load();
+    } on ApiError catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text(e.message)));
+    }
+  }
+
+  static String _kindLabel(String k) {
+    final w = k.replaceAll('_', ' ');
+    return w.isEmpty ? w : '${w[0].toUpperCase()}${w.substring(1)}';
+  }
+
+  /// Put a new file in this document's place, keeping the old one.
+  ///
+  /// The outgoing file becomes a version rather than being overwritten. That
+  /// is not tidiness: a wrong scan uploaded over a right one used to destroy
+  /// the right one, and what a document store holds is usually irreplaceable.
+  /// The wording says so, because "Replace" on its own reads as "overwrite".
+  Future<void> _replace(Map<String, dynamic> doc) async {
+    final picked = await FilePicker.pickFiles(withData: false);
+    final path = picked?.files.single.path;
+    if (path == null || !mounted) return;
+
+    final messenger = ScaffoldMessenger.of(context);
+    final api = context.read<Session>().api;
+    messenger.showSnackBar(const SnackBar(content: Text('Replacing…')));
+    try {
+      final bytes = await File(path).readAsBytes();
+      await api.postMultipartJson(
+        '/api/documents/${doc['id']}/replace',
+        fileField: 'file',
+        filename: path.split(Platform.pathSeparator).last,
+        bytes: bytes,
+      );
+      messenger.showSnackBar(const SnackBar(
+          content: Text('Replaced — the old file is kept as a version')));
+      if (mounted) await _load();
+    } on ApiError catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text(e.message)));
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('Could not read it: $e')));
+    }
+  }
+
+  /// What the text in this document says its fields should be.
+  ///
+  /// OFFERED, NEVER WRITTEN. The values come from a reader that is right most
+  /// of the time, and a wrong expiry date that filled itself in is worse than
+  /// an empty one — nobody re-checks a field they did not type. So each line
+  /// is applied by tapping it, one at a time.
+  Future<void> _suggestions(Map<String, dynamic> doc) async {
+    final api = context.read<Session>().api;
+    final messenger = ScaffoldMessenger.of(context);
+    Map<String, dynamic> r;
+    try {
+      final raw = await api.get('/api/documents/${doc['id']}/suggestions');
+      r = raw is Map ? Map<String, dynamic>.from(raw) : <String, dynamic>{};
+    } on ApiError catch (e) {
+      messenger.showSnackBar(SnackBar(
+          content: Text(e.status == 404
+              ? 'Your computer needs its SafeNest updated for this.'
+              : e.message)));
+      return;
+    }
+    if (!mounted) return;
+
+    if (r['ready'] != true) {
+      messenger.showSnackBar(const SnackBar(
+          content: Text('This document has not been read yet.')));
+      return;
+    }
+    final fields = r['fields'] is Map
+        ? Map<String, dynamic>.from(r['fields'] as Map)
+        : <String, dynamic>{};
+    const labels = {
+      'expiry_date': 'Expires',
+      'issue_date': 'Issued',
+      'doc_number': 'Number',
+    };
+
+    final apply = await showModalBottomSheet<Map<String, dynamic>>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            const Align(
+              alignment: Alignment.centerLeft,
+              child: Text('Read from this document',
+                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+            ),
+            const SizedBox(height: 4),
+            const Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                'Tap one to fill it in. Nothing is saved until you do — and '
+                'only fields you have left empty are offered.',
+                style: TextStyle(fontSize: 12.5),
+              ),
+            ),
+            const SizedBox(height: 10),
+            if (fields.isEmpty)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 18),
+                child: Text('Nothing new to suggest — either the text gave '
+                    'none of these away, or you have filled them in already.'),
+              )
+            else
+              for (final e in fields.entries)
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(Icons.auto_fix_high),
+                  title: Text('${e.value}'),
+                  subtitle: Text(labels[e.key] ?? e.key),
+                  onTap: () => Navigator.pop(ctx, {e.key: e.value}),
+                ),
+            if ('${r['preview'] ?? ''}'.trim().isNotEmpty) ...[
+              const Divider(),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Text('${r['preview']}',
+                    maxLines: 6,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 12)),
+              ),
+            ],
+          ]),
+        ),
+      ),
+    );
+    if (apply == null || !mounted) return;
+    try {
+      await api.put('/api/documents/${doc['id']}', apply);
+      messenger.showSnackBar(const SnackBar(content: Text('Filled in')));
+      if (mounted) await _load();
+    } on ApiError catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text(e.message)));
     }
   }
 
@@ -686,6 +1000,29 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
       appBar: AppBar(
         title: const Text('Documents'),
         actions: [
+          IconButton(
+            tooltip: 'Recent',
+            icon: const Icon(Icons.schedule),
+            onPressed: _openRecent,
+          ),
+          // The bin sits in the overflow rather than on the bar: it is
+          // reached rarely and always deliberately, and a delete-adjacent
+          // control one tap from a list of documents is not a kindness.
+          PopupMenuButton<String>(
+            onSelected: (v) {
+              if (v == 'trash') _openTrash();
+            },
+            itemBuilder: (_) => const [
+              PopupMenuItem(
+                value: 'trash',
+                child: ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: Icon(Icons.delete_outline),
+                  title: Text('Recycle bin'),
+                ),
+              ),
+            ],
+          ),
           IconButton(
             tooltip: _grid ? 'Show as a list' : 'Show as a grid',
             icon: Icon(_grid ? Icons.view_list_outlined : Icons.grid_view_outlined),
