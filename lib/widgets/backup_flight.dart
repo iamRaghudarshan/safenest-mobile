@@ -86,7 +86,7 @@ class _BackupFlightState extends State<BackupFlight>
   Widget build(BuildContext context) {
     final dark = Theme.of(context).brightness == Brightness.dark;
     return SizedBox(
-      height: 96,
+      height: 108,
       child: AnimatedBuilder(
         animation: _c,
         builder: (_, _) => CustomPaint(
@@ -144,13 +144,16 @@ class _FlightPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    final midY = size.height * 0.52;
-    const deviceW = 34.0;
-    final leftX = 26.0;
-    final rightX = size.width - 26.0;
+    final midY = size.height * 0.48;
+    // Half-widths, stated separately: a laptop is wider than a phone, and one
+    // shared constant made the flight path start inside the laptop's lid.
+    const phoneHalf = 17.0;
+    const laptopHalf = 31.0;
+    final leftX = phoneHalf + 10;
+    final rightX = size.width - laptopHalf - 10;
 
-    final from = leftX + deviceW / 2 + 8;
-    final to = rightX - deviceW / 2 - 8;
+    final from = leftX + phoneHalf + 9;
+    final to = rightX - laptopHalf - 9;
 
     // ---- the path between them ---------------------------------------------
     // Dashes that travel with the parcels rather than sitting still, and a
@@ -202,8 +205,8 @@ class _FlightPainter extends CustomPainter {
     }
 
     // ---- labels ------------------------------------------------------------
-    _label(canvas, 'This phone', Offset(leftX, midY + 30), soft);
-    _label(canvas, 'Your computer', Offset(rightX, midY + 30), soft);
+    _label(canvas, 'This phone', Offset(leftX, midY + 34), soft);
+    _label(canvas, 'Your computer', Offset(rightX, midY + 34), soft);
   }
 
   void _photo(Canvas canvas, Offset at, double opacity, Color hue,
@@ -296,64 +299,225 @@ class _FlightPainter extends CustomPainter {
     return Rect.fromLTWH(0, (ih - h) / 2, iw, h);
   }
 
+  /// A phone that looks like a phone.
+  ///
+  /// The old one was a rounded rectangle with two lines on it, which at this
+  /// size read as a blank card. What makes a phone recognisable in 34x54
+  /// pixels is not detail, it is the RIGHT detail: a dark bezel with a lit
+  /// screen inset inside it, the pill cut out at the top, the home bar at the
+  /// bottom, and the side buttons breaking the silhouette. Anything more is
+  /// invisible at this scale and anything less is a card.
   void _phone(Canvas canvas, Offset c, Color colour) {
-    final rect = Rect.fromCenter(center: c, width: 30, height: 48);
-    final body = RRect.fromRectAndRadius(rect, const Radius.circular(7));
-    canvas.drawRRect(
-        body,
-        Paint()
-          ..shader = LinearGradient(
-            colors: [
-              colour.withValues(alpha: 0.28),
-              colour.withValues(alpha: 0.10)
-            ],
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-          ).createShader(rect));
-    canvas.drawRRect(
-        body,
-        Paint()
-          ..color = colour.withValues(alpha: 0.85)
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 1.8);
-    // The home line, and a speaker slot — enough to read as a phone.
-    final ink = Paint()
-      ..color = colour.withValues(alpha: 0.85)
-      ..strokeWidth = 1.8
-      ..strokeCap = StrokeCap.round;
-    canvas.drawLine(
-        Offset(c.dx - 5, c.dy + 18), Offset(c.dx + 5, c.dy + 18), ink);
-    canvas.drawLine(
-        Offset(c.dx - 4, c.dy - 19), Offset(c.dx + 4, c.dy - 19), ink);
-  }
+    const w = 34.0, h = 54.0;
+    final body = Rect.fromCenter(center: c, width: w, height: h);
+    final shell = RRect.fromRectAndRadius(body, const Radius.circular(8));
 
-  void _computer(Canvas canvas, Offset c, Color colour) {
-    final rect = Rect.fromCenter(center: Offset(c.dx, c.dy - 5), width: 46, height: 32);
-    final screen = RRect.fromRectAndRadius(rect, const Radius.circular(5));
+    // A soft drop shadow, so the device sits ON the surface rather than in it.
     canvas.drawRRect(
-        screen,
+        shell.shift(const Offset(0, 2)),
+        Paint()
+          ..color = Colors.black.withValues(alpha: dark ? 0.45 : 0.18)
+          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 4));
+
+    // The metal shell: a vertical gradient is what reads as a rounded edge
+    // catching the light.
+    canvas.drawRRect(
+        shell,
         Paint()
           ..shader = LinearGradient(
-            colors: [
-              colour.withValues(alpha: 0.28),
-              colour.withValues(alpha: 0.10)
-            ],
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
-          ).createShader(rect));
+            colors: dark
+                ? [const Color(0xFF3A3F45), const Color(0xFF1C1F22)]
+                : [const Color(0xFF8E979F), const Color(0xFF5A636B)],
+          ).createShader(body));
+
+    // The screen, inset so the bezel shows all the way round.
+    final glassRect = body.deflate(2.6);
+    final glass = RRect.fromRectAndRadius(glassRect, const Radius.circular(6));
+    canvas.drawRRect(
+        glass,
+        Paint()
+          ..shader = LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [
+              colour.withValues(alpha: 0.95),
+              Color.lerp(colour, const Color(0xFF0B3D62), 0.55)!,
+            ],
+          ).createShader(glassRect));
+
+    // A few photo tiles on the screen. This is a backup of PHOTOS, and a
+    // blank blue screen says nothing about that.
+    canvas.save();
+    canvas.clipRRect(glass);
+    final tile = Paint()..color = Colors.white.withValues(alpha: 0.22);
+    for (var row = 0; row < 3; row++) {
+      for (var col = 0; col < 2; col++) {
+        canvas.drawRRect(
+            RRect.fromRectAndRadius(
+                Rect.fromLTWH(glassRect.left + 3.5 + col * 11.5,
+                    glassRect.top + 6.5 + row * 11.5, 9.5, 9.5),
+                const Radius.circular(2)),
+            tile);
+      }
+    }
+    // A diagonal sheen across the glass.
+    canvas.drawPath(
+        Path()
+          ..moveTo(glassRect.left, glassRect.top + 14)
+          ..lineTo(glassRect.right, glassRect.top - 4)
+          ..lineTo(glassRect.right, glassRect.top + 6)
+          ..lineTo(glassRect.left, glassRect.top + 24)
+          ..close(),
+        Paint()..color = Colors.white.withValues(alpha: 0.10));
+    canvas.restore();
+
+    // The pill at the top, drawn in the shell colour so it reads as a cut-out
+    // rather than a sticker.
+    canvas.drawRRect(
+        RRect.fromRectAndRadius(
+            Rect.fromCenter(
+                center: Offset(c.dx, body.top + 6), width: 11, height: 3.4),
+            const Radius.circular(2)),
+        Paint()..color = const Color(0xFF15181B).withValues(alpha: 0.92));
+
+    // The home bar.
+    canvas.drawRRect(
+        RRect.fromRectAndRadius(
+            Rect.fromCenter(
+                center: Offset(c.dx, body.bottom - 5), width: 13, height: 2),
+            const Radius.circular(1)),
+        Paint()..color = Colors.white.withValues(alpha: 0.65));
+
+    // Side buttons: two on the left, one longer on the right. They break the
+    // outline, which is most of what makes a rectangle read as a device.
+    final btn = Paint()
+      ..color = dark ? const Color(0xFF2A2E33) : const Color(0xFF6E777F);
+    for (final y in [c.dy - 11.0, c.dy - 3.0]) {
+      canvas.drawRRect(
+          RRect.fromRectAndRadius(
+              Rect.fromLTWH(body.left - 1.2, y, 1.6, 6),
+              const Radius.circular(1)),
+          btn);
+    }
+    canvas.drawRRect(
+        RRect.fromRectAndRadius(
+            Rect.fromLTWH(body.right - 0.4, c.dy - 8, 1.6, 10),
+            const Radius.circular(1)),
+        btn);
+  }
+
+  /// A laptop that looks like a laptop.
+  ///
+  /// The old one was a rectangle on a line — which is the icon for a monitor,
+  /// not a laptop, and it is what made the pair look like clip art. A laptop
+  /// reads from three things at this size: a lid with a visible bezel, a BASE
+  /// that is wider than the lid and tapers towards the viewer, and the hinge
+  /// line between them. The taper is the part that sells it; a plain
+  /// rectangle underneath looks like a shelf.
+  void _computer(Canvas canvas, Offset c, Color colour) {
+    const lidW = 56.0, lidH = 38.0;
+    final lid = Rect.fromCenter(
+        center: Offset(c.dx, c.dy - 5), width: lidW, height: lidH);
+    final shell = RRect.fromRectAndRadius(lid, const Radius.circular(4.5));
+
+    canvas.drawRRect(
+        shell.shift(const Offset(0, 2)),
+        Paint()
+          ..color = Colors.black.withValues(alpha: dark ? 0.45 : 0.18)
+          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 4));
+
+    canvas.drawRRect(
+        shell,
+        Paint()
+          ..shader = LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: dark
+                ? [const Color(0xFF3A3F45), const Color(0xFF1C1F22)]
+                : [const Color(0xFF8E979F), const Color(0xFF5A636B)],
+          ).createShader(lid));
+
+    // The screen.
+    final scrRect = lid.deflate(2.4);
+    final screen = RRect.fromRectAndRadius(scrRect, const Radius.circular(3));
     canvas.drawRRect(
         screen,
         Paint()
-          ..color = colour.withValues(alpha: 0.85)
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 1.8);
-    final ink = Paint()
-      ..color = colour.withValues(alpha: 0.85)
-      ..strokeWidth = 2
-      ..strokeCap = StrokeCap.round;
-    // The stand.
-    canvas.drawLine(Offset(c.dx - 10, c.dy + 15), Offset(c.dx + 10, c.dy + 15), ink);
-    canvas.drawLine(Offset(c.dx, c.dy + 11), Offset(c.dx, c.dy + 15), ink);
+          ..shader = LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [
+              colour.withValues(alpha: 0.95),
+              Color.lerp(colour, const Color(0xFF07331F), 0.55)!,
+            ],
+          ).createShader(scrRect));
+
+    // A grid of arrived photos, denser than the phone's: this is where they
+    // all end up.
+    canvas.save();
+    canvas.clipRRect(screen);
+    final tile = Paint()..color = Colors.white.withValues(alpha: 0.22);
+    for (var row = 0; row < 3; row++) {
+      for (var col = 0; col < 5; col++) {
+        canvas.drawRRect(
+            RRect.fromRectAndRadius(
+                Rect.fromLTWH(scrRect.left + 2.5 + col * 9.9,
+                    scrRect.top + 3 + row * 10.2, 8.2, 8.2),
+                const Radius.circular(1.6)),
+            tile);
+      }
+    }
+    canvas.drawPath(
+        Path()
+          ..moveTo(scrRect.left, scrRect.top + 12)
+          ..lineTo(scrRect.right, scrRect.top - 6)
+          ..lineTo(scrRect.right, scrRect.top + 2)
+          ..lineTo(scrRect.left, scrRect.top + 20)
+          ..close(),
+        Paint()..color = Colors.white.withValues(alpha: 0.10));
+    canvas.restore();
+
+    // The camera dot in the top bezel.
+    canvas.drawCircle(Offset(c.dx, lid.top + 1.2), 0.8,
+        Paint()..color = Colors.black.withValues(alpha: 0.5));
+
+    // THE BASE, tapering outwards towards the viewer. Wider at the front than
+    // the lid is, which is what gives the whole thing depth.
+    final baseTop = lid.bottom + 0.5;
+    final baseBottom = baseTop + 5.5;
+    final base = Path()
+      ..moveTo(c.dx - lidW / 2 - 1, baseTop)
+      ..lineTo(c.dx + lidW / 2 + 1, baseTop)
+      ..lineTo(c.dx + lidW / 2 + 6, baseBottom)
+      ..lineTo(c.dx - lidW / 2 - 6, baseBottom)
+      ..close();
+    canvas.drawPath(
+        base,
+        Paint()
+          ..shader = LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: dark
+                ? [const Color(0xFF2F343A), const Color(0xFF474D54)]
+                : [const Color(0xFF9AA3AB), const Color(0xFFC3CAD1)],
+          ).createShader(Rect.fromLTRB(
+              c.dx - lidW / 2 - 6, baseTop, c.dx + lidW / 2 + 6, baseBottom)));
+
+    // The hinge, and the thumb notch in the front edge.
+    canvas.drawLine(
+        Offset(c.dx - lidW / 2, baseTop + 0.4),
+        Offset(c.dx + lidW / 2, baseTop + 0.4),
+        Paint()
+          ..color = Colors.black.withValues(alpha: dark ? 0.55 : 0.28)
+          ..strokeWidth = 1);
+    canvas.drawRRect(
+        RRect.fromRectAndRadius(
+            Rect.fromCenter(
+                center: Offset(c.dx, baseBottom), width: 14, height: 2.2),
+            const Radius.circular(1.6)),
+        Paint()..color = Colors.black.withValues(alpha: dark ? 0.40 : 0.16));
   }
 
   void _label(Canvas canvas, String text, Offset centre, Color colour) {
