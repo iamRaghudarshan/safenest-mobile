@@ -55,6 +55,15 @@ class BackupScreen extends StatefulWidget {
   State<BackupScreen> createState() => _BackupScreenState();
 }
 
+/// A byte count as somebody would say it. Big files are the whole reason
+/// this line exists, so MB and GB are what it deals in.
+String _mb(int bytes) {
+  const mb = 1024 * 1024;
+  if (bytes >= 1024 * mb) return '${(bytes / (1024 * mb)).toStringAsFixed(1)} GB';
+  if (bytes >= mb) return '${(bytes / mb).round()} MB';
+  return '${(bytes / 1024).round()} KB';
+}
+
 class _BackupScreenState extends State<BackupScreen> {
   BackupService? _service;
   bool _owns = false;   // only stop a service we created — a shared one keeps going
@@ -222,6 +231,47 @@ class _BackupScreenState extends State<BackupScreen> {
                           fontSize: 12.5,
                           fontWeight: FontWeight.w600,
                           color: theme.colorScheme.onSurfaceVariant)),
+                ],
+                // THE FILE GOING UP RIGHT NOW, by name and by percentage.
+                //
+                // The counter above cannot move while a single large video is
+                // sending, and on a long 4K clip that is minutes of a screen
+                // that looks frozen. This is the line that says the difference
+                // between slow and stuck.
+                if (p.state == BackupState.running &&
+                    p.currentLabel.isNotEmpty &&
+                    p.currentFraction != null) ...[
+                  const SizedBox(height: 12),
+                  Row(children: [
+                    Expanded(
+                      child: Text(p.currentLabel,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                              fontSize: 12.5, fontWeight: FontWeight.w600)),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                        '${(p.currentFraction! * 100).round()}%'
+                        '${p.currentTotal > 0 ? ' · ${_mb(p.currentTotal)}' : ''}',
+                        style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                            fontFeatures: const [FontFeature.tabularFigures()],
+                            color: theme.colorScheme.onSurfaceVariant)),
+                  ]),
+                  const SizedBox(height: 6),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(999),
+                    child: LinearProgressIndicator(
+                      value: p.currentFraction,
+                      minHeight: 4,
+                      backgroundColor:
+                          theme.colorScheme.surfaceContainerHighest,
+                      valueColor: AlwaysStoppedAnimation(
+                          accent.withValues(alpha: 0.7)),
+                    ),
+                  ),
                 ],
                 const SizedBox(height: 14),
                 Wrap(

@@ -37,6 +37,7 @@ library;
 
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
@@ -55,6 +56,19 @@ enum BackupState { idle, scanning, running, paused, done, failed }
 /// express: the upload succeeded and yet nothing new exists on the server.
 enum _Sent { stored, already, failed }
 
+/// Catches the one Digest a chunked sha256 emits when it is closed.
+///
+/// package:convert has AccumulatorSink for this, and it is not a dependency
+/// of this app — adding a package to hold a single value would be a poor
+/// trade for five lines.
+class _DigestSink implements Sink<Digest> {
+  Digest? value;
+  @override
+  void add(Digest d) => value = d;
+  @override
+  void close() {}
+}
+
 class BackupProgress {
   const BackupProgress({
     this.state = BackupState.idle,
@@ -65,6 +79,9 @@ class BackupProgress {
     this.message = '',
     this.reasons = const {},
     this.retryable = 0,
+    this.currentLabel = '',
+    this.currentSent = 0,
+    this.currentTotal = 0,
   });
 
   final BackupState state;
@@ -84,6 +101,26 @@ class BackupProgress {
 
   /// How many failures are worth trying again without rescanning the library.
   final int retryable;
+
+  /// WHICH file is going up, and how far through it is.
+  ///
+  /// A counter that says "12 of 400" tells you nothing while a single
+  /// two-gigabyte video takes nine minutes: the number does not move, and a
+  /// backup that does not move is indistinguishable from one that has died.
+  /// That is exactly what was reported — "not moving". The name and the
+  /// percentage are the difference between waiting and giving up.
+  final String currentLabel;
+  final int currentSent;
+  final int currentTotal;
+
+  /// 0..1 through the file being sent now, or null when nothing is in flight
+  /// or its size is unknown. Null rather than 0 so the screen can tell "not
+  /// started" from "started and nothing has gone yet".
+  double? get currentFraction {
+    if (currentTotal <= 0) return null;
+    final f = currentSent / currentTotal;
+    return f < 0 ? 0.0 : (f > 1 ? 1.0 : f);
+  }
 
   int get handled => done + skipped + failed;
 
@@ -686,7 +723,30 @@ class BackupService extends ChangeNotifier {
           skipped: handledSkip,
           failed: handledFail,
           message: 'Backing up…',
+          currentLabel: _fileLabel,
+          currentSent: _fileSent,
+          currentTotal: _fileTotal,
         ));
+
+    // WHICH file, and how far through. A run where one two-gigabyte video
+    // takes nine minutes looks identical to a dead one if all the screen has
+    // is "12 of 400" — which is what was reported as "not moving".
+    //
+    // The per-chunk callback emits at most a few times a second: a 4 MB chunk
+    // over a home connection is not fast enough to flood the UI, and throttling
+    // it would only hide movement on exactly the slow transfers this exists
+    // for.
+    onFileStart = (label, bytes) {
+      _fileLabel = label;
+      _fileSent = 0;
+      _fileTotal = bytes;
+      report();
+    };
+    onFileProgress = (sent, total) {
+      _fileSent = sent;
+      _fileTotal = total;
+      report();
+    };
 
     // NEWEST FIRST, and it is the ordering Google Photos uses for a reason.
     //
@@ -973,8 +1033,21 @@ class BackupService extends ChangeNotifier {
             'Photos once, or turn off "Optimise Storage".');
         return _Sent.failed;
       }
-      final bytes = await f.readAsBytes();
-      if (bytes.isEmpty) {
+      // THE SIZE FIRST, AND THE BYTES ONLY IF THEY ARE SAFE TO HOLD.
+      //
+      // This used to read every file whole before deciding anything, so a
+      // two-gigabyte recording asked the phone for two gigabytes of memory
+      // and was killed for it — which is what "some videos not moving,
+      // showing error" was. A big file is now streamed off the disk a piece
+      // at a time and never exists in memory at once.
+      final int fileSize;
+      try {
+        fileSize = await f.length();
+      } catch (_) {
+        _blame(asset, 'in iCloud rather than on the phone.');
+        return _Sent.failed;
+      }
+      if (fileSize <= 0) {
         _blame(asset, 'in iCloud rather than on the phone.');
         return _Sent.failed;
       }
@@ -987,9 +1060,25 @@ class BackupService extends ChangeNotifier {
       // driven hard and works.
       final label = asset.title ?? '${asset.id}.jpg';
       final ms = asset.duration > 0 ? asset.duration * 1000 : 0;
-      final r = bytes.length >= _resumeFrom
-          ? await _uploadResumable(bytes, label, asset.id, durationMs: ms)
-          : await _upload(bytes, label, durationMs: ms);
+      onFileStart?.call(label, fileSize);
+      String? streamedDigest;
+      final ({int status, Map<String, dynamic> body}) r;
+      if (fileSize >= _resumeFrom) {
+        final got = await _uploadResumableFile(f, fileSize, label, asset.id,
+            durationMs: ms);
+        r = got.result;
+        streamedDigest = got.digest;
+      } else {
+        final bytes = await f.readAsBytes();
+        if (bytes.isEmpty) {
+          _blame(asset, 'in iCloud rather than on the phone.');
+          return _Sent.failed;
+        }
+        onFileProgress?.call(0, bytes.length);
+        r = await _upload(bytes, label, durationMs: ms);
+        onFileProgress?.call(bytes.length, bytes.length);
+        streamedDigest = sha256.convert(bytes).toString();
+      }
       if (r.status >= 200 && r.status < 300) {
         _rememberAsset(asset);
         // A video's poster comes from the phone, which decodes HEVC where the
@@ -997,7 +1086,10 @@ class BackupService extends ChangeNotifier {
         // neutral "black" tile. Best effort, keyed by the same hash the server
         // stores, and skipped for photos (they poster themselves).
         if (asset.type == AssetType.video) {
-          await _sendPoster(asset, sha256.convert(bytes).toString());
+          // The digest was computed WHILE the file went up, chunk by chunk —
+          // re-reading a two-gigabyte clip only to hash it would undo the
+          // whole point of streaming it.
+          await _sendPoster(asset, streamedDigest ?? '');
         }
         // The server answers 200 for a photo it already holds, saying so in
         // the body. Counted as new, that is a backup claiming to have sent
@@ -1086,16 +1178,43 @@ class BackupService extends ChangeNotifier {
   /// never finishes however many times it is retried.
   static const _resumeFrom = 16 * 1024 * 1024;
 
+  /// How much goes in one request, and therefore how much is in memory at
+  /// once. Small enough that a phone never feels it; large enough that a
+  /// gigabyte is 256 requests rather than thousands.
+  static const _chunkBytes = 4 * 1024 * 1024;
+
   /// Send a large file in pieces, continuing from whatever the computer holds.
   ///
   /// The upload id comes from the ASSET, not from this attempt. A fresh id
   /// each time would orphan the half-sent copy on the computer and start again
   /// from zero -- the very thing this exists to stop.
-  Future<({int status, Map<String, dynamic> body})> _uploadResumable(
-      Uint8List bytes, String name, String assetId,
-      {int durationMs = 0}) async {
+  /// Called as each file starts and as it progresses, so a screen can show
+  /// WHICH photo is going up and how far through it is.
+  void Function(String label, int totalBytes)? onFileStart;
+  void Function(int sent, int total)? onFileProgress;
+
+  String _fileLabel = '';
+  int _fileSent = 0;
+  int _fileTotal = 0;
+
+  /// Send one large file WITHOUT ever holding it in memory.
+  ///
+  /// The resumable path already existed, and it still took a `Uint8List` —
+  /// so the caller had to read the whole file first and a long 4K recording
+  /// asked the phone for gigabytes it was not going to get. The phone killed
+  /// the app or the read simply failed, and the backup screen showed an error
+  /// against a file that was perfectly fine.
+  ///
+  /// Here the file is opened once and read a chunk at a time, straight into
+  /// the request. Memory is one chunk, whatever the clip weighs.
+  ///
+  /// The sha256 is accumulated over the same chunks on the way past. The
+  /// poster upload needs that digest, and re-reading two gigabytes to
+  /// calculate it afterwards would give back everything this saves.
+  Future<({({int status, Map<String, dynamic> body}) result, String? digest})>
+      _uploadResumableFile(File file, int total, String name, String assetId,
+          {int durationMs = 0}) async {
     final id = 'a${assetId.replaceAll(RegExp(r'[^A-Za-z0-9]'), '')}';
-    final total = bytes.length;
     final safe = name
         .replaceAll(RegExp(r'[\r\n"\\]'), '_')
         .replaceAll(RegExp(r'[\x00-\x1f]'), '_');
@@ -1106,45 +1225,83 @@ class BackupService extends ChangeNotifier {
     try {
       final st = await _net.get('/api/gallery/upload/status?upload_id=$id');
       final have = (st is Map ? (st['received'] as num?)?.toInt() : null) ?? 0;
-      // A part at least as big as the file means the asset changed under the
-      // same id. Continuing from there would splice two different videos
-      // together, so throw it away and start again.
       if (have > 0 && have < total) {
         sent = have;
       } else if (have >= total) {
         await _net.post('/api/gallery/upload/abandon?upload_id=$id', null);
       }
     } catch (_) {
-      // No status route means an older computer. Fall back to one shot rather
-      // than failing -- the album_id lesson in one line: never assume the far
-      // end is as new as this app.
-      return _upload(bytes, name, durationMs: durationMs);
+      // An older computer has no status route. Reading the whole file is the
+      // only way to talk to it, and for a file this size that may fail — but
+      // failing here is better than not trying, and the honest error names
+      // the real cause.
+      try {
+        final bytes = await file.readAsBytes();
+        final r = await _upload(bytes, name, durationMs: durationMs);
+        return (result: r, digest: sha256.convert(bytes).toString());
+      } catch (_) {
+        return (
+          result: (status: 0, body: const <String, dynamic>{}),
+          digest: null
+        );
+      }
     }
 
-    const chunk = 4 * 1024 * 1024;
-    while (sent < total) {
-      if (_stop) return (status: 0, body: const <String, dynamic>{});
-      final end = (sent + chunk) > total ? total : sent + chunk;
-      final last = end == total;
-      final r = await _postUploadRaw(
-        '/api/gallery/upload/chunk?$q&offset=$sent&total=${last ? total : 0}',
-        bytes.sublist(sent, end),
-        'application/octet-stream',
-      );
-      if (r.status == 409) {
-        // The computer holds a different amount than we believed. Ask it
-        // rather than guessing; if it agrees with us then the disagreement is
-        // not one we can resolve and the failure is reported honestly.
-        final st = await _net.get('/api/gallery/upload/status?upload_id=$id');
-        final have = (st is Map ? (st['received'] as num?)?.toInt() : null) ?? 0;
-        if (have == sent) return r;
-        sent = have;
-        continue;
+    // RESUMING MEANS THE DIGEST CANNOT BE COMPLETED. The bytes already on the
+    // computer went past in an earlier run and cannot be hashed now without
+    // re-reading them, so the poster is skipped for a resumed clip rather
+    // than being sent under a hash that does not match. It is a still frame;
+    // the video itself is what matters.
+    final resumed = sent > 0;
+    final digestSink = _DigestSink();
+    final hasher = sha256.startChunkedConversion(digestSink);
+
+    final handle = await file.open();
+    try {
+      if (resumed) await handle.setPosition(sent);
+      onFileProgress?.call(sent, total);
+      while (sent < total) {
+        if (_stop) {
+          return (
+            result: (status: 0, body: const <String, dynamic>{}),
+            digest: null
+          );
+        }
+        final want = (sent + _chunkBytes) > total ? total - sent : _chunkBytes;
+        final piece = await handle.read(want);
+        if (piece.isEmpty) break;
+        if (!resumed) hasher.add(piece);
+        final last = sent + piece.length >= total;
+        final r = await _postUploadRaw(
+          '/api/gallery/upload/chunk?$q&offset=$sent&total=${last ? total : 0}',
+          piece,
+          'application/octet-stream',
+        );
+        if (r.status == 409) {
+          // The computer holds a different amount than we believed. Ask it
+          // rather than guessing.
+          final st = await _net.get('/api/gallery/upload/status?upload_id=$id');
+          final have = (st is Map ? (st['received'] as num?)?.toInt() : null) ?? 0;
+          if (have == sent) return (result: r, digest: null);
+          sent = have;
+          await handle.setPosition(sent);
+          onFileProgress?.call(sent, total);
+          continue;
+        }
+        if (r.status != 200) return (result: r, digest: null);
+        sent += piece.length;
+        onFileProgress?.call(sent, total);
+        if (last) {
+          hasher.close();
+          return (
+            result: r,
+            digest: resumed ? null : digestSink.value?.toString()
+          );
+        }
       }
-      if (r.status != 200) return r;
-      sent = end;
-      if (last) return r;
+    } finally {
+      await handle.close();
     }
-    return (status: 0, body: const <String, dynamic>{});
+    return (result: (status: 0, body: const <String, dynamic>{}), digest: null);
   }
 }
