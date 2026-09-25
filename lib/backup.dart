@@ -56,6 +56,64 @@ enum BackupState { idle, scanning, running, paused, done, failed }
 /// express: the upload succeeded and yet nothing new exists on the server.
 enum _Sent { stored, already, failed }
 
+/// One photo or video on its way up, for the screen to show.
+///
+/// A LIST of these rather than a single "current file", because photos go up
+/// FOUR at a time (a video takes the uplink to itself). A single label
+/// flickered between four uploads and settled on whichever finished last,
+/// which is worse than showing nothing: it looks like one photo taking an
+/// age rather than four going at once.
+class BackupItem {
+  const BackupItem({
+    required this.id,
+    required this.label,
+    required this.isVideo,
+    this.sent = 0,
+    this.total = 0,
+    this.fetching = false,
+    this.fetched = 0,
+  });
+
+  /// The AssetEntity id, so the screen can fetch the real thumbnail. Showing
+  /// the photograph is the whole point — a filename off a camera roll
+  /// ("IMG_4102.HEIC") tells nobody which picture is going up.
+  final String id;
+  final String label;
+  final bool isVideo;
+  final int sent;
+  final int total;
+
+  /// Still coming DOWN from iCloud rather than going up to the computer.
+  /// Two different waits, and showing the wrong one is worse than showing
+  /// nothing: an upload bar that sits at zero while Apple sends a 200 MB
+  /// video looks exactly like a stall.
+  final bool fetching;
+  final double fetched;
+
+  /// 0..1, or null when the size is not known yet.
+  double? get fraction {
+    if (total <= 0) return null;
+    final f = sent / total;
+    return f < 0 ? 0.0 : (f > 1 ? 1.0 : f);
+  }
+
+  BackupItem withProgress(int sentNow, int totalNow) => BackupItem(
+        id: id,
+        label: label,
+        isVideo: isVideo,
+        sent: sentNow,
+        total: totalNow,
+      );
+
+  BackupItem withFetch(double progress) => BackupItem(
+        id: id,
+        label: label,
+        isVideo: isVideo,
+        fetching: true,
+        fetched: progress < 0 ? 0 : (progress > 1 ? 1 : progress),
+      );
+}
+
 /// Catches the one Digest a chunked sha256 emits when it is closed.
 ///
 /// package:convert has AccumulatorSink for this, and it is not a dependency
@@ -82,6 +140,7 @@ class BackupProgress {
     this.currentLabel = '',
     this.currentSent = 0,
     this.currentTotal = 0,
+    this.inFlight = const [],
   });
 
   final BackupState state;
@@ -112,6 +171,10 @@ class BackupProgress {
   final String currentLabel;
   final int currentSent;
   final int currentTotal;
+
+  /// Everything in the air right now, oldest first, so the screen can show
+  /// the actual photographs rather than a name.
+  final List<BackupItem> inFlight;
 
   /// 0..1 through the file being sent now, or null when nothing is in flight
   /// or its size is unknown. Null rather than 0 so the screen can tell "not
@@ -726,6 +789,7 @@ class BackupService extends ChangeNotifier {
           currentLabel: _fileLabel,
           currentSent: _fileSent,
           currentTotal: _fileTotal,
+          inFlight: _inFlight.values.toList(growable: false),
         ));
 
     // WHICH file, and how far through. A run where one two-gigabyte video
@@ -747,6 +811,7 @@ class BackupService extends ChangeNotifier {
       _fileTotal = total;
       report();
     };
+    onFileDone = report;
 
     // NEWEST FIRST, and it is the ordering Google Photos uses for a reason.
     //
@@ -1021,16 +1086,69 @@ class BackupService extends ChangeNotifier {
     return [for (final x in e) '${x.value} photo${x.value == 1 ? '' : 's'}: ${x.key}'];
   }
 
+  /// The file for one asset, FETCHING IT BACK FROM iCLOUD if that is where
+  /// it lives.
+  ///
+  /// This is why "so many photos are not sending" on an iPhone. With
+  /// Optimise Storage on — which is the default once a phone fills up — most
+  /// of the camera roll is not on the phone at all; the full-size original
+  /// sits in iCloud and only a small preview is local. `originFile` does not
+  /// bring one back: it returns null, and every one of those photos was being
+  /// reported as a failure that no amount of retrying could fix.
+  ///
+  /// `loadFile` with a progress handler is the API that asks Apple to send
+  /// the original down. It can take a while on a big video, which is exactly
+  /// why the progress is reported rather than swallowed — otherwise the
+  /// backup looks frozen on the photo it is quietly downloading.
+  ///
+  /// Android never takes this path: `isLocallyAvailable` is always true
+  /// there, and `originFile` has always worked.
+  Future<File?> _fileFor(AssetEntity asset) async {
+    try {
+      final direct = await asset.originFile;
+      if (direct != null && await direct.exists()) return direct;
+    } catch (_) {
+      // Fall through and try the cloud. An exception here is what an
+      // iCloud-only asset looks like on some iOS versions.
+    }
+    if (!Platform.isIOS && !Platform.isMacOS) return null;
+
+    PMProgressHandler? handler;
+    StreamSubscription<PMProgressState>? sub;
+    try {
+      handler = PMProgressHandler();
+      sub = handler.stream.listen((e) {
+        // Shown as its own state, because "downloading from iCloud" and
+        // "uploading to your computer" are different waits and telling
+        // somebody the wrong one is worse than telling them nothing.
+        _itemFetching(asset.id, e.progress);
+        onFileProgress?.call(0, 0);
+      });
+      final f = await asset.loadFile(isOrigin: true, progressHandler: handler);
+      if (f != null && await f.exists()) return f;
+    } catch (_) {
+      // Nothing more to try; the caller reports it honestly.
+    } finally {
+      await sub?.cancel();
+    }
+    return null;
+  }
+
   /// What became of one photo. `bool` could not tell "stored" from "the server
   /// already had it", and the difference is the whole of the count mismatch.
   Future<_Sent> _send(AssetEntity asset) async {
     try {
       // originFile, not file: `file` hands back a transcoded copy on iOS, which
       // is slower and loses the original. The server decodes HEIC itself.
-      final f = await asset.originFile;
+      _beginFetch(asset);
+      final f = await _fileFor(asset);
       if (f == null || !await f.exists()) {
-        _blame(asset, 'stored in iCloud rather than on this phone. Open them in '
-            'Photos once, or turn off "Optimise Storage".');
+        // Only after asking iCloud for it and being refused. The old wording
+        // blamed iCloud for every one of these and told people to open Photos
+        // — advice that was useless, because the app had not actually tried
+        // to fetch them.
+        _blame(asset, 'could not be downloaded from iCloud. Check the phone '
+            'has signal and is signed in to iCloud, then try again.');
         return _Sent.failed;
       }
       // THE SIZE FIRST, AND THE BYTES ONLY IF THEY ARE SAFE TO HOLD.
@@ -1060,6 +1178,7 @@ class BackupService extends ChangeNotifier {
       // driven hard and works.
       final label = asset.title ?? '${asset.id}.jpg';
       final ms = asset.duration > 0 ? asset.duration * 1000 : 0;
+      _beginItem(asset, label, fileSize);
       onFileStart?.call(label, fileSize);
       String? streamedDigest;
       final ({int status, Map<String, dynamic> body}) r;
@@ -1074,8 +1193,14 @@ class BackupService extends ChangeNotifier {
           _blame(asset, 'in iCloud rather than on the phone.');
           return _Sent.failed;
         }
+        // A photo goes in one request, so there is no progress to report
+        // between nothing and everything. It still appears in the row for as
+        // long as it takes, which on a home connection is a second or two —
+        // and four of them at once is what the row exists to show.
+        _itemProgress(asset.id, 0, bytes.length);
         onFileProgress?.call(0, bytes.length);
         r = await _upload(bytes, label, durationMs: ms);
+        _itemProgress(asset.id, bytes.length, bytes.length);
         onFileProgress?.call(bytes.length, bytes.length);
         streamedDigest = sha256.convert(bytes).toString();
       }
@@ -1123,6 +1248,13 @@ class BackupService extends ChangeNotifier {
     } catch (_) {
       _blame(asset, 'could not be read from this phone.');
       return _Sent.failed;
+    } finally {
+      // Whatever became of it, it is no longer in the air. In a `finally`
+      // rather than before each return: there are eight ways out of this
+      // method and a failed upload left sitting at 40% reads as stuck for
+      // the rest of the run.
+      _endItem(asset.id);
+      onFileDone?.call();
     }
   }
 
@@ -1193,9 +1325,50 @@ class BackupService extends ChangeNotifier {
   void Function(String label, int totalBytes)? onFileStart;
   void Function(int sent, int total)? onFileProgress;
 
+  /// Fired when an item finishes, fails or is abandoned, so the screen drops
+  /// it from the row. Without it a failed upload would sit there at 40% for
+  /// the rest of the run, which reads as stuck rather than finished.
+  void Function()? onFileDone;
+
   String _fileLabel = '';
   int _fileSent = 0;
   int _fileTotal = 0;
+
+  /// In flight, keyed by asset id. A LinkedHashMap by construction, so the
+  /// order is the order they started — which keeps the row on screen stable
+  /// instead of reshuffling every time one reports progress.
+  final Map<String, BackupItem> _inFlight = {};
+
+  void _beginItem(AssetEntity asset, String label, int bytes) {
+    _inFlight[asset.id] = BackupItem(
+      id: asset.id,
+      label: label,
+      isVideo: asset.type == AssetType.video,
+      total: bytes,
+    );
+  }
+
+  void _itemProgress(String assetId, int sent, int total) {
+    final had = _inFlight[assetId];
+    if (had != null) _inFlight[assetId] = had.withProgress(sent, total);
+  }
+
+  void _endItem(String assetId) => _inFlight.remove(assetId);
+
+  /// An item that is being fetched back from iCloud before it can be sent.
+  void _beginFetch(AssetEntity asset) {
+    _inFlight[asset.id] = BackupItem(
+      id: asset.id,
+      label: asset.title ?? asset.id,
+      isVideo: asset.type == AssetType.video,
+      fetching: true,
+    );
+  }
+
+  void _itemFetching(String assetId, double progress) {
+    final had = _inFlight[assetId];
+    if (had != null) _inFlight[assetId] = had.withFetch(progress);
+  }
 
   /// Send one large file WITHOUT ever holding it in memory.
   ///
@@ -1259,6 +1432,7 @@ class BackupService extends ChangeNotifier {
     final handle = await file.open();
     try {
       if (resumed) await handle.setPosition(sent);
+      _itemProgress(assetId, sent, total);
       onFileProgress?.call(sent, total);
       while (sent < total) {
         if (_stop) {
@@ -1285,11 +1459,13 @@ class BackupService extends ChangeNotifier {
           if (have == sent) return (result: r, digest: null);
           sent = have;
           await handle.setPosition(sent);
+          _itemProgress(assetId, sent, total);
           onFileProgress?.call(sent, total);
           continue;
         }
         if (r.status != 200) return (result: r, digest: null);
         sent += piece.length;
+        _itemProgress(assetId, sent, total);
         onFileProgress?.call(sent, total);
         if (last) {
           hasher.close();

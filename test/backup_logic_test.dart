@@ -2,6 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:safenest/backup.dart';
 
 void main() {
+  inFlightTests();
   progressTests();
   group('shouldReoffer — re-check the whole library only on a real loss', () {
     test('server count DROPPED since last run -> re-offer (a real deletion)', () {
@@ -96,6 +97,53 @@ void progressTests() {
         () {
       const p = BackupProgress(currentLabel: 'x.jpg', currentSent: 10);
       expect(p.currentFraction, isNull);
+    });
+  });
+}
+
+// ---------------------------------------------------------------------------
+// One item on its way up, and the two different waits it can be in.
+void inFlightTests() {
+  group('an item in flight', () {
+    test('reports how far through the upload it is', () {
+      const it = BackupItem(
+          id: 'a1', label: 'IMG_1.HEIC', isVideo: false, sent: 25, total: 100);
+      expect(it.fraction, 0.25);
+      expect(it.fetching, isFalse);
+    });
+
+    test('an unknown size reports null rather than dividing by zero', () {
+      const it = BackupItem(id: 'a1', label: 'x', isVideo: false);
+      expect(it.fraction, isNull);
+    });
+
+    test('never leaves 0..1 however odd the counts', () {
+      const over =
+          BackupItem(id: 'a', label: 'x', isVideo: false, sent: 9, total: 4);
+      expect(over.fraction, 1.0);
+    });
+
+    test('coming down from iCloud is a DIFFERENT state from going up', () {
+      // Showing an upload bar at zero while Apple sends a 200MB video looks
+      // exactly like a stall, which is the bug this separation exists for.
+      const it = BackupItem(id: 'a1', label: 'v.MOV', isVideo: true);
+      final fetching = it.withFetch(0.4);
+      expect(fetching.fetching, isTrue);
+      expect(fetching.fetched, 0.4);
+      expect(fetching.fraction, isNull, reason: 'nothing has been sent yet');
+    });
+
+    test('a fetch progress outside 0..1 is clamped', () {
+      const it = BackupItem(id: 'a1', label: 'v.MOV', isVideo: true);
+      expect(it.withFetch(1.9).fetched, 1.0);
+      expect(it.withFetch(-0.5).fetched, 0.0);
+    });
+
+    test('starting the upload clears the fetching state', () {
+      const it = BackupItem(id: 'a1', label: 'v.MOV', isVideo: true);
+      final up = it.withFetch(1.0).withProgress(10, 100);
+      expect(up.fetching, isFalse);
+      expect(up.fraction, 0.1);
     });
   });
 }
