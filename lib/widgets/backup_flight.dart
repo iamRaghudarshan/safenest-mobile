@@ -86,7 +86,10 @@ class _BackupFlightState extends State<BackupFlight>
   Widget build(BuildContext context) {
     final dark = Theme.of(context).brightness == Brightness.dark;
     return SizedBox(
-      height: 128,
+      // Fills the card it sits in rather than perching in the top of it. The
+      // painter scales to whatever it is given, so this is the only number
+      // that decides how big the whole scene is.
+      height: 176,
       child: AnimatedBuilder(
         animation: _c,
         builder: (_, _) => CustomPaint(
@@ -125,13 +128,20 @@ class _FlightPainter extends CustomPainter {
   final Color ink;
   final Color soft;
 
-  /// Four parcels, evenly spaced, so there is always one in flight rather than
-  /// a gap where nothing is happening.
-  static const _parcels = 4;
+  /// Three parcels, evenly spaced, so there is always one in flight rather
+  /// than a gap where nothing is happening.
+  ///
+  /// Three and not four. Scaling the canvas to fill its box divides the
+  /// LOGICAL width by the same factor it multiplies everything else, so the
+  /// path between the devices gets shorter in the coordinates the photos are
+  /// spaced in — and four tiles at a readable size ended up overlapping in a
+  /// heap in the middle. Fewer, bigger, evenly spread reads better than four
+  /// stacked on top of each other.
+  static const _parcels = 3;
 
   /// How wide a photo in flight is. Shared by the drawing and by the ends of
   /// the path, which must allow for it or the tile overlaps a device.
-  static const _photoW = 34.0;
+  static const _photoW = 28.0;
 
   /// Each photo in its own colour, cycled.
   ///
@@ -146,13 +156,31 @@ class _FlightPainter extends CustomPainter {
     Color(0xFF0EA5E9), // sky
   ];
 
+  /// The height everything below was drawn against. The canvas is scaled by
+  /// how far it differs, so one number on the widget resizes the whole scene
+  /// — devices, photos, dashes and strokes together. Scaling the canvas
+  /// rather than every constant is what keeps the proportions right: a 2px
+  /// stroke that stayed 2px while the phone doubled would look like a
+  /// different drawing.
+  static const _designH = 128.0;
+
   @override
-  void paint(Canvas canvas, Size size) {
+  void paint(Canvas canvas, Size outer) {
+    final k = outer.height / _designH;
+    canvas.save();
+    canvas.scale(k);
+    _paintScene(canvas, Size(outer.width / k, outer.height / k));
+    canvas.restore();
+  }
+
+  void _paintScene(Canvas canvas, Size size) {
     final midY = size.height * 0.48;
     // Half-widths, stated separately: a laptop is wider than a phone, and one
     // shared constant made the flight path start inside the laptop's lid.
-    const phoneHalf = 20.0;
-    const laptopHalf = 35.0;
+    // Logical half-widths. They look small next to the rendered result
+    // because the whole canvas is scaled up around them.
+    const phoneHalf = 17.0;
+    const laptopHalf = 27.0;
     final leftX = phoneHalf + 10;
     final rightX = size.width - laptopHalf - 10;
 
@@ -200,7 +228,7 @@ class _FlightPainter extends CustomPainter {
         final x = from + (to - from) * eased;
         // A gentle arc, and a fade at both ends so nothing pops into existence
         // in the middle of the empty line.
-        final lift = math.sin(p * math.pi) * 18;
+        final lift = math.sin(p * math.pi) * 15;
         final fade = (math.sin(p * math.pi) * 1.6).clamp(0.0, 1.0);
         // A slight tilt that settles as it lands, so the tiles feel carried
         // rather than slid along a rail.
@@ -317,7 +345,7 @@ class _FlightPainter extends CustomPainter {
   /// bottom, and the side buttons breaking the silhouette. Anything more is
   /// invisible at this scale and anything less is a card.
   void _phone(Canvas canvas, Offset c, Color colour) {
-    const w = 40.0, h = 64.0;
+    const w = 34.0, h = 56.0;
     final body = Rect.fromCenter(center: c, width: w, height: h);
     final shell = RRect.fromRectAndRadius(body, const Radius.circular(8));
 
@@ -426,7 +454,7 @@ class _FlightPainter extends CustomPainter {
   /// line between them. The taper is the part that sells it; a plain
   /// rectangle underneath looks like a shelf.
   void _computer(Canvas canvas, Offset c, Color colour) {
-    const lidW = 64.0, lidH = 44.0;
+    const lidW = 54.0, lidH = 37.0;
     final lid = Rect.fromCenter(
         center: Offset(c.dx, c.dy - 5), width: lidW, height: lidH);
     final shell = RRect.fromRectAndRadius(lid, const Radius.circular(4.5));
