@@ -58,7 +58,7 @@ class ThumbCache extends ChangeNotifier {
       // each of four photos, several times a second, is how a progress screen
       // becomes the reason the upload is slow.
       final Uint8List? bytes =
-          await asset.thumbnailDataWithSize(const ThumbnailSize.square(180));
+          await asset.thumbnailDataWithSize(const ThumbnailSize.square(320));
       if (bytes == null || _disposed) return;
       final codec = await ui.instantiateImageCodec(bytes);
       final frame = await codec.getNextFrame();
@@ -135,7 +135,7 @@ class UploadingNow extends StatelessWidget {
                 color: theme.colorScheme.onSurfaceVariant)),
         const SizedBox(height: 8),
         SizedBox(
-          height: 78,
+          height: 104,
           child: ListView.separated(
             scrollDirection: Axis.horizontal,
             itemCount: items.length,
@@ -163,19 +163,21 @@ class _Tile extends StatelessWidget {
     final pct = value == null ? null : (value * 100).round();
 
     return SizedBox(
-      width: 64,
+      // Medium, not a thumbnail. The picture is the answer to "which of my
+      // photos is this", and at 64 across a face in a group shot is a smudge.
+      width: 88,
       child: Column(children: [
         Stack(children: [
           ClipRRect(
             borderRadius: BorderRadius.circular(12),
             child: SizedBox(
-              width: 64,
-              height: 56,
+              width: 88,
+              height: 76,
               child: image == null
                   ? Container(
                       color: theme.colorScheme.surfaceContainerHighest,
                       child: Icon(Icons.photo_outlined,
-                          size: 20, color: theme.colorScheme.outline))
+                          size: 26, color: theme.colorScheme.outline))
                   : RawImage(image: image, fit: BoxFit.cover),
             ),
           ),
@@ -187,7 +189,7 @@ class _Tile extends StatelessWidget {
             right: 0,
             bottom: 0,
             child: Container(
-              height: 18,
+              height: 22,
               decoration: BoxDecoration(
                 borderRadius: const BorderRadius.vertical(
                     bottom: Radius.circular(12)),
@@ -205,7 +207,7 @@ class _Tile extends StatelessWidget {
                 pct == null ? '…' : '$pct%',
                 style: const TextStyle(
                     color: Colors.white,
-                    fontSize: 10.5,
+                    fontSize: 12,
                     fontWeight: FontWeight.w800,
                     fontFeatures: [FontFeature.tabularFigures()]),
               ),

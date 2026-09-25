@@ -86,7 +86,7 @@ class _BackupFlightState extends State<BackupFlight>
   Widget build(BuildContext context) {
     final dark = Theme.of(context).brightness == Brightness.dark;
     return SizedBox(
-      height: 108,
+      height: 128,
       child: AnimatedBuilder(
         animation: _c,
         builder: (_, _) => CustomPaint(
@@ -129,6 +129,10 @@ class _FlightPainter extends CustomPainter {
   /// a gap where nothing is happening.
   static const _parcels = 4;
 
+  /// How wide a photo in flight is. Shared by the drawing and by the ends of
+  /// the path, which must allow for it or the tile overlaps a device.
+  static const _photoW = 34.0;
+
   /// Each photo in its own colour, cycled.
   ///
   /// Four identical brand-purple tiles read as one thing blinking; four
@@ -147,13 +151,18 @@ class _FlightPainter extends CustomPainter {
     final midY = size.height * 0.48;
     // Half-widths, stated separately: a laptop is wider than a phone, and one
     // shared constant made the flight path start inside the laptop's lid.
-    const phoneHalf = 17.0;
-    const laptopHalf = 31.0;
+    const phoneHalf = 20.0;
+    const laptopHalf = 35.0;
     final leftX = phoneHalf + 10;
     final rightX = size.width - laptopHalf - 10;
 
-    final from = leftX + phoneHalf + 9;
-    final to = rightX - laptopHalf - 9;
+    // The PARCEL's half-width is part of this, not just the device's. It was
+    // not, and once the photos were drawn at a readable size the last one
+    // landed on top of the laptop's lid before fading — the tile is 34 wide,
+    // so its edge reached 5 pixels past where the path was told to stop.
+    const parcelHalf = _photoW / 2;
+    final from = leftX + phoneHalf + parcelHalf + 4;
+    final to = rightX - laptopHalf - parcelHalf - 4;
 
     // ---- the path between them ---------------------------------------------
     // Dashes that travel with the parcels rather than sitting still, and a
@@ -191,7 +200,7 @@ class _FlightPainter extends CustomPainter {
         final x = from + (to - from) * eased;
         // A gentle arc, and a fade at both ends so nothing pops into existence
         // in the middle of the empty line.
-        final lift = math.sin(p * math.pi) * 13;
+        final lift = math.sin(p * math.pi) * 18;
         final fade = (math.sin(p * math.pi) * 1.6).clamp(0.0, 1.0);
         // A slight tilt that settles as it lands, so the tiles feel carried
         // rather than slid along a rail.
@@ -205,14 +214,14 @@ class _FlightPainter extends CustomPainter {
     }
 
     // ---- labels ------------------------------------------------------------
-    _label(canvas, 'This phone', Offset(leftX, midY + 34), soft);
-    _label(canvas, 'Your computer', Offset(rightX, midY + 34), soft);
+    _label(canvas, 'This phone', Offset(leftX, midY + 40), soft);
+    _label(canvas, 'Your computer', Offset(rightX, midY + 40), soft);
   }
 
   void _photo(Canvas canvas, Offset at, double opacity, Color hue,
       double tilt, ui.Image? image) {
-    const w = 22.0;
-    const h = w * 0.8;
+    const w = _photoW;
+    const h = w * 0.78;
 
     // Rotated about its own centre, so the tilt reads as the tile leaning
     // rather than the whole thing drifting off the path.
@@ -221,7 +230,7 @@ class _FlightPainter extends CustomPainter {
     canvas.rotate(tilt);
 
     final rect = Rect.fromCenter(center: Offset.zero, width: w, height: h);
-    final r = RRect.fromRectAndRadius(rect, const Radius.circular(5));
+    final r = RRect.fromRectAndRadius(rect, const Radius.circular(6));
 
     // A soft glow underneath, in the tile's own colour. This is what makes it
     // look lit rather than pasted on.
@@ -229,7 +238,7 @@ class _FlightPainter extends CustomPainter {
         r.shift(const Offset(0, 2)),
         Paint()
           ..color = hue.withValues(alpha: 0.35 * opacity)
-          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 5));
+          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 7));
 
     canvas.drawRRect(
         r,
@@ -271,13 +280,13 @@ class _FlightPainter extends CustomPainter {
       // as a photograph rather than as an abstract square.
       final glyph =
           Paint()..color = Colors.white.withValues(alpha: 0.95 * opacity);
-      canvas.drawCircle(const Offset(-5, -3), 1.9, glyph);
+      canvas.drawCircle(const Offset(-7.5, -4.5), 2.8, glyph);
       final tri = Path()
-        ..moveTo(-7.5, 5.5)
-        ..lineTo(-1, -1.5)
-        ..lineTo(3, 2.5)
-        ..lineTo(5.5, 0)
-        ..lineTo(7.5, 5.5)
+        ..moveTo(-11.5, 8.5)
+        ..lineTo(-1.5, -2.5)
+        ..lineTo(4.5, 4)
+        ..lineTo(8, 0)
+        ..lineTo(11.5, 8.5)
         ..close();
       canvas.drawPath(tri, glyph);
     }
@@ -308,7 +317,7 @@ class _FlightPainter extends CustomPainter {
   /// bottom, and the side buttons breaking the silhouette. Anything more is
   /// invisible at this scale and anything less is a card.
   void _phone(Canvas canvas, Offset c, Color colour) {
-    const w = 34.0, h = 54.0;
+    const w = 40.0, h = 64.0;
     final body = Rect.fromCenter(center: c, width: w, height: h);
     final shell = RRect.fromRectAndRadius(body, const Radius.circular(8));
 
@@ -417,7 +426,7 @@ class _FlightPainter extends CustomPainter {
   /// line between them. The taper is the part that sells it; a plain
   /// rectangle underneath looks like a shelf.
   void _computer(Canvas canvas, Offset c, Color colour) {
-    const lidW = 56.0, lidH = 38.0;
+    const lidW = 64.0, lidH = 44.0;
     final lid = Rect.fromCenter(
         center: Offset(c.dx, c.dy - 5), width: lidW, height: lidH);
     final shell = RRect.fromRectAndRadius(lid, const Radius.circular(4.5));
