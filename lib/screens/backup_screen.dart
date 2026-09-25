@@ -126,12 +126,52 @@ class _BackupScreenState extends State<BackupScreen> {
 
     return Scaffold(
       appBar: AppBar(title: const Text('Back up this phone')),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(18, 8, 18, 32),
-        children: [
+      // ONE PAGE. Everything about the run on screen at once, no scrolling.
+      //
+      // It was a ListView, so the live figures sat wherever the content above
+      // them happened to end and a long day's copy pushed them under the fold.
+      // A screen somebody checks at a glance should not need a gesture first.
+      //
+      // Not a bare Column, though. "Fits" is a claim about a device, a text
+      // size and a language, and it is false on some combination of the three
+      // — an iPhone SE at the largest accessibility size is not going to hold
+      // this however it is arranged. So: fill the viewport and lay out to it,
+      // and let it scroll only when it genuinely cannot. On a normal phone
+      // there is nothing to scroll, which is what was asked for; on a small
+      // one it degrades instead of clipping, which is what a fixed height
+      // would have done.
+      body: LayoutBuilder(
+        builder: (context, box) => SingleChildScrollView(
+          child: ConstrainedBox(
+            constraints: BoxConstraints(minHeight: box.maxHeight),
+            // IntrinsicHeight so the Spacer below has a height to divide.
+            // Inside a scroll view the column's height is unbounded, and a
+            // flex child of an unbounded column is an assertion rather than a
+            // layout.
+            child: IntrinsicHeight(
+              child: Padding(
+              padding: const EdgeInsets.fromLTRB(18, 4, 18, 16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
           // Repeated here as well as on the gallery: this is the screen
           // somebody opens when they have noticed nothing is happening.
           const BackupBlockedBanner(),
+          // THE BADGE AND THE PITCH ARE THE IDLE STATE.
+          //
+          // While a run is going they are decoration above the only thing
+          // anybody is looking at, and together they pushed the live numbers
+          // most of the way down the screen — on a 390pt phone the bar started
+          // below the fold. A screen that is DOING something leads with what
+          // it is doing.
+          // ...AND NOT AFTER A RUN EITHER. "Every photo on this phone,
+          // copied to your own computer. No choosing, no batches..." is a
+          // pitch: it belongs on the screen of somebody deciding whether to
+          // start, not on the screen of somebody reading what just happened.
+          // Left in, it pushed the finished state 57 pixels past the bottom
+          // of an iPhone — measured, because a screenshot at a generous
+          // height had made it look fine.
+          if (!running && !done && !failed) ...[
           Center(
             child: Container(
               width: 92,
@@ -176,6 +216,8 @@ class _BackupScreenState extends State<BackupScreen> {
                 color: theme.colorScheme.onSurfaceVariant),
           ),
 
+          ],
+
           // Two named devices with photos travelling between them. The bar says
           // how far along it is; this says where the photos are going, which is
           // the thing people actually wanted reassuring about — the whole point
@@ -204,20 +246,20 @@ class _BackupScreenState extends State<BackupScreen> {
             _card(
               theme,
               dark,
-              child: Column(children: [
-                // A determinate bar the moment a total is known. An indefinite
-                // sweep for twenty minutes tells somebody nothing except that
-                // the app has not crashed.
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(999),
-                  child: LinearProgressIndicator(
-                    value: p.total == 0 ? null : p.fraction,
-                    minHeight: 10,
-                    backgroundColor: theme.colorScheme.surfaceContainerHighest,
-                    valueColor: AlwaysStoppedAnimation(accent),
-                  ),
-                ),
-                const SizedBox(height: 14),
+              child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                // THE FIGURE FIRST, THEN ITS BAR.
+                //
+                // It was the other way round, which reads as a loading
+                // indicator with a caption under it rather than a number with
+                // its progress. The number is the answer; the bar qualifies
+                // it.
+                //
+                // Left-aligned, not centred: centred text in a card reads as a
+                // poster. A figure you check repeatedly wants to be where the
+                // eye already is, and the percentage sits opposite it on the
+                // same line so both are read in one movement.
                 // THE HEADLINE IS WHAT IS BEING UPLOADED, not the size of the
                 // library.
                 //
@@ -234,26 +276,55 @@ class _BackupScreenState extends State<BackupScreen> {
                 // repeat backup reads "0 uploaded / 900 of 1048 checked, 900
                 // already there", which is the truth and is reassuring instead
                 // of alarming.
-                Text(
-                  p.state == BackupState.scanning
-                      ? p.message
-                      : '${p.done} uploaded',
-                  style: const TextStyle(
-                      fontSize: 22,
-                      fontWeight: FontWeight.w800,
-                      fontFeatures: [FontFeature.tabularFigures()]),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.baseline,
+                  textBaseline: TextBaseline.alphabetic,
+                  children: [
+                    Expanded(
+                      child: Text(
+                        p.state == BackupState.scanning
+                            ? p.message
+                            : '${p.done} uploaded',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                            fontSize: 28,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: -0.6,
+                            fontFeatures: [FontFeature.tabularFigures()]),
+                      ),
+                    ),
+                    if (p.total > 0 && p.state != BackupState.scanning)
+                      Text('${(p.fraction * 100).round()}%',
+                          style: TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w800,
+                              color: accent,
+                              fontFeatures: const [
+                                FontFeature.tabularFigures()
+                              ])),
+                  ],
                 ),
                 if (p.total > 0 && p.state != BackupState.scanning) ...[
-                  const SizedBox(height: 3),
+                  const SizedBox(height: 4),
                   Text(
                       '${p.handled} of ${p.total} checked'
                       '${p.skipped > 0 ? ' · ${p.skipped} already there' : ''}',
-                      textAlign: TextAlign.center,
                       style: TextStyle(
                           fontSize: 12.5,
                           fontWeight: FontWeight.w600,
                           color: theme.colorScheme.onSurfaceVariant)),
                 ],
+                const SizedBox(height: 12),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(999),
+                  child: LinearProgressIndicator(
+                    value: p.total == 0 ? null : p.fraction,
+                    minHeight: 8,
+                    backgroundColor: theme.colorScheme.surfaceContainerHighest,
+                    valueColor: AlwaysStoppedAnimation(accent),
+                  ),
+                ),
                 // THE PHOTOGRAPHS GOING UP RIGHT NOW.
                 //
                 // Photos go four at a time, so this is a row rather than one
@@ -307,13 +378,17 @@ class _BackupScreenState extends State<BackupScreen> {
                     ),
                   ),
                 ],
-                const SizedBox(height: 14),
-                Wrap(
-                  spacing: 6,
-                  runSpacing: 6,
-                  alignment: WrapAlignment.center,
-                  children: _counts(p),
-                ),
+                // Left, with everything else in this card. A centred row under
+                // left-aligned figures reads as a different block that
+                // happened to land here.
+                if (p.failed > 0) ...[
+                  const SizedBox(height: 14),
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 6,
+                    children: _counts(p, running: true),
+                  ),
+                ],
               ]),
             ),
             const SizedBox(height: 14),
@@ -493,7 +568,16 @@ class _BackupScreenState extends State<BackupScreen> {
               ),
             ],
           ],
-        ],
+          // Pushes the actions to the bottom of the viewport when there is
+          // room to spare, so the page reads as one composed screen rather
+          // than a stack of things that stopped.
+          const Spacer(),
+                ],
+              ),
+            ),
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -599,10 +683,16 @@ class _BackupScreenState extends State<BackupScreen> {
   /// "could not be READ" was the old wording and it was wrong: the photo read
   /// perfectly and the upload failed. Naming the right half is the difference
   /// between somebody checking their laptop and somebody checking their phone.
-  List<Widget> _counts(BackupProgress p) => [
-        if (p.done > 0)
+  /// `running` drops the two counts the line under the headline already
+  /// states. While a run is going the screen said "900 already there" twice,
+  /// a few centimetres apart — which does not read as emphasis, it reads as
+  /// two different numbers that happen to match, and invites the reader to
+  /// work out whether they do. What is NOT up there is the failures, so that
+  /// pill stays in both states.
+  List<Widget> _counts(BackupProgress p, {bool running = false}) => [
+        if (p.done > 0 && !running)
           Pill('${p.done} sent', tone: PillTone.ok, icon: Icons.check),
-        if (p.skipped > 0)
+        if (p.skipped > 0 && !running)
           Pill('${p.skipped} already there',
               tone: PillTone.muted, icon: Icons.done_all),
         if (p.failed > 0)
