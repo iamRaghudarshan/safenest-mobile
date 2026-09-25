@@ -135,6 +135,41 @@ class _PhotoViewerState extends State<PhotoViewer> {
     }
   }
 
+  /// Out of the timeline, still in the library.
+  ///
+  /// NOT A BIN, and the wording has to carry that or nobody will use it: an
+  /// archived photo keeps its albums, its faces and its search text, and the
+  /// only thing it stops doing is appearing in the main grid. It is for the
+  /// receipts, the screenshot of a wifi password, the twelve shots of a
+  /// whiteboard — things worth keeping and not worth scrolling past daily.
+  Future<void> _archive() async {
+    final p = _photos[_index];
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await context.read<Session>().api
+          .post('/api/gallery/${p.id}/archive', const {});
+      widget.onChanged?.call();
+      if (!mounted) return;
+      // Removed from THIS viewer as well as from the grid behind: the photo
+      // is no longer in the timeline these pages came from, and leaving it
+      // swipeable would let somebody archive it twice.
+      setState(() {
+        _photos.removeAt(_index);
+        if (_index >= _photos.length) _index = _photos.length - 1;
+      });
+      messenger.showSnackBar(const SnackBar(
+          content: Text('Archived — find it under Collections › Archive')));
+      if (_photos.isEmpty && mounted) Navigator.pop(context);
+    } on ApiError catch (e) {
+      if (!mounted) return;
+      messenger.showSnackBar(SnackBar(
+        content: Text(e.status == 404
+            ? 'Your computer needs its SafeNest updated for this.'
+            : e.message),
+      ));
+    }
+  }
+
   /// Crop, rotate, filter or draw on it — or, for a video, trim it.
   ///
   /// The editor returns the UPDATED item, and the viewer swaps it in rather
@@ -290,6 +325,10 @@ class _PhotoViewerState extends State<PhotoViewer> {
                         icon: p.isVideo ? Icons.content_cut : Icons.tune,
                         label: p.isVideo ? 'Trim' : 'Edit',
                         onTap: _edit),
+                    _Action(
+                        icon: Icons.archive_outlined,
+                        label: 'Archive',
+                        onTap: _archive),
                     _Action(
                         icon: Icons.info_outline,
                         label: 'Details',

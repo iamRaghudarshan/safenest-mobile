@@ -23,6 +23,7 @@ import 'package:provider/provider.dart';
 import '../api.dart';
 import '../session.dart';
 import '../widgets/face_circle.dart';
+import 'saved_search_sheet.dart';
 import '../theme.dart';
 import '../widgets/brand_button.dart';
 import '../widgets/photo_tile.dart';
@@ -53,6 +54,49 @@ class _AlbumsTabState extends State<AlbumsTab> {
     _load();
   }
 
+  /// Make an album that is a QUESTION rather than a list.
+  ///
+  /// "Photos, 2024, beach" answers itself every time it is opened, so a photo
+  /// taken tomorrow that matches appears without anybody filing it. The phone
+  /// could already SHOW these — the server returns them among the albums —
+  /// but there was no way to make one except on the computer.
+  ///
+  /// The rule is CHOSEN, never typed. A rule somebody types is a rule they
+  /// can spell wrong, and a saved search that quietly matches nothing because
+  /// of a typo is the worst version of this feature.
+  Future<void> _newSavedSearch() async {
+    final api = context.read<Session>().api;
+    final messenger = ScaffoldMessenger.of(context);
+
+    // Only the labels this library actually contains. Offering "desert" to
+    // somebody with no desert photographs is how a picker becomes a list of
+    // dead ends.
+    List<Map<String, dynamic>> labels = const [];
+    try {
+      final r = await api.get('/api/gallery/labels');
+      labels = [
+        for (final e in ((r as Map)['items'] as List? ?? const []))
+          Map<String, dynamic>.from(e as Map)
+      ];
+    } on ApiError catch (e) {
+      if (e.status == 404) {
+        messenger.showSnackBar(const SnackBar(
+            content:
+                Text('Your computer needs its SafeNest updated for this.')));
+        return;
+      }
+    }
+    if (!mounted) return;
+
+    final made = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (ctx) => SavedSearchSheet(api: api, labels: labels),
+    );
+    if (made == true && mounted) await _load();
+  }
+
   Future<void> _load() async {
     setState(() => _loading = true);
     try {
@@ -78,13 +122,24 @@ class _AlbumsTabState extends State<AlbumsTab> {
     if (_loading) return const Center(child: CircularProgressIndicator());
     if (_error != null) return _Retry(message: _error!, onRetry: _load);
     if (_albums.isEmpty) {
-      return const _Empty(
-        icon: Icons.photo_album_outlined,
-        title: 'No albums yet',
-        note: 'Albums you make on the computer show up here.',
-      );
+      return Column(children: [
+        _newRow(),
+        const Expanded(
+          child: _Empty(
+            icon: Icons.photo_album_outlined,
+            title: 'No albums yet',
+            // The note used to say albums are made on the computer. A saved
+            // search can now be made here, so saying otherwise would send
+            // somebody to the wrong machine.
+            note: 'Make a saved search here, or an album on the computer.',
+          ),
+        ),
+      ]);
     }
-    return RefreshIndicator(
+    return Column(children: [
+      _newRow(),
+      Expanded(
+        child: RefreshIndicator(
       onRefresh: _load,
       child: GridView.builder(
         padding: const EdgeInsets.all(12),
@@ -128,6 +183,25 @@ class _AlbumsTabState extends State<AlbumsTab> {
                 .then((_) => _load()),
           );
         },
+      ),
+        ),
+      ),
+    ]);
+  }
+
+  /// The one control that makes a saved search here rather than only on the
+  /// computer. A row, not a floating button: it belongs with the albums it
+  /// adds to, and a FAB would sit over the last row of covers.
+  Widget _newRow() {
+    return Align(
+      alignment: Alignment.centerRight,
+      child: Padding(
+        padding: const EdgeInsets.only(right: 8, top: 4),
+        child: TextButton.icon(
+          onPressed: _newSavedSearch,
+          icon: const Icon(Icons.saved_search, size: 18),
+          label: const Text('Saved search'),
+        ),
       ),
     );
   }

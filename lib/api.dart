@@ -111,6 +111,34 @@ class Api {
     return res.bodyBytes;
   }
 
+  /// A POST whose ANSWER is a file rather than JSON.
+  ///
+  /// `download` above cannot do it: the export endpoint needs a body saying
+  /// WHICH documents, and a GET has nowhere to put a list of ids. Reading the
+  /// answer as bytes matters too — decoding a zip as text and then failing to
+  /// parse it is the shape this would otherwise take.
+  Future<List<int>> downloadPost(String path, Object body) async {
+    final res = await http
+        .post(_url(path),
+            headers: {
+              'Content-Type': 'application/json',
+              if (token != null) 'Authorization': 'Bearer $token',
+            },
+            body: jsonEncode(body))
+        .timeout(const Duration(minutes: 5));
+    if (res.statusCode >= 400) {
+      // The body of a failure IS json, even here, so the server's own sentence
+      // is used when there is one.
+      String msg = 'Could not fetch it';
+      try {
+        final d = jsonDecode(utf8.decode(res.bodyBytes));
+        if (d is Map && d['detail'] is String) msg = d['detail'] as String;
+      } catch (_) {}
+      throw ApiError(res.statusCode, msg);
+    }
+    return res.bodyBytes;
+  }
+
   /// One file plus form fields, framed by hand.
   ///
   /// By hand rather than with a client package because the framing has to match

@@ -137,6 +137,10 @@ class _StorageScreenState extends State<StorageScreen> {
       padding: const EdgeInsets.only(bottom: 28),
       children: [
         _totalCard(total, totalFiles),
+        // Sits with storage rather than under settings: "is everything still
+        // there?" is the same question as "what is on the disk", and it is
+        // where somebody already is when a tile looks broken.
+        ReconcileCard(api: context.read<Session>().api),
         _sectionTitle('What is using it'),
         if (entries.isEmpty)
           const Padding(
@@ -343,4 +347,149 @@ class _StorageScreenState extends State<StorageScreen> {
               style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14)),
         ],
       );
+}
+
+
+/// Does the computer's database still agree with its disk?
+///
+/// WHY ANYBODY WOULD WANT THIS. A photo can vanish from the disk — a failed
+/// copy, a drive swapped out, a tidy-up by somebody who did not know — while
+/// its row, its thumbnail, its face embeddings and its search text all carry
+/// on as though nothing happened. The gallery then shows a broken tile and
+/// nobody is told. Every part of the app that could have noticed is written
+/// to look away, because a missing file must never take a screen down.
+///
+/// So the check has to be asked for. It is READ-ONLY: it reports, and it
+/// repairs nothing. The repair that exists on the computer only clears
+/// derived rows — embeddings and faces for photos that are gone — and never
+/// deletes a photograph.
+class ReconcileCard extends StatefulWidget {
+  const ReconcileCard({super.key, required this.api});
+
+  final Api api;
+
+  @override
+  State<ReconcileCard> createState() => _ReconcileCardState();
+}
+
+class _ReconcileCardState extends State<ReconcileCard> {
+  Map<String, dynamic>? _result;
+  bool _busy = false;
+  String? _error;
+
+  Future<void> _run() async {
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      final r = await widget.api.get('/api/system/reconcile');
+      if (!mounted) return;
+      setState(() {
+        _result = (r as Map).cast<String, dynamic>();
+        _busy = false;
+      });
+    } on ApiError catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e.status == 404
+            ? 'Your computer needs its SafeNest updated for this.'
+            : e.message;
+        _busy = false;
+      });
+    }
+  }
+
+  int _n(Map<String, dynamic>? m, String key) =>
+      ((m?[key]) as num?)?.toInt() ?? 0;
+
+  @override
+  Widget build(BuildContext context) {
+    final gallery = (_result?['gallery'] as Map?)?.cast<String, dynamic>();
+    final docs = (_result?['documents'] as Map?)?.cast<String, dynamic>();
+    final missing = _n(gallery, 'missing_file') + _n(docs, 'missing_file');
+    final strays = _n(gallery, 'stray_file') + _n(docs, 'stray_file');
+
+    return Card(
+      margin: const EdgeInsets.fromLTRB(14, 6, 14, 6),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.fact_check_outlined, size: 20),
+                const SizedBox(width: 10),
+                const Expanded(
+                  child: Text('Check the files are all there',
+                      style: TextStyle(fontWeight: FontWeight.w600)),
+                ),
+                TextButton(
+                  onPressed: _busy ? null : _run,
+                  child: Text(_busy
+                      ? 'Checking…'
+                      : (_result == null ? 'Check' : 'Again')),
+                ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            const Text(
+              'Compares your computer\'s records against the files on its '
+              'disk. It only looks — nothing is changed or deleted.',
+              style: TextStyle(fontSize: 12.5, height: 1.4),
+            ),
+            if (_error != null) ...[
+              const SizedBox(height: 10),
+              Text(_error!, style: const TextStyle(fontSize: 12.5)),
+            ],
+            if (_result != null) ...[
+              const SizedBox(height: 12),
+              // The good answer is stated as plainly as the bad one. "0
+              // problems" read out of a table of numbers is not reassurance.
+              if (missing == 0 && strays == 0)
+                const Row(children: [
+                  Icon(Icons.check_circle_outline, size: 18),
+                  SizedBox(width: 8),
+                  Expanded(
+                      child: Text('Everything matches.',
+                          style: TextStyle(fontSize: 13))),
+                ])
+              else ...[
+                if (missing > 0)
+                  _line(context, Icons.error_outline,
+                      '$missing ${missing == 1 ? 'item is' : 'items are'} '
+                      'recorded but the file is missing from the disk.'),
+                if (strays > 0)
+                  _line(context, Icons.help_outline,
+                      '$strays ${strays == 1 ? 'file' : 'files'} on the disk '
+                      'that nothing points at.'),
+                const SizedBox(height: 6),
+                const Text(
+                  'Missing files usually mean a copy that did not finish, or '
+                  'a drive that changed. Your photographs are not deleted by '
+                  'this check.',
+                  style: TextStyle(fontSize: 12, height: 1.4),
+                ),
+              ],
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  static Widget _line(BuildContext context, IconData icon, String text) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 18),
+          const SizedBox(width: 8),
+          Expanded(child: Text(text, style: const TextStyle(fontSize: 13))),
+        ],
+      ),
+    );
+  }
 }

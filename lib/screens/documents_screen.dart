@@ -32,6 +32,7 @@ import 'package:flutter/material.dart';
 import 'package:open_filex/open_filex.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../api.dart';
@@ -39,6 +40,7 @@ import '../dates.dart';
 import '../session.dart';
 import '../sharing.dart';
 import 'doc_preview.dart';
+import 'doc_versions.dart';
 import 'scan_screen.dart';
 import '../masters.dart';
 import '../theme.dart';
@@ -69,6 +71,17 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
   /// to the folder somebody happens to be standing in is the complaint every
   /// file manager that did it has had.
   int _folder = 0;
+
+  /// Narrowing by what a file IS and when it arrived, and the order.
+  ///
+  /// Kept out of the search box deliberately: these NARROW a listing and a
+  /// search REPLACES it, and mixing them gives "search inside the filter" or
+  /// "filter inside the search" depending on which ran last.
+  String _ftype = '';
+  String _since = '';
+  String _until = '';
+  String _sort = '';
+  bool _filtersOpen = false;
   List<Map<String, dynamic>> _folders = const [];
   List<Map<String, dynamic>> _path = const [];
 
@@ -179,6 +192,10 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
         if (_category != 'all') 'category': _category,
         if (_query.isNotEmpty) 'q': _query,
         if (!searching) 'folder': '$_folder',
+        if (_ftype.isNotEmpty) 'ftype': _ftype,
+        if (_since.isNotEmpty) 'since': _since,
+        if (_until.isNotEmpty) 'until': _until,
+        if (_sort.isNotEmpty) 'sort': _sort,
       });
       setState(() {
         final root = d as Map;
@@ -436,6 +453,48 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
     );
   }
 
+  /// Several documents as ONE file.
+  ///
+  /// Sharing them individually already works, and this is the other half of
+  /// it: twelve files attached one by one is twelve chances to miss one,
+  /// where a zip is one thing to send and one thing to receive. It is also
+  /// what "sharing" means in this product — the file goes to the owner's own
+  /// share sheet, not behind a link.
+  Future<void> _exportSelected() async {
+    if (_picked.isEmpty) return;
+    final messenger = ScaffoldMessenger.of(context);
+    final api = context.read<Session>().api;
+    messenger.showSnackBar(const SnackBar(content: Text('Packing…')));
+    try {
+      // The zip is BUILT by the server — it holds the files, and asking the
+      // phone to download twelve documents and zip them would spend the
+      // battery and the connection to arrive at the same bytes.
+      final bytes = await api.downloadPost(
+          '/api/documents/export', {'ids': _picked.toList()});
+      final dir = await getTemporaryDirectory();
+      final out = Directory('${dir.path}/share');
+      if (!await out.exists()) await out.create(recursive: true);
+      final now = DateTime.now();
+      final name = 'documents-${now.year}-'
+          '${now.month.toString().padLeft(2, '0')}-'
+          '${now.day.toString().padLeft(2, '0')}.zip';
+      final f = File('${out.path}/$name');
+      await f.writeAsBytes(bytes);
+      if (!mounted) return;
+      await SharePlus.instance.share(ShareParams(files: [XFile(f.path)]));
+      if (mounted) setState(_picked.clear);
+    } on ApiError catch (e) {
+      messenger.showSnackBar(SnackBar(
+        content: Text(e.status == 404
+            ? 'Your computer needs its SafeNest updated for this.'
+            : e.message),
+      ));
+    } catch (_) {
+      messenger.showSnackBar(
+          const SnackBar(content: Text('Those could not be packed.')));
+    }
+  }
+
   Future<void> _shareSelected() async {
     if (_picked.isEmpty) return;
     final messenger = ScaffoldMessenger.of(context);
@@ -541,12 +600,33 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
             title: const Text('Open'),
             onTap: () => Navigator.pop(ctx, 'open'),
           ),
+          ListTile(
+            leading: const Icon(Icons.history),
+            title: const Text('Versions'),
+            subtitle: const Text('Earlier copies, kept when you replace it'),
+            onTap: () => Navigator.pop(ctx, 'versions'),
+          ),
         ]),
       ),
     );
     if (choice == null || !mounted) return;
     if (choice == 'open') return _open(doc);
     if (choice == 'preview') return _preview(doc);
+    if (choice == 'versions') {
+      final changed = await Navigator.of(context).push<bool>(
+        MaterialPageRoute(
+          builder: (_) => DocVersionsScreen(
+            api: context.read<Session>().api,
+            id: (doc['id'] as num).toInt(),
+            title: '${doc['title'] ?? 'Document'}',
+          ),
+        ),
+      );
+      // Restoring changes which file IS the document, so the list behind is
+      // showing a stale size and thumbnail until it reloads.
+      if (changed == true && mounted) await _load();
+      return;
+    }
 
     final messenger = ScaffoldMessenger.of(context);
     final api = context.read<Session>().api;
@@ -693,6 +773,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
           // The way back up. Hidden while searching, because results come
           // from the WHOLE tree and a breadcrumb over them would name a
           // folder most of the results are not in.
+          _filterBar(),
           if (_query.isEmpty && _category == 'all') _crumbs(),
           if (_selecting) _selectionBar(),
           Expanded(
@@ -736,6 +817,169 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
           ),
         ],
       ),
+    );
+  }
+
+  /// Grouped by what a file IS, not by extension — "was it .xls or .xlsx,
+  /// and did I save that one as .csv?" is the question this exists to avoid
+  /// having to answer. Keys match TYPE_GROUPS on the server.
+  static const _fileTypes = <(String, String)>[
+    ('pdf', 'PDFs'),
+    ('image', 'Images'),
+    ('doc', 'Documents'),
+    ('sheet', 'Spreadsheets'),
+    ('slides', 'Slides'),
+    ('archive', 'Archives'),
+    ('other', 'Other'),
+  ];
+
+  /// '' is the DEFAULT order — favourites first, then newest — and it is in
+  /// the list because naming it is the only way back to it after choosing
+  /// another.
+  static const _sorts = <(String, String)>[
+    ('', 'Starred first'),
+    ('name', 'Name'),
+    ('oldest', 'Oldest first'),
+    ('largest', 'Largest'),
+    ('smallest', 'Smallest'),
+  ];
+
+  int get _activeFilters =>
+      (_ftype.isEmpty ? 0 : 1) +
+      ((_since.isEmpty && _until.isEmpty) ? 0 : 1) +
+      (_sort.isEmpty ? 0 : 1);
+
+  Widget _filterBar() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(
+          height: 42,
+          child: ListView(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            children: [
+              FilterChip(
+                avatar: const Icon(Icons.tune, size: 16),
+                label: Text(_activeFilters > 0
+                    ? 'Filters ($_activeFilters)'
+                    : 'Filters'),
+                selected: _filtersOpen || _activeFilters > 0,
+                onSelected: (_) =>
+                    setState(() => _filtersOpen = !_filtersOpen),
+              ),
+              if (_activeFilters > 0)
+                Padding(
+                  padding: const EdgeInsets.only(left: 8),
+                  child: ActionChip(
+                    label: const Text('Clear'),
+                    onPressed: () {
+                      setState(() {
+                        _ftype = '';
+                        _since = '';
+                        _until = '';
+                        _sort = '';
+                      });
+                      _load();
+                    },
+                  ),
+                ),
+            ],
+          ),
+        ),
+        if (_filtersOpen) _filterPanel(),
+      ],
+    );
+  }
+
+  Widget _filterPanel() {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(12, 2, 12, 8),
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Wrap(
+            spacing: 8,
+            runSpacing: 6,
+            children: [
+              for (final (key, label) in _fileTypes)
+                ChoiceChip(
+                  label: Text(label),
+                  selected: _ftype == key,
+                  onSelected: (_) {
+                    setState(() => _ftype = _ftype == key ? '' : key);
+                    _load();
+                  },
+                ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(child: _dateField('From', _since, (v) {
+                setState(() => _since = v);
+                _load();
+              })),
+              const SizedBox(width: 8),
+              Expanded(child: _dateField('To', _until, (v) {
+                setState(() => _until = v);
+                _load();
+              })),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              const Text('Sort', style: TextStyle(fontSize: 12.5)),
+              const SizedBox(width: 10),
+              Expanded(
+                child: DropdownButton<String>(
+                  value: _sort,
+                  isExpanded: true,
+                  underline: const SizedBox.shrink(),
+                  items: [
+                    for (final (key, label) in _sorts)
+                      DropdownMenuItem(value: key, child: Text(label)),
+                  ],
+                  onChanged: (v) {
+                    setState(() => _sort = v ?? '');
+                    _load();
+                  },
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _dateField(String label, String value, ValueChanged<String> onPick) {
+    return OutlinedButton(
+      onPressed: () async {
+        final now = DateTime.now();
+        final picked = await showDatePicker(
+          context: context,
+          initialDate: DateTime.tryParse(value) ?? now,
+          firstDate: DateTime(now.year - 30),
+          lastDate: DateTime(now.year + 1),
+        );
+        if (picked == null) return;
+        // ISO, because that is what the server parses; anything else is
+        // silently ignored by it and looks to the person like a filter that
+        // does nothing.
+        onPick('${picked.year.toString().padLeft(4, '0')}-'
+            '${picked.month.toString().padLeft(2, '0')}-'
+            '${picked.day.toString().padLeft(2, '0')}');
+      },
+      onLongPress: value.isEmpty ? null : () => onPick(''),
+      child: Text(value.isEmpty ? label : value,
+          maxLines: 1, overflow: TextOverflow.ellipsis),
     );
   }
 
@@ -791,6 +1035,10 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                 icon: const Icon(Icons.ios_share),
                 tooltip: 'Share',
                 onPressed: _shareSelected),
+            IconButton(
+                icon: const Icon(Icons.folder_zip_outlined),
+                tooltip: 'Send as one zip',
+                onPressed: _exportSelected),
             IconButton(
                 icon: const Icon(Icons.drive_file_move_outline),
                 tooltip: 'Move to a folder',
