@@ -412,6 +412,80 @@ class _PeopleTabState extends State<PeopleTab> {
     }
   }
 
+  /// Group every face again, using the current rule.
+  ///
+  /// WHY THIS BUTTON EXISTS. Grouping happens once, as each photo is indexed,
+  /// and never revisits its own decisions — so a library grouped by an older,
+  /// worse rule stays that way for ever. Improving the rule does nothing for
+  /// the photographs already in.
+  ///
+  /// It asks first, with the numbers, because this rewrites every grouping in
+  /// the library. Names are kept whatever the answer: named people are used
+  /// as anchors, and only faces that match nobody named are grouped afresh.
+  Future<void> _regroup() async {
+    final api = context.read<Session>().api;
+    final messenger = ScaffoldMessenger.of(context);
+    Map<String, dynamic>? preview;
+    try {
+      final r = await api.post('/api/people/regroup', {'dry_run': true});
+      preview = (r as Map).cast<String, dynamic>();
+    } on ApiError catch (e) {
+      // 404 means the computer is running an older SafeNest that has no such
+      // route — worth saying plainly rather than "something went wrong".
+      messenger.showSnackBar(SnackBar(
+        content: Text(e.status == 404
+            ? 'Your computer needs its SafeNest updated for this.'
+            : e.message),
+      ));
+      return;
+    }
+    if (!mounted) return;
+
+    final moved = (preview['moved'] as num?)?.toInt() ?? 0;
+    final before = (preview['people_before'] as num?)?.toInt() ?? 0;
+    final after = (preview['people_after'] as num?)?.toInt() ?? 0;
+    if (moved == 0) {
+      messenger.showSnackBar(const SnackBar(
+          content: Text('Nothing would change — the grouping is already '
+              'what the current rule gives.')));
+      return;
+    }
+
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Group faces again?'),
+        content: Text(
+          '$moved face${moved == 1 ? '' : 's'} would move, and you would go '
+          'from $before ${before == 1 ? 'person' : 'people'} to $after.\n\n'
+          'Names you have given are kept.',
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Leave it')),
+          FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Group again')),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+
+    messenger.showSnackBar(const SnackBar(content: Text('Grouping…')));
+    try {
+      final r = await api.post('/api/people/regroup', const {}) as Map;
+      if (!mounted) return;
+      messenger.showSnackBar(SnackBar(
+        content: Text('Done — ${r['people_after']} '
+            '${(r['people_after'] as num?) == 1 ? 'person' : 'people'}'),
+      ));
+      await _load();
+    } on ApiError catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text(e.message)));
+    }
+  }
+
   Future<void> _load() async {
     setState(() => _loading = true);
     try {
@@ -437,6 +511,21 @@ class _PeopleTabState extends State<PeopleTab> {
     return Column(
       children: [
         _scanHeader(),
+        // Offered only once there is something to regroup. On an empty or
+        // barely-indexed library it would be a button that reports "nothing
+        // would change", which teaches people to ignore it.
+        if (_people.length > 1 && !_scanning)
+          Align(
+            alignment: Alignment.centerRight,
+            child: Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: TextButton.icon(
+                onPressed: _regroup,
+                icon: const Icon(Icons.auto_fix_high, size: 18),
+                label: const Text('Group again'),
+              ),
+            ),
+          ),
         Expanded(child: _content(context)),
       ],
     );

@@ -53,6 +53,8 @@ class CollectionsHomeState extends State<CollectionsHome> {
   int _documents = 0;
   int _memories = 0;
   int _total = 0;
+  int _videos = 0;
+  int _archived = 0;
 
   @override
   void initState() {
@@ -92,6 +94,11 @@ class CollectionsHomeState extends State<CollectionsHome> {
         safe('/api/documents'),
         safe('/api/gallery/memories'),
         safe('/api/gallery?limit=1'),
+        safe('/api/gallery?kind=videos&limit=1'),
+        // Archived photos are OUT of the timeline and still in the library —
+        // receipts, screenshots of a wifi password, the twelve shots of a
+        // whiteboard. There was no way to reach them from the phone at all.
+        safe('/api/gallery?archived=1&limit=1'),
       ]);
       if (!mounted) return;
 
@@ -112,6 +119,8 @@ class CollectionsHomeState extends State<CollectionsHome> {
         _documents = intOf(r[6], 'total');
         _memories = intOf(r[7], 'total');
         _total = intOf(r[8], 'total');
+        _videos = intOf(r[9], 'total');
+        _archived = intOf(r[10], 'total');
         _loading = false;
         _error = null;
       });
@@ -476,6 +485,28 @@ class CollectionsHomeState extends State<CollectionsHome> {
           // the point of the tile is finding what just arrived from the phone.
           onTap: () => _open(const CollectionScreen(
               title: 'Recently added', path: '/api/gallery?sort=added')),
+        ),
+      if (_videos > 0)
+        _Tile(
+          icon: Icons.videocam_outlined,
+          colour: const Color(0xFFE2557A),
+          title: 'Videos',
+          count: _videos,
+          unit: _videos == 1 ? 'video' : 'videos',
+          onTap: () => _open(const CollectionScreen(
+              title: 'Videos', path: '/api/gallery?kind=videos')),
+        ),
+      if (_archived > 0)
+        _Tile(
+          icon: Icons.archive_outlined,
+          colour: const Color(0xFF6B7280),
+          title: 'Archive',
+          count: _archived,
+          // Not a bin. Archived photos keep their albums, their faces and
+          // their search text — the only thing they stop doing is appearing
+          // in the main grid.
+          onTap: () => _open(const CollectionScreen(
+              title: 'Archive', path: '/api/gallery?archived=1')),
         ),
       if (_screenshots > 0)
         _Tile(
