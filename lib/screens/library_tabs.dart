@@ -771,15 +771,36 @@ class _PeopleTabState extends State<PeopleTab> {
     }
   }
 
+  /// Only people seen in more than one photo, unless asked otherwise.
+  ///
+  /// A face found in a SINGLE photograph is usually not a person you know —
+  /// it is somebody walking past, a face on a poster, a statue in a temple,
+  /// or something that is not a face at all. On the owner's library thirteen
+  /// of thirty-six "people" appeared exactly once, and seven of the ten
+  /// worst-looking circles were among them: an ear, a wristwatch, carvings.
+  ///
+  /// So they are hidden by default and the toggle brings them back. This is
+  /// what the web app has always done and what Google Photos does; the phone
+  /// was the odd one out, showing every stray detection with equal weight and
+  /// burying the people who matter among them.
+  bool _onlyRepeat = true;
+
+  /// How many people exist at all, so "show everyone" can say what it would
+  /// add — and so a filtered view that finds nobody does not claim the
+  /// library has nobody in it.
+  int _allPeople = 0;
+
   Future<void> _load() async {
     setState(() => _loading = true);
     try {
-      final d = await context.read<Session>().api.get('/api/people');
+      final d = await context.read<Session>().api.get('/api/people',
+          {'min_photos': _onlyRepeat ? '2' : '1'});
       setState(() {
         _people = [
           for (final p in ((d as Map)['people'] as List? ?? const []))
             Map<String, dynamic>.from(p as Map),
         ];
+        _allPeople = ((d)['all_people'] as num?)?.toInt() ?? _people.length;
         _loading = false;
         _error = null;
       });
@@ -811,8 +832,45 @@ class _PeopleTabState extends State<PeopleTab> {
               ),
             ),
           ),
+        _repeatChips(),
         Expanded(child: _content(context)),
       ],
+    );
+  }
+
+  /// Seen more than once / everyone.
+  ///
+  /// Only offered when the two differ — a row of chips that cannot change
+  /// what is on screen is noise, and on a small library every face is a
+  /// one-off anyway.
+  Widget _repeatChips() {
+    final hidden = _allPeople - _people.length;
+    if (_onlyRepeat && hidden <= 0) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(14, 0, 14, 8),
+      child: Row(children: [
+        ChoiceChip(
+          label: const Text('Seen more than once'),
+          selected: _onlyRepeat,
+          onSelected: (_) {
+            if (_onlyRepeat) return;
+            setState(() => _onlyRepeat = true);
+            _load();
+          },
+        ),
+        const SizedBox(width: 8),
+        ChoiceChip(
+          // The count is the point: it says what turning this on would add,
+          // so nobody has to try it to find out.
+          label: Text('Everyone ($_allPeople)'),
+          selected: !_onlyRepeat,
+          onSelected: (_) {
+            if (!_onlyRepeat) return;
+            setState(() => _onlyRepeat = false);
+            _load();
+          },
+        ),
+      ]),
     );
   }
 
@@ -828,23 +886,40 @@ class _PeopleTabState extends State<PeopleTab> {
             children: [
               const Icon(Icons.people_outline, size: 44),
               const SizedBox(height: 14),
-              const Text(
-                'No people found yet',
-                style: TextStyle(fontWeight: FontWeight.w700),
+              Text(
+                _onlyRepeat && _allPeople > 0
+                    ? 'Nobody appears twice yet'
+                    : 'No people found yet',
+                style: const TextStyle(fontWeight: FontWeight.w700),
               ),
               const SizedBox(height: 8),
-              const Text(
-                'Scan your backed-up photos for faces — it runs on your computer '
-                'and groups the people it finds.',
+              // Saying "no people" when there are faces, just none seen twice,
+              // reads as the scan having failed — and sends somebody off to
+              // re-run something that already worked.
+              Text(
+                _onlyRepeat && _allPeople > 0
+                    ? '$_allPeople ${_allPeople == 1 ? 'face was' : 'faces were'} '
+                        'found, each in a single photo. Tap Everyone to see them.'
+                    : 'Scan your backed-up photos for faces — it runs on your '
+                        'computer and groups the people it finds.',
                 textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 12.5),
+                style: const TextStyle(fontSize: 12.5),
               ),
               const SizedBox(height: 18),
-              FilledButton.icon(
-                onPressed: _scanning ? null : () => _startScan(),
-                icon: const Icon(Icons.face_retouching_natural),
-                label: Text(_scanning ? 'Finding people…' : 'Find people'),
-              ),
+              if (_onlyRepeat && _allPeople > 0)
+                FilledButton.tonal(
+                  onPressed: () {
+                    setState(() => _onlyRepeat = false);
+                    _load();
+                  },
+                  child: Text('Everyone ($_allPeople)'),
+                )
+              else
+                FilledButton.icon(
+                  onPressed: _scanning ? null : () => _startScan(),
+                  icon: const Icon(Icons.face_retouching_natural),
+                  label: Text(_scanning ? 'Finding people…' : 'Find people'),
+                ),
             ],
           ),
         ),

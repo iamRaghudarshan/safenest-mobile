@@ -85,7 +85,8 @@ class CollectionsHomeState extends State<CollectionsHome> {
 
     try {
       final r = await Future.wait([
-        safe('/api/people'),
+        // Repeat faces only, same as the People screen itself opens on.
+        safe('/api/people?min_photos=2'),
         safe('/api/gallery/albums'),
         safe('/api/gallery?fav=1&limit=1'),
         safe('/api/gallery?kind=screenshots&limit=1'),

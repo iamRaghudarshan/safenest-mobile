@@ -1145,7 +1145,11 @@ class _GalleryScreenState extends State<GalleryScreen>
     if (_peopleTried) return;
     _peopleTried = true;
     try {
-      final r = await context.read<Session>().api.get('/api/people?limit=40');
+      // min_photos=2: a face seen in ONE photo is usually a passer-by, a
+      // poster or a statue rather than somebody you would filter by. The
+      // People screen still offers everyone.
+      final r = await context.read<Session>().api
+          .get('/api/people?limit=40&min_photos=2');
       final list = (r is Map ? r['people'] as List? : null) ?? const [];
       if (!mounted) return;
       setState(() => _people = [
