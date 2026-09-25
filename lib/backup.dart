@@ -1207,8 +1207,15 @@ class BackupService extends ChangeNotifier {
         _itemProgress(asset.id, 0, bytes.length);
         onFileProgress?.call(0, bytes.length);
         r = await _upload(bytes, label, durationMs: ms);
-        _itemProgress(asset.id, bytes.length, bytes.length);
-        onFileProgress?.call(bytes.length, bytes.length);
+        // ONLY on success. This marked every photo 100% the moment the
+        // request returned, success or not — so a photo that never reached
+        // the computer filled its bar and then appeared under "not sent",
+        // which is the most confusing thing a progress bar can do: it says
+        // the work is done and then says it failed.
+        if (r.status >= 200 && r.status < 300) {
+          _itemProgress(asset.id, bytes.length, bytes.length);
+          onFileProgress?.call(bytes.length, bytes.length);
+        }
         streamedDigest = sha256.convert(bytes).toString();
       }
       if (r.status >= 200 && r.status < 300) {
