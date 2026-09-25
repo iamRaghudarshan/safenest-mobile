@@ -22,6 +22,7 @@ import 'package:provider/provider.dart';
 
 import '../api.dart';
 import '../session.dart';
+import '../widgets/face_circle.dart';
 import 'suggestions_strip.dart';
 import '../theme.dart';
 import 'documents_screen.dart';
@@ -279,14 +280,16 @@ class CollectionsHomeState extends State<CollectionsHome> {
                             width: 2),
                       ),
                       clipBehavior: Clip.antiAlias,
-                      child: p['cover_url'] == null
-                          ? Icon(Icons.person,
-                              color: Theme.of(ctx).colorScheme.outline)
-                          : Image.network(_abs('${p['cover_url']}'),
-                              fit: BoxFit.cover,
-                              cacheWidth: 200,
-                              errorBuilder: (_, _, _) => Icon(Icons.person,
-                                  color: Theme.of(ctx).colorScheme.outline)),
+                      // The face, not the middle of the photo it came from.
+                      child: FaceCircle(
+                        imageUrl: p['cover_url'] == null
+                            ? null
+                            : _abs('${p['cover_url']}'),
+                        box: p['box'] is Map
+                            ? (p['box'] as Map).cast<String, dynamic>()
+                            : null,
+                        size: 60,
+                      ),
                     ),
                     if (isUnnamed)
                       Positioned(

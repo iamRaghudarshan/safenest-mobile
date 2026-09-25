@@ -77,46 +77,66 @@ class _BackupBlockedBannerState extends State<BackupBlockedBanner>
     final theme = Theme.of(context);
     final ios = Platform.isIOS;
 
-    return Container(
-      margin: const EdgeInsets.fromLTRB(12, 10, 12, 0),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: theme.colorScheme.errorContainer,
-        borderRadius: BorderRadius.circular(12),
-      ),
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(14, 8, 14, 0),
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Icon(Icons.battery_saver_outlined,
-              color: theme.colorScheme.onErrorContainer, size: 22),
-          const SizedBox(width: 11),
+              size: 15, color: theme.colorScheme.onSurfaceVariant),
+          const SizedBox(width: 7),
           Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  ios ? 'Backup is paused by Low Power Mode'
-                      : 'Backup is paused by battery saver',
-                  style: theme.textTheme.titleSmall?.copyWith(
-                    color: theme.colorScheme.onErrorContainer,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                const SizedBox(height: 3),
-                Text(
-                  ios
-                      ? 'iOS does not run background tasks in Low Power Mode. '
-                          'Turn it off in Settings › Battery, then put the phone '
-                          'on charge — your photos will carry on by themselves.'
-                      : 'Battery saver stops background work. Turn it off, or '
-                          'allow SafeNest to run in the background, and your '
-                          'photos will carry on by themselves.',
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: theme.colorScheme.onErrorContainer,
-                  ),
-                ),
-              ],
+            child: Text(
+              // One line, and the shortest true one. This was a red box with
+              // a bold heading and three lines of prose telling somebody how
+              // to use their own phone's settings — over the top of a gallery
+              // they opened to look at photographs.
+              //
+              // The condition can last for DAYS, so whatever is said here is
+              // said on every visit. That is the argument for making it small:
+              // a notice nobody can dismiss should not be shouting, and a red
+              // panel reads as "something is broken" when nothing is.
+              ios
+                  ? 'Auto backup paused — Low Power Mode'
+                  : 'Auto backup paused — battery saver',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
             ),
+          ),
+          // The explanation moved HERE rather than being deleted. Somebody who
+          // wants to know why can ask; somebody who already knows is not made
+          // to read it again every time they open the app.
+          TextButton(
+            style: TextButton.styleFrom(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              minimumSize: const Size(0, 30),
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+            onPressed: () => showDialog<void>(
+              context: context,
+              builder: (ctx) => AlertDialog(
+                title: Text(ios
+                    ? 'Low Power Mode is on'
+                    : 'Battery saver is on'),
+                content: Text(ios
+                    ? 'iOS does not run background tasks in Low Power Mode, so '
+                        'automatic backup is waiting. Turn it off in '
+                        'Settings › Battery and put the phone on charge — your '
+                        'photos will carry on by themselves.'
+                    : 'Battery saver stops background work, so automatic '
+                        'backup is waiting. Turn it off, or allow SafeNest to '
+                        'run in the background, and your photos will carry on '
+                        'by themselves.'),
+                actions: [
+                  TextButton(
+                      onPressed: () => Navigator.pop(ctx),
+                      child: const Text('Close')),
+                ],
+              ),
+            ),
+            child: const Text('Why?'),
           ),
         ],
       ),

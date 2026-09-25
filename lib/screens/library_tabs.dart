@@ -22,6 +22,7 @@ import 'package:provider/provider.dart';
 
 import '../api.dart';
 import '../session.dart';
+import '../widgets/face_circle.dart';
 import '../theme.dart';
 import '../widgets/brand_button.dart';
 import '../widgets/photo_tile.dart';
@@ -545,20 +546,20 @@ class _PeopleTabState extends State<PeopleTab> {
                         ),
                       ),
                       clipBehavior: Clip.antiAlias,
-                      child: p['cover_url'] == null
-                          ? Icon(
-                              Icons.person,
-                              color: Theme.of(ctx).colorScheme.outline,
-                            )
-                          : Image.network(
-                              _abs(ctx, '${p['cover_url']}'),
-                              fit: BoxFit.cover,
-                              cacheWidth: 220,
-                              errorBuilder: (_, _, _) => Icon(
-                                Icons.person,
-                                color: Theme.of(ctx).colorScheme.outline,
-                              ),
-                            ),
+                      // The FACE, not the middle of the photograph it came
+                      // from. The server sends where it is; without that this
+                      // circle showed a shoulder on any group shot.
+                      child: FaceCircle(
+                        imageUrl: p['cover_url'] == null
+                            ? null
+                            : _abs(ctx, '${p['cover_url']}'),
+                        box: p['box'] is Map
+                            ? (p['box'] as Map).cast<String, dynamic>()
+                            : null,
+                        // 66 to match the container it fills — a smaller
+                        // value leaves a ring of background inside the border.
+                        size: 66,
+                      ),
                     ),
                     if (unnamedOne)
                       Positioned(

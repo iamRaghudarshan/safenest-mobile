@@ -33,6 +33,7 @@ import 'package:provider/provider.dart';
 import '../api.dart';
 import '../dates.dart';
 import '../session.dart';
+import '../widgets/face_circle.dart';
 import '../sharing.dart';
 import '../widgets/date_scrubber.dart';
 import '../widgets/selection_bar.dart';
@@ -1366,19 +1367,15 @@ class FaceChip extends StatelessWidget {
                 width: 2.5,
               ),
             ),
-            child: ClipOval(
-              child: url == null
-                  ? Container(
-                      color: theme.colorScheme.surfaceContainerHighest,
-                      child: const Icon(Icons.person, size: 26))
-                  : Image.network(url,
-                      fit: BoxFit.cover,
-                      // A face that will not load must not leave a broken-image
-                      // glyph where somebody's photograph should be.
-                      errorBuilder: (_, _, _) => Container(
-                          color: theme.colorScheme.surfaceContainerHighest,
-                          child: const Icon(Icons.person, size: 26))),
-            ),
+            // The face, cropped from wherever it was found — the whole
+            // photo in a circle is a shoulder on any group shot.
+            child: FaceCircle(
+              imageUrl: url,
+              box: person['box'] is Map
+                  ? (person['box'] as Map).cast<String, dynamic>()
+                  : null,
+              size: 52,
+            )
           ),
           const SizedBox(height: 3),
           Text(
