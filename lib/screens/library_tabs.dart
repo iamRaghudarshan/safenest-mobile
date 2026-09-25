@@ -28,6 +28,7 @@ import '../theme.dart';
 import '../widgets/brand_button.dart';
 import '../widgets/photo_tile.dart';
 import 'gallery_screen.dart';
+import 'person_faces.dart';
 import 'photo_viewer.dart';
 
 String _abs(BuildContext c, String u) {
@@ -47,6 +48,152 @@ class _AlbumsTabState extends State<AlbumsTab> {
   List<Map<String, dynamic>> _albums = [];
   bool _loading = true;
   String? _error;
+
+  /// Albums the library already implies, which nobody has accepted yet.
+  ///
+  /// SUGGESTIONS, NOT ALBUMS. Nothing is created until one is tapped, because
+  /// a gallery that quietly grows albums nobody asked for is a mess to undo —
+  /// and the one thing worse than not offering this is offering it by making
+  /// twelve albums on somebody's behalf.
+  List<Map<String, dynamic>> _suggested = const [];
+  bool _suggesting = false;
+
+  /// Dismissed for this visit only, and deliberately not remembered.
+  ///
+  /// A suggestion is recomputed from the photos every time, so "never show me
+  /// this again" would need a store of its own keyed on something that has no
+  /// stable identity — the group changes the moment a photo is added to it.
+  /// Hiding it until the screen is left is honest about what it can promise.
+  final Set<String> _waved = <String>{};
+
+  Future<void> _loadSuggestions() async {
+    setState(() => _suggesting = true);
+    try {
+      final r =
+          await context.read<Session>().api.get('/api/gallery/albums/suggested');
+      if (!mounted) return;
+      setState(() {
+        _suggested = [
+          for (final e in ((r as Map)['suggestions'] as List? ?? const []))
+            if ((e as Map)['exists'] != true) Map<String, dynamic>.from(e)
+        ];
+        _suggesting = false;
+      });
+    } on ApiError {
+      // Silent. This is an offer, not a feature that was asked for — an error
+      // banner over a suggestion nobody requested is pure noise, and an older
+      // computer simply answers 404 here.
+      if (mounted) setState(() => _suggesting = false);
+    }
+  }
+
+  Future<void> _accept(Map<String, dynamic> s) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final api = context.read<Session>().api;
+    try {
+      await api.post('/api/gallery/albums/suggested', {
+        'name': s['name'],
+        'photo_ids': s['photo_ids'],
+      });
+      messenger.showSnackBar(
+          SnackBar(content: Text('“${s['name']}” created')));
+      if (!mounted) return;
+      setState(() => _suggested.remove(s));
+      await _load();
+    } on ApiError catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text(e.message)));
+    }
+  }
+
+  /// The suggestion strip. Absent entirely when there is nothing to suggest —
+  /// an empty "Suggested" heading is a promise the screen cannot keep.
+  Widget _suggestionStrip() {
+    final live = [
+      for (final s in _suggested)
+        if (!_waved.contains('${s['name']}')) s
+    ];
+    if (live.isEmpty) return const SizedBox.shrink();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(14, 6, 14, 0),
+          child: Row(children: [
+            const Icon(Icons.auto_awesome, size: 16),
+            const SizedBox(width: 6),
+            Text('Suggested albums',
+                style: Theme.of(context)
+                    .textTheme
+                    .labelLarge
+                    ?.copyWith(fontWeight: FontWeight.w700)),
+          ]),
+        ),
+        SizedBox(
+          height: 150,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.fromLTRB(14, 8, 14, 8),
+            itemCount: live.length,
+            separatorBuilder: (_, _) => const SizedBox(width: 10),
+            itemBuilder: (ctx, i) {
+              final s = live[i];
+              final count = (s['count'] ?? 0) as int;
+              return SizedBox(
+                width: 150,
+                child: Card(
+                  clipBehavior: Clip.antiAlias,
+                  margin: EdgeInsets.zero,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Expanded(
+                        child: s['cover_url'] == null
+                            ? Container(
+                                color: Theme.of(ctx)
+                                    .colorScheme
+                                    .surfaceContainerHighest)
+                            : Image.network(_abs(ctx, '${s['cover_url']}'),
+                                fit: BoxFit.cover,
+                                errorBuilder: (_, _, _) => const SizedBox()),
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(8, 6, 8, 0),
+                        child: Text('${s['name']}',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                                fontSize: 12.5, fontWeight: FontWeight.w700)),
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                        child: Text(
+                            '$count ${count == 1 ? 'photo' : 'photos'}',
+                            style: Theme.of(ctx).textTheme.labelSmall),
+                      ),
+                      Row(children: [
+                        TextButton(
+                          onPressed: () =>
+                              setState(() => _waved.add('${s['name']}')),
+                          child: const Text('No',
+                              style: TextStyle(fontSize: 12)),
+                        ),
+                        const Spacer(),
+                        TextButton(
+                          onPressed: () => _accept(s),
+                          child: const Text('Create',
+                              style: TextStyle(fontSize: 12)),
+                        ),
+                      ]),
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
 
   @override
   void initState() {
@@ -99,6 +246,7 @@ class _AlbumsTabState extends State<AlbumsTab> {
 
   Future<void> _load() async {
     setState(() => _loading = true);
+    if (!_suggesting && _suggested.isEmpty) unawaited(_loadSuggestions());
     try {
       final d = await context.read<Session>().api.get('/api/gallery/albums');
       setState(() {
@@ -124,6 +272,7 @@ class _AlbumsTabState extends State<AlbumsTab> {
     if (_albums.isEmpty) {
       return Column(children: [
         _newRow(),
+        _suggestionStrip(),
         const Expanded(
           child: _Empty(
             icon: Icons.photo_album_outlined,
@@ -138,6 +287,7 @@ class _AlbumsTabState extends State<AlbumsTab> {
     }
     return Column(children: [
       _newRow(),
+      _suggestionStrip(),
       Expanded(
         child: RefreshIndicator(
       onRefresh: _load,
@@ -441,6 +591,16 @@ class _PeopleTabState extends State<PeopleTab> {
               title: Text(_isUnnamed(p) ? 'Add a name' : 'Rename'),
               onTap: () => Navigator.pop(ctx, 'name'),
             ),
+            // The repair tools. "Group again" re-runs the rule; this is where
+            // a person overrules it, and without it a wrong grouping has no
+            // answer at all beyond deleting the person and starting over.
+            ListTile(
+              leading: const Icon(Icons.face_retouching_natural),
+              title: const Text('Review faces'),
+              subtitle: const Text('Merge, split, or move a face that is '
+                  'somebody else'),
+              onTap: () => Navigator.pop(ctx, 'faces'),
+            ),
             ListTile(
               leading: const Icon(Icons.person_remove_outlined, color: kDanger),
               title: const Text('Remove this person'),
@@ -455,6 +615,7 @@ class _PeopleTabState extends State<PeopleTab> {
     );
     if (choice == null || !mounted) return;
     if (choice == 'name') return _name(p);
+    if (choice == 'faces') return _reviewFaces(p);
 
     final ok = await showDialog<bool>(
       context: context,
@@ -484,6 +645,28 @@ class _PeopleTabState extends State<PeopleTab> {
     } on ApiError catch (e) {
       messenger.showSnackBar(SnackBar(content: Text(e.message)));
     }
+  }
+
+  /// Every face filed under one person, and the tools to move them.
+  ///
+  /// It is handed the whole people list because both repairs need somewhere to
+  /// put a face: merging asks which other person is the same one, and moving a
+  /// single face asks who it really is. Fetching that list again inside the
+  /// screen would show a different set from the one just tapped.
+  Future<void> _reviewFaces(Map<String, dynamic> p) async {
+    final session = context.read<Session>();
+    final changed = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (_) => PersonFacesScreen(
+          api: session.api,
+          personId: (p['id'] as num).toInt(),
+          name: _isUnnamed(p) ? 'Unnamed person' : '${p['name']}',
+          baseUrl: session.baseUrl ?? '',
+          people: _people,
+        ),
+      ),
+    );
+    if (changed == true && mounted) await _load();
   }
 
   /// Group every face again, using the current rule.

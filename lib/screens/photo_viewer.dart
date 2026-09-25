@@ -236,7 +236,8 @@ class _PhotoViewerState extends State<PhotoViewer> {
     showModalBottomSheet(
       context: context,
       showDragHandle: true,
-      builder: (ctx) => _InfoSheet(detail: d, photo: p),
+      builder: (ctx) => _InfoSheet(
+          detail: d, photo: p, api: context.read<Session>().api),
     );
   }
 
@@ -385,10 +386,127 @@ class _Action extends StatelessWidget {
 ///
 /// It also threw away the two things the endpoint returns that nothing else in
 /// the app can tell you: which albums a photo is in, and who is in it.
-class _InfoSheet extends StatelessWidget {
-  const _InfoSheet({required this.detail, required this.photo});
+class _InfoSheet extends StatefulWidget {
+  const _InfoSheet(
+      {required this.detail, required this.photo, required this.api});
   final Map<String, dynamic>? detail;
   final Photo photo;
+  final Api api;
+
+  @override
+  State<_InfoSheet> createState() => _InfoSheetState();
+}
+
+class _InfoSheetState extends State<_InfoSheet> {
+  Photo get photo => widget.photo;
+  Map<String, dynamic>? get detail => widget.detail;
+
+  /// Who is in the photo, as this sheet currently believes it.
+  ///
+  /// Held locally rather than re-read from `detail` because tagging somebody
+  /// has to show on the pill row at once. Round-tripping /info after every tag
+  /// would be a spinner between a tap and its result, and this is a list of
+  /// names — the server's answer cannot differ from what was just sent.
+  List<Map<String, dynamic>>? _people;
+
+  List<Map<String, dynamic>> get people {
+    final cached = _people;
+    if (cached != null) return cached;
+    final root = detail ?? const <String, dynamic>{};
+    return _people = [
+      for (final e in ((root['people'] as List?) ?? const []))
+        Map<String, dynamic>.from(e as Map)
+    ];
+  }
+
+  /// Say who this is — an existing person, or somebody new.
+  ///
+  /// WHY TAGGING BY HAND EXISTS AT ALL when faces are found automatically: the
+  /// automatic pass only ever sees faces it can detect. A photo taken from
+  /// behind, a child asleep, somebody at the far edge of a group — those are
+  /// in nobody's group and never will be, and until now there was no way to
+  /// say so. It is also the only way to attach a person to a photo that has
+  /// no face in it at all.
+  Future<void> _tag() async {
+    final messenger = ScaffoldMessenger.of(context);
+    List<Map<String, dynamic>> known = const [];
+    try {
+      final r = await widget.api.get('/api/people');
+      known = [
+        for (final e in ((r as Map)['people'] as List? ?? const []))
+          Map<String, dynamic>.from(e as Map)
+      ];
+    } on ApiError {
+      // An empty list still lets a NEW name be typed, which is the case that
+      // matters on a library nobody has named anybody in yet.
+    }
+    if (!mounted) return;
+
+    final taken = {for (final p in people) (p['id'] as num?)?.toInt()};
+    final choice = await showModalBottomSheet<Map<String, dynamic>>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (ctx) => _PersonPicker(
+        people: [
+          for (final p in known)
+            if (!taken.contains((p['id'] as num?)?.toInt())) p
+        ],
+      ),
+    );
+    if (choice == null || !mounted) return;
+
+    try {
+      final r = await widget.api.post('/api/gallery/${photo.id}/tag', choice);
+      final m = r is Map ? r : const {};
+      setState(() => people.add({
+            'id': (m['person_id'] as num?)?.toInt(),
+            'name': '${m['name'] ?? choice['name'] ?? 'Someone'}',
+          }));
+    } on ApiError catch (e) {
+      messenger.showSnackBar(SnackBar(
+          content: Text(e.status == 404
+              ? 'Your computer needs its SafeNest updated for this.'
+              : e.message)));
+    }
+  }
+
+  /// Take a name off this photo.
+  ///
+  /// It removes the LINK between this photo and that person — not the person,
+  /// and not the photo. The wording has to carry that, because "remove" next
+  /// to somebody's name reads as deleting them from the library.
+  Future<void> _untag(Map<String, dynamic> person) async {
+    final id = (person['id'] as num?)?.toInt();
+    if (id == null) return;
+    final messenger = ScaffoldMessenger.of(context);
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Remove ${person['name'] ?? 'them'} from this photo?'),
+        content: const Text(
+            'Only this photo stops being theirs. They stay in People, and '
+            'every other photo of them is untouched.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Keep')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Remove')),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    try {
+      await widget.api
+          .post('/api/gallery/${photo.id}/untag', {'person_id': id});
+      setState(() =>
+          people.removeWhere((p) => (p['id'] as num?)?.toInt() == id));
+    } on ApiError catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text(e.message)));
+    }
+  }
 
   String _size(dynamic b) {
     final n = b is num ? b.toDouble() : double.tryParse('${b ?? ''}');
@@ -476,16 +594,28 @@ class _InfoSheet extends StatelessWidget {
           ]),
         ],
 
-        if (people.isNotEmpty) ...[
-          const SizedBox(height: 16),
-          Text('People', style: theme.textTheme.bodySmall),
-          const SizedBox(height: 8),
-          Wrap(spacing: 6, runSpacing: 6, children: [
-            for (final pr in people)
-              Pill('${(pr as Map)['name'] ?? 'Someone'}',
-                  colour: kBrand, icon: Icons.person_outline),
-          ]),
-        ],
+        // ALWAYS shown, even with nobody in it — this is the only way to say
+        // who is in a photograph the face finder missed, and a section that
+        // appears only once somebody is already tagged can never be the place
+        // the first tag is made.
+        const SizedBox(height: 16),
+        Text('People', style: theme.textTheme.bodySmall),
+        const SizedBox(height: 8),
+        Wrap(spacing: 6, runSpacing: 6, children: [
+          for (final pr in people)
+            InputChip(
+              avatar: const Icon(Icons.person_outline, size: 17),
+              label: Text('${pr['name'] ?? 'Someone'}'),
+              onDeleted: () => _untag(pr),
+              deleteIcon: const Icon(Icons.close, size: 16),
+              tooltip: 'Remove from this photo',
+            ),
+          ActionChip(
+            avatar: const Icon(Icons.person_add_alt, size: 17),
+            label: const Text('Add someone'),
+            onPressed: _tag,
+          ),
+        ]),
 
         const SizedBox(height: 16),
         Text(
@@ -498,3 +628,114 @@ class _InfoSheet extends StatelessWidget {
 }
 
 
+
+/// Choose who is in a photo: somebody already known, or a new name.
+///
+/// THE NEW NAME COMES FIRST and is always available, because the common case
+/// for hand-tagging is exactly the person the face finder has never seen — a
+/// photo taken from behind, or somebody who appears once. A picker that only
+/// offers existing people cannot serve that case at all.
+///
+/// The server takes either shape at the same endpoint: `{person_id}` picks
+/// somebody known, `{name}` finds them by name or creates them. So this
+/// returns whichever the person chose and lets the server reconcile it — which
+/// also means typing a name that already exists attaches to that person
+/// instead of making a second one with the same name.
+class _PersonPicker extends StatefulWidget {
+  const _PersonPicker({required this.people});
+  final List<Map<String, dynamic>> people;
+
+  @override
+  State<_PersonPicker> createState() => _PersonPickerState();
+}
+
+class _PersonPickerState extends State<_PersonPicker> {
+  final _name = TextEditingController();
+  String _filter = '';
+
+  @override
+  void dispose() {
+    _name.dispose();
+    super.dispose();
+  }
+
+  bool _isPlaceholder(String n) =>
+      RegExp(r'^Person\s*\d+$', caseSensitive: false).hasMatch(n);
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final q = _filter.trim().toLowerCase();
+    final shown = [
+      for (final p in widget.people)
+        if (q.isEmpty || '${p['name'] ?? ''}'.toLowerCase().contains(q)) p
+    ];
+    final typed = _name.text.trim();
+
+    return Padding(
+      padding: EdgeInsets.fromLTRB(
+          20, 0, 20, MediaQuery.of(context).viewInsets.bottom + 20),
+      child: Column(mainAxisSize: MainAxisSize.min, children: [
+        Align(
+          alignment: Alignment.centerLeft,
+          child: Text('Who is in this photo?',
+              style: theme.textTheme.titleMedium),
+        ),
+        const SizedBox(height: 12),
+        TextField(
+          controller: _name,
+          autofocus: true,
+          textCapitalization: TextCapitalization.words,
+          decoration: const InputDecoration(
+            labelText: 'Name',
+            hintText: 'Type a name, or pick somebody below',
+            prefixIcon: Icon(Icons.search),
+          ),
+          onChanged: (v) => setState(() => _filter = v),
+          onSubmitted: (v) {
+            if (v.trim().isNotEmpty) {
+              Navigator.pop(context, {'name': v.trim()});
+            }
+          },
+        ),
+        if (typed.isNotEmpty &&
+            !shown.any((p) =>
+                '${p['name'] ?? ''}'.toLowerCase() == typed.toLowerCase()))
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: const CircleAvatar(child: Icon(Icons.person_add_alt)),
+            title: Text('Add “$typed”',
+                style: const TextStyle(fontWeight: FontWeight.w700)),
+            subtitle: const Text('Somebody new'),
+            onTap: () => Navigator.pop(context, {'name': typed}),
+          ),
+        if (shown.isNotEmpty) ...[
+          const Divider(),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxHeight: 280),
+            child: ListView.builder(
+              shrinkWrap: true,
+              itemCount: shown.length,
+              itemBuilder: (ctx, i) {
+                final p = shown[i];
+                final name = '${p['name'] ?? ''}'.trim();
+                final placeholder = name.isEmpty || _isPlaceholder(name);
+                return ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: const CircleAvatar(child: Icon(Icons.person)),
+                  // An unnamed cluster is still worth offering — tagging a
+                  // photo to it is a perfectly good way to say "this is that
+                  // one" before deciding what to call them.
+                  title: Text(placeholder ? 'Unnamed person' : name),
+                  subtitle: Text('${p['count'] ?? 0} photos'),
+                  onTap: () => Navigator.pop(
+                      ctx, {'person_id': (p['id'] as num?)?.toInt()}),
+                );
+              },
+            ),
+          ),
+        ],
+      ]),
+    );
+  }
+}

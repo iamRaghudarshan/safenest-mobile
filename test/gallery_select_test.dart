@@ -100,7 +100,7 @@ void main() {
   });
 
   group('the selection bar', () {
-    testWidgets('states the count in words and offers the three actions',
+    testWidgets('states the count in words and offers every action',
         (tester) async {
       tester.view.physicalSize = const Size(375, 667);
       tester.view.devicePixelRatio = 1.0;
@@ -115,6 +115,7 @@ void main() {
           onDelete: () {},
           onAlbum: () {},
           onFavourite: () {},
+          onArchive: () {},
           onShare: () {},
         ),
       )));
@@ -126,6 +127,10 @@ void main() {
       expect(find.text('12 selected'), findsOneWidget);
       expect(find.text('Album'), findsOneWidget);
       expect(find.text('Star'), findsOneWidget);
+      // Archive sits beside Delete because that is the choice actually being
+      // made. Without it on screen the only way out of a crowded timeline is
+      // deleting photographs somebody wanted to keep.
+      expect(find.text('Archive'), findsOneWidget);
       expect(find.text('Delete'), findsOneWidget);
       expect(find.text('Select all'), findsOneWidget);
     });
@@ -145,6 +150,7 @@ void main() {
           onDelete: () => taps++,
           onAlbum: () => taps++,
           onFavourite: () => taps++,
+          onArchive: () => taps++,
           onShare: () => taps++,
         ),
       )));
@@ -174,6 +180,7 @@ void main() {
           onDelete: () {},
           onAlbum: () {},
           onFavourite: () {},
+          onArchive: () {},
           onShare: () {},
         ),
       )));

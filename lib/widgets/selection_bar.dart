@@ -22,6 +22,7 @@ class SelectionBar extends StatelessWidget {
     required this.onDelete,
     required this.onAlbum,
     required this.onFavourite,
+    required this.onArchive,
     required this.onShare,
   });
 
@@ -32,6 +33,14 @@ class SelectionBar extends StatelessWidget {
   final VoidCallback onDelete;
   final VoidCallback onAlbum;
   final VoidCallback onFavourite;
+
+  /// Out of the timeline, still in the library.
+  ///
+  /// It sits beside Delete on purpose, because that is the choice actually
+  /// being made: archive is "stop showing me this", delete is "get rid of
+  /// it". Offering only delete is what makes people delete things they
+  /// wanted to keep.
+  final VoidCallback onArchive;
   final VoidCallback onShare;
 
   @override
@@ -65,9 +74,9 @@ class SelectionBar extends StatelessWidget {
               child: const Text('Select all'),
             ),
           ]),
-          // A determinate-looking bar would be a lie — the actions are one
-          // request per photo. This only says "something is happening", which
-          // is all it knows.
+          // Indeterminate because the phone cannot know how long the server
+          // takes over a selection — it is one request now, not one per
+          // photo, but the answer still arrives when it arrives.
           if (busy) const LinearProgressIndicator(minHeight: 2),
           Row(children: [
             _Action(
@@ -82,6 +91,10 @@ class SelectionBar extends StatelessWidget {
                 icon: Icons.star_outline,
                 label: 'Star',
                 onTap: busy ? null : onFavourite),
+            _Action(
+                icon: Icons.archive_outlined,
+                label: 'Archive',
+                onTap: busy ? null : onArchive),
             _Action(
                 icon: Icons.delete_outline,
                 label: 'Delete',

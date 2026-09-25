@@ -154,6 +154,29 @@ class _GalleryScreenState extends State<GalleryScreen>
   List<Map<String, dynamic>> _people = [];
   bool _peopleTried = false;
 
+  /// People whose NAME matches what is being typed.
+  ///
+  /// Only people somebody has actually named. "Person 12" is the clustering's
+  /// own placeholder, and matching it would mean typing "person" produced a
+  /// row of every unnamed face in the library — noise, dressed as an answer.
+  static final _placeholderName =
+      RegExp(r'^Person\s*\d+$', caseSensitive: false);
+
+  List<Map<String, dynamic>> get _namedMatches {
+    final q = _query.trim().toLowerCase();
+    if (q.isEmpty) return const [];
+    return [
+      for (final p in _people)
+        if (() {
+          final n = '${p['name'] ?? ''}'.trim();
+          return n.isNotEmpty &&
+              !_placeholderName.hasMatch(n) &&
+              n.toLowerCase().contains(q);
+        }())
+          p,
+    ];
+  }
+
   /// How the grid is ordered. 'newest' (default) is newest TAKEN first — the
   /// order every phone gallery opens on. 'oldest' is the reverse. 'added' is
   /// newest BACKED UP first, a genuinely different order: a photo scanned in
@@ -643,15 +666,37 @@ class _GalleryScreenState extends State<GalleryScreen>
     );
     if (ok != true || !mounted) return;
     final api = context.read<Session>().api;
-    // One call per photo: DELETE /api/gallery/{id} takes a single id. Sent
-    // four at a time rather than all at once — the same pacing the backup uses,
-    // and for the same reason.
-    await _run('Deleted', (ids) async {
-      for (var i = 0; i < ids.length; i += 4) {
-        await Future.wait(
-            ids.skip(i).take(4).map((id) => api.delete('/api/gallery/$id')));
-      }
-    });
+    await _run('Deleted', (ids) => _bulk('trash', ids,
+        oneByOne: (id) => api.delete('/api/gallery/$id')));
+  }
+
+  /// One action, one request — falling back to one request per photo.
+  ///
+  /// A selected day is easily two hundred photos, and two hundred POSTs is two
+  /// hundred commits and a progress bar to watch. Worse, a phone that loses
+  /// its connection halfway leaves the selection half-applied with nothing
+  /// saying which half. `/bulk` applies the lot or none of it.
+  ///
+  /// The FALLBACK is not belt-and-braces. A computer running an older SafeNest
+  /// answers 404 here, and without it every bulk action on this screen would
+  /// simply stop working the day the phone was updated ahead of the computer —
+  /// which is the normal order, not an edge case.
+  Future<void> _bulk(String action, List<int> ids,
+      {required Future<void> Function(int id) oneByOne,
+      Map<String, dynamic> extra = const {}}) async {
+    final api = context.read<Session>().api;
+    try {
+      await api.post('/api/gallery/bulk',
+          {'action': action, 'ids': ids, ...extra});
+      return;
+    } on ApiError catch (e) {
+      if (e.status != 404 && e.status != 400) rethrow;
+    }
+    // Four at a time rather than all at once — the same pacing the backup
+    // uses, and for the same reason.
+    for (var i = 0; i < ids.length; i += 4) {
+      await Future.wait(ids.skip(i).take(4).map(oneByOne));
+    }
   }
 
   /// Send the selection out of the app.
@@ -681,14 +726,60 @@ class _GalleryScreenState extends State<GalleryScreen>
     }
   }
 
+  /// Star the selection — SET, not toggle.
+  ///
+  /// The per-photo route toggles, so starring a mixed selection one photo at a
+  /// time un-starred the ones already starred: press Star on fifty photos of
+  /// which ten were starred and ten lose their star. `/bulk` sets them all to
+  /// starred, which is what the button says it does. The fallback keeps the
+  /// old toggle behaviour only because on an older server that is the only
+  /// behaviour there is.
   Future<void> _favouriteSelected() async {
     final api = context.read<Session>().api;
-    await _run('Starred', (ids) async {
+    await _run('Starred', (ids) => _bulk('favourite', ids,
+        oneByOne: (id) => api.post('/api/gallery/$id/favourite')));
+  }
+
+  /// Out of the timeline, still in the library.
+  ///
+  /// Archive and delete are different promises and the wording has to keep
+  /// them apart: trash ends in the file being removed, archive ends in
+  /// nothing at all — the photo, its faces, its albums and its searchability
+  /// are untouched, and only the timeline stops showing it.
+  Future<void> _archiveSelected() async {
+    final n = _selected.length;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Archive $n ${n == 1 ? "photo" : "photos"}?'),
+        content: const Text(
+            'They leave the timeline and stay in your library — search, '
+            'albums and people still find them. Nothing is deleted.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Archive')),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    final api = context.read<Session>().api;
+    await _run('Archived', (ids) async {
+      // Archive has its OWN bulk route rather than an action on /bulk, so it
+      // cannot share _bulk's body shape.
+      try {
+        await api.post(
+            '/api/gallery/archive/bulk', {'ids': ids, 'archived': true});
+        return;
+      } on ApiError catch (e) {
+        if (e.status != 404) rethrow;
+      }
       for (var i = 0; i < ids.length; i += 4) {
-        await Future.wait(ids
-            .skip(i)
-            .take(4)
-            .map((id) => api.post('/api/gallery/$id/favourite')));
+        await Future.wait(ids.skip(i).take(4).map((id) =>
+            api.post('/api/gallery/$id/archive', {'archived': true})));
       }
     });
   }
@@ -976,6 +1067,7 @@ class _GalleryScreenState extends State<GalleryScreen>
               onDelete: _deleteSelected,
               onAlbum: _addToAlbum,
               onFavourite: _favouriteSelected,
+              onArchive: _archiveSelected,
               onShare: _shareSelected,
             )
           : null,
@@ -1061,6 +1153,55 @@ class _GalleryScreenState extends State<GalleryScreen>
                         _personId != 0) ...[
                       const SizedBox(height: 8),
                       _toolbar(),
+                    ],
+                    // TYPING A NAME SHOWS THE PERSON, not only their photos.
+                    //
+                    // Searching a name already worked — the server matches it
+                    // — but nothing on screen ever said so, so it was a
+                    // feature nobody could find. Now the faces strip answers
+                    // the question being typed: matching people come to the
+                    // front under a heading that names the search.
+                    if (_query.isNotEmpty && _namedMatches.isNotEmpty) ...[
+                      const SizedBox(height: 10),
+                      Text(
+                        'People matching “$_query”',
+                        style: Theme.of(context)
+                            .textTheme
+                            .labelMedium
+                            ?.copyWith(fontWeight: FontWeight.w700),
+                      ),
+                      const SizedBox(height: 6),
+                      SizedBox(
+                        height: 78,
+                        child: ListView.separated(
+                          scrollDirection: Axis.horizontal,
+                          itemCount: _namedMatches.length,
+                          separatorBuilder: (_, _) => const SizedBox(width: 10),
+                          itemBuilder: (ctx, i) {
+                            final person = _namedMatches[i];
+                            final id = (person['id'] as num?)?.toInt() ?? 0;
+                            return FaceChip(
+                              person: person,
+                              selected: _personId == id,
+                              // Picking the person REPLACES the typed words.
+                              // Leaving both on would narrow to their photos
+                              // and then filter those by the same name again,
+                              // which reads as the search having lost most of
+                              // the results.
+                              onTap: () {
+                                _search.clear();
+                                setState(() {
+                                  _query = '';
+                                  _personId = id;
+                                  _personName =
+                                      '${person['name'] ?? ''}'.trim();
+                                });
+                                _load(reset: true);
+                              },
+                            );
+                          },
+                        ),
+                      ),
                     ],
                     // Faces — a quiet strip with no labelled row above it. Tap a
                     // face to narrow the grid; the last item is the way to the
