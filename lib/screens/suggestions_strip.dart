@@ -16,8 +16,11 @@
 library;
 
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
 import '../api.dart';
+import '../session.dart';
+import '../widgets/photo_tile.dart';
 
 class SuggestionsStrip extends StatefulWidget {
   const SuggestionsStrip({super.key, required this.api, this.onMade});
@@ -36,6 +39,15 @@ class _SuggestionsStripState extends State<SuggestionsStrip> {
   List<Map<String, dynamic>> _items = const [];
   String _busy = '';
   bool _loaded = false;
+
+  /// How many are shown before "Show more".
+  ///
+  /// The server offers one per busy day, which on a real library is eight or
+  /// more — and eight full-width cards stacked above the albums is not a
+  /// suggestion panel, it is the screen. Two is an offer; the rest are there
+  /// for anybody who wants them.
+  static const _visible = 2;
+  bool _all = false;
 
   @override
   void initState() {
@@ -119,8 +131,95 @@ class _SuggestionsStripState extends State<SuggestionsStrip> {
                   fontWeight: FontWeight.w700,
                   letterSpacing: 0.6)),
         ),
-        for (final s in _items) _card(s),
+        for (final s in (_all ? _items : _items.take(_visible))) _card(s),
+        if (_items.length > _visible)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 0, 14, 4),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton(
+                onPressed: () => setState(() => _all = !_all),
+                child: Text(_all
+                    ? 'Show fewer'
+                    : 'Show ${_items.length - _visible} more'),
+              ),
+            ),
+          ),
       ],
+    );
+  }
+
+  /// The photographs the suggestion is ABOUT, as a small overlapping stack.
+  ///
+  /// It drew a generic icon in a tinted square — for a suggestion about
+  /// somebody's own pictures, which is the one thing worth showing. "A moving
+  /// highlight from 25 September" means nothing on its own; three faces from
+  /// that afternoon mean everything.
+  ///
+  /// Overlapped rather than in a row: it says "several of these" in the width
+  /// of one and a half, and a card in a list has no room for three squares
+  /// side by side.
+  Widget _covers(Map<String, dynamic> s, IconData fallbackIcon) {
+    final base = context.read<Session>().baseUrl ?? '';
+    final urls = [
+      for (final u in ((s['covers'] as List?) ?? const []))
+        absoluteMedia('$u', base)
+    ];
+    if (urls.isEmpty) {
+      return Container(
+        width: 46,
+        height: 46,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.14),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Icon(fallbackIcon, size: 20),
+      );
+    }
+    return SizedBox(
+      width: 46.0 + (urls.length - 1) * 13,
+      height: 46,
+      child: Stack(
+        children: [
+          // Reversed so the FIRST photo ends up on top: it is the one the
+          // suggestion leads with, and the others are depth behind it.
+          for (var i = urls.length - 1; i >= 0; i--)
+            Positioned(
+              left: i * 13.0,
+              child: Container(
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(9),
+                  border: Border.all(
+                      color: Theme.of(context).colorScheme.surface, width: 1.6),
+                  boxShadow: const [
+                    BoxShadow(
+                        color: Color(0x22000000), blurRadius: 3, offset:
+                            Offset(0, 1))
+                  ],
+                ),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: Image.network(
+                    urls[i],
+                    width: 44,
+                    height: 44,
+                    fit: BoxFit.cover,
+                    gaplessPlayback: true,
+                    errorBuilder: (_, _, _) => Container(
+                      width: 44,
+                      height: 44,
+                      color: Theme.of(context)
+                          .colorScheme
+                          .surfaceContainerHighest,
+                      child: Icon(fallbackIcon, size: 18),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
     );
   }
 
@@ -137,26 +236,13 @@ class _SuggestionsStripState extends State<SuggestionsStrip> {
       ),
       child: Row(
         children: [
-          Container(
-            width: 38,
-            height: 38,
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              color: Theme.of(context)
-                  .colorScheme
-                  .primary
-                  .withValues(alpha: 0.14),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Icon(
+          _covers(
+              s,
               kind == 'reel'
                   ? Icons.movie_filter_outlined
                   : kind == 'collage'
                       ? Icons.auto_awesome_mosaic_outlined
-                      : Icons.folder_open,
-              size: 20,
-            ),
-          ),
+                      : Icons.folder_open),
           const SizedBox(width: 11),
           Expanded(
             child: Column(
