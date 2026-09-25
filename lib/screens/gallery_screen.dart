@@ -38,7 +38,6 @@ import '../sharing.dart';
 import '../widgets/date_scrubber.dart';
 import '../widgets/selection_bar.dart';
 import '../widgets/photo_tile.dart';
-import 'library_tabs.dart';
 import 'photo_viewer.dart';
 
 class Photo {
@@ -149,10 +148,38 @@ class _GalleryScreenState extends State<GalleryScreen>
   /// "Person 12", and those are most of them, so "search by person" was
   /// reachable only for faces somebody had already gone and named. Tapping a
   /// face needs no name to exist.
-  int _personId = 0;
-  String _personName = '';
+  /// Which people the grid is narrowed to, and their names for the chips.
+  ///
+  /// A SET, because "photos of Amma AND Appa" is the question people actually
+  /// ask — it is how you find the few pictures with both of your parents out
+  /// of the hundreds with either. The server ANDs them for the same reason:
+  /// choosing a second face must narrow the result, not widen it.
+  ///
+  /// The faces used to sit in a permanent strip across the top of this page,
+  /// which spent a row of the screen on something most visits never use, and
+  /// could only ever filter by one person. They live in the filter menu now,
+  /// and in Collections, where the whole People screen already was.
+  final Set<int> _personIds = <int>{};
+  final Map<int, String> _personNames = <int, String>{};
   List<Map<String, dynamic>> _people = [];
   bool _peopleTried = false;
+
+  String _labelFor(int id) {
+    final n = (_personNames[id] ?? '').trim();
+    return n.isEmpty || _placeholderName.hasMatch(n) ? 'Unnamed' : n;
+  }
+
+  void _togglePerson(Map<String, dynamic> person) {
+    final id = (person['id'] as num?)?.toInt() ?? 0;
+    if (id == 0) return;
+    setState(() {
+      if (!_personIds.remove(id)) {
+        _personIds.add(id);
+        _personNames[id] = '${person['name'] ?? ''}'.trim();
+      }
+    });
+    _load(reset: true);
+  }
 
   /// People whose NAME matches what is being typed.
   ///
@@ -301,6 +328,12 @@ class _GalleryScreenState extends State<GalleryScreen>
         tooltip: 'Filter',
         position: PopupMenuPosition.under,
         onSelected: (v) {
+          // People opens a picker rather than toggling, so it must not fall
+          // through to the reload below — the sheet reloads when it closes.
+          if (v == 'people') {
+            _pickPeople();
+            return;
+          }
           setState(() {
             switch (v) {
               case 'fav':
@@ -314,6 +347,11 @@ class _GalleryScreenState extends State<GalleryScreen>
               case 'clear':
                 _favesOnly = false;
                 _mediaKind = '';
+                // "Clear filters" has to clear the faces too. Leaving a face
+                // on after it is exactly the kind of thing that reads as the
+                // gallery having lost photos.
+                _personIds.clear();
+                _personNames.clear();
             }
           });
           _load(reset: true);
@@ -323,6 +361,14 @@ class _GalleryScreenState extends State<GalleryScreen>
           CheckedPopupMenuItem(value: 'photos', checked: _mediaKind == 'photos', child: const Text('Photos only')),
           CheckedPopupMenuItem(value: 'videos', checked: _mediaKind == 'videos', child: const Text('Videos only')),
           CheckedPopupMenuItem(value: 'screenshots', checked: _mediaKind == 'screenshots', child: const Text('Screenshots')),
+          const PopupMenuDivider(),
+          PopupMenuItem(
+            value: 'people',
+            child: Text(_personIds.isEmpty
+                ? 'People\u2026'
+                : '${_personIds.length} '
+                    '${_personIds.length == 1 ? 'person' : 'people'}\u2026'),
+          ),
           if (active > 0) const PopupMenuDivider(),
           if (active > 0) const PopupMenuItem(value: 'clear', child: Text('Clear filters')),
         ],
@@ -384,17 +430,19 @@ class _GalleryScreenState extends State<GalleryScreen>
           bg: _smart ? cs.primary : null,
         ),
       ),
-      if (_personId != 0) ...[
+      // One chip per chosen face, each removable on its own. A single chip
+      // saying "3 people" would make removing one of them impossible without
+      // starting again.
+      for (final id in _personIds) ...[
         const SizedBox(width: 8),
         Flexible(
           child: InputChip(
             avatar: const Icon(Icons.person, size: 16),
-            label: Text(_personName.isEmpty ? 'Person' : _personName,
-                overflow: TextOverflow.ellipsis),
+            label: Text(_labelFor(id), overflow: TextOverflow.ellipsis),
             onDeleted: () {
               setState(() {
-                _personId = 0;
-                _personName = '';
+                _personIds.remove(id);
+                _personNames.remove(id);
               });
               _load(reset: true);
             },
@@ -405,38 +453,156 @@ class _GalleryScreenState extends State<GalleryScreen>
     ]);
   }
 
-  /// The trailing item on the face strip — the way to the full People screen,
-  /// folded into the strip instead of taking its own labelled row above it.
-  Widget _seeAllFaces() {
-    final cs = Theme.of(context).colorScheme;
-    return GestureDetector(
-      onTap: () => Navigator.of(context)
-          .push(MaterialPageRoute(
-            builder: (_) => Scaffold(
-              appBar: AppBar(title: const Text('People')),
-              body: const PeopleTab(),
+  /// Choose any number of faces, and see only the photos with ALL of them in.
+  ///
+  /// The sheet is the filter — there is no Apply button, because every tap
+  /// already changed the answer and a second confirmation for something this
+  /// reversible is a step that exists only to be dismissed. The count in the
+  /// heading is what tells you it took.
+  Future<void> _pickPeople() async {
+    await _loadPeople();
+    if (!mounted) return;
+    if (_people.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('No faces have been found yet.')));
+      return;
+    }
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheet) => SafeArea(
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 4),
+              child: Row(children: [
+                const Expanded(
+                  child: Text('Who is in the photo?',
+                      style: TextStyle(
+                          fontSize: 15, fontWeight: FontWeight.w700)),
+                ),
+                if (_personIds.isNotEmpty)
+                  TextButton(
+                    onPressed: () {
+                      setSheet(() => setState(() {
+                            _personIds.clear();
+                            _personNames.clear();
+                          }));
+                      _load(reset: true);
+                    },
+                    child: const Text('Clear'),
+                  ),
+              ]),
             ),
-          ))
-          .then((_) => _loadPeople()),
-      child: SizedBox(
-        width: 58,
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          Container(
-            width: 52,
-            height: 52,
-            decoration: BoxDecoration(
-                shape: BoxShape.circle, color: cs.surfaceContainerHighest),
-            child: Icon(Icons.more_horiz, color: cs.onSurfaceVariant),
-          ),
-          const SizedBox(height: 6),
-          Text('See all',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: 11.5, color: cs.onSurfaceVariant)),
-        ]),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 10),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                // Said plainly, because it is the one thing about this that
+                // surprises people: picking a second face shows FEWER photos,
+                // not more.
+                child: Text(
+                  _personIds.length < 2
+                      ? 'Pick one, or several to see only the photos they are '
+                          'in together.'
+                      : 'Showing only photos with all '
+                          '${_personIds.length} of them in.',
+                  style: const TextStyle(fontSize: 12.5),
+                ),
+              ),
+            ),
+            Flexible(
+              child: GridView.builder(
+                shrinkWrap: true,
+                padding: const EdgeInsets.fromLTRB(14, 0, 14, 16),
+                gridDelegate:
+                    const SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: 4,
+                  crossAxisSpacing: 10,
+                  mainAxisSpacing: 14,
+                  childAspectRatio: 0.72,
+                ),
+                itemCount: _people.length,
+                itemBuilder: (c, i) {
+                  final person = _people[i];
+                  final id = (person['id'] as num?)?.toInt() ?? 0;
+                  final on = _personIds.contains(id);
+                  return GestureDetector(
+                    onTap: () => setSheet(() => _togglePerson(person)),
+                    child: Column(mainAxisSize: MainAxisSize.min, children: [
+                      Stack(children: [
+                        Container(
+                          width: 62,
+                          height: 62,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color: on
+                                  ? Theme.of(c).colorScheme.primary
+                                  : Colors.transparent,
+                              width: 3,
+                            ),
+                          ),
+                          clipBehavior: Clip.antiAlias,
+                          child: FaceCircle(
+                            // absoluteMedia, not a hand-rolled join: the
+                            // server mints a RELATIVE signed path and
+                            // Image.network cannot resolve one, which is how
+                            // every face in the old strip rendered as a grey
+                            // silhouette.
+                            imageUrl: person['cover_url'] == null
+                                ? null
+                                : absoluteMedia('${person['cover_url']}',
+                                    context.read<Session>().baseUrl ?? ''),
+                            box: person['box'] is Map
+                                ? (person['box'] as Map)
+                                    .cast<String, dynamic>()
+                                : null,
+                            size: 62,
+                          ),
+                        ),
+                        if (on)
+                          Positioned(
+                            right: 0,
+                            bottom: 0,
+                            child: CircleAvatar(
+                              radius: 10,
+                              backgroundColor:
+                                  Theme.of(c).colorScheme.primary,
+                              child: const Icon(Icons.check,
+                                  size: 13, color: Colors.white),
+                            ),
+                          ),
+                      ]),
+                      const SizedBox(height: 5),
+                      Text(
+                        _isPlaceholder('${person['name'] ?? ''}')
+                            ? 'Unnamed'
+                            : '${person['name']}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                            fontSize: 11.5, fontWeight: FontWeight.w600),
+                      ),
+                      Text('${person['count'] ?? 0}',
+                          style: Theme.of(c).textTheme.labelSmall),
+                    ]),
+                  );
+                },
+              ),
+            ),
+          ]),
+        ),
       ),
     );
+    if (mounted) setState(() {});
   }
+
+  static bool _isPlaceholder(String n) =>
+      n.trim().isEmpty || _placeholderName.hasMatch(n.trim());
+
 
   /// One day's photos as a list of rows (used when _listView is on).
   Widget _daySliverList(List<Photo> photos) {
@@ -871,7 +1037,7 @@ class _GalleryScreenState extends State<GalleryScreen>
   /// added". Only here does the "photos · videos" split make sense; a filtered
   /// view shows a single count for what it is showing.
   bool get _plainView =>
-      _mediaKind.isEmpty && _query.isEmpty && !_favesOnly && _personId == 0 &&
+      _mediaKind.isEmpty && _query.isEmpty && !_favesOnly && _personIds.isEmpty &&
       _sort != 'added';
 
   String _plural(int n, String w) => '$n $w${n == 1 ? '' : 's'}';
@@ -923,7 +1089,9 @@ class _GalleryScreenState extends State<GalleryScreen>
         if (_query.isNotEmpty && _smart) 'smart': '1',
         if (_favesOnly) 'fav': '1',
         if (_mediaKind.isNotEmpty) 'kind': _mediaKind,
-        if (_personId != 0) 'person': '$_personId',
+        // Comma-separated, and the server ANDs them: several faces means
+        // "photos they are in TOGETHER", not "photos of any of them".
+        if (_personIds.isNotEmpty) 'person': _personIds.join(','),
         // 'newest' is the server's default order, so it needs no param; 'oldest'
         // and 'added' are sent through. A server too old to know 'oldest' simply
         // returns its default (newest) rather than erroring.
@@ -1150,7 +1318,7 @@ class _GalleryScreenState extends State<GalleryScreen>
                         _favesOnly ||
                         _mediaKind.isNotEmpty ||
                         _sort != 'newest' ||
-                        _personId != 0) ...[
+                        _personIds.isNotEmpty) ...[
                       const SizedBox(height: 8),
                       _toolbar(),
                     ],
@@ -1182,7 +1350,7 @@ class _GalleryScreenState extends State<GalleryScreen>
                             final id = (person['id'] as num?)?.toInt() ?? 0;
                             return FaceChip(
                               person: person,
-                              selected: _personId == id,
+                              selected: _personIds.contains(id),
                               // Picking the person REPLACES the typed words.
                               // Leaving both on would narrow to their photos
                               // and then filter those by the same name again,
@@ -1190,56 +1358,22 @@ class _GalleryScreenState extends State<GalleryScreen>
                               // the results.
                               onTap: () {
                                 _search.clear();
-                                setState(() {
-                                  _query = '';
-                                  _personId = id;
-                                  _personName =
-                                      '${person['name'] ?? ''}'.trim();
-                                });
-                                _load(reset: true);
+                                setState(() => _query = '');
+                                _togglePerson(person);
                               },
                             );
                           },
                         ),
                       ),
                     ],
-                    // Faces — a quiet strip with no labelled row above it. Tap a
-                    // face to narrow the grid; the last item is the way to the
-                    // full People screen.
-                    if (_people.isNotEmpty) ...[
-                      const SizedBox(height: 8),
-                      SizedBox(
-                        height: 78,
-                        child: ListView.separated(
-                          scrollDirection: Axis.horizontal,
-                          itemCount: _people.length + 1,
-                          separatorBuilder: (_, _) => const SizedBox(width: 10),
-                          itemBuilder: (ctx, i) {
-                            if (i == _people.length) return _seeAllFaces();
-                            final person = _people[i];
-                            final id = (person['id'] as num?)?.toInt() ?? 0;
-                            return FaceChip(
-                              person: person,
-                              selected: _personId == id,
-                              onTap: () {
-                                setState(() {
-                                  // Tapping the selected face clears it, so the
-                                  // way out is the same control as the way in.
-                                  if (_personId == id) {
-                                    _personId = 0;
-                                    _personName = '';
-                                  } else {
-                                    _personId = id;
-                                    _personName = '${person['name'] ?? ''}'.trim();
-                                  }
-                                });
-                                _load(reset: true);
-                              },
-                            );
-                          },
-                        ),
-                      ),
-                    ],
+                    // THE FACES STRIP IS GONE FROM THIS PAGE.
+                    //
+                    // It sat permanently across the top, spending a row of
+                    // every visit on something most visits never use, and it
+                    // could only ever narrow to ONE person. Faces are now in
+                    // the filter menu, where several can be combined, and the
+                    // whole People screen is a tap away in Collections — which
+                    // is where somebody looking for a person goes.
                   ],
                 ),
               ),
