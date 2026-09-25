@@ -339,6 +339,8 @@ class CollectionsHomeState extends State<CollectionsHome> {
       _Header(
         title: 'Albums',
         note: _albums.isEmpty ? 'none yet' : '${_albums.length}',
+        onAdd: _createAlbum,
+        addLabel: 'New album',
         onSeeAll: _albums.isEmpty
             ? null
             : () => _open(Scaffold(
@@ -350,13 +352,14 @@ class CollectionsHomeState extends State<CollectionsHome> {
         child: ListView.separated(
           scrollDirection: Axis.horizontal,
           padding: const EdgeInsets.symmetric(horizontal: 14),
-          // +1 for the create tile, which comes FIRST. With no albums yet it is
-          // the only thing on the row, so the section explains itself instead
-          // of being an empty strip.
-          itemCount: _albums.length + 1,
+          // The create tile is kept ONLY while there are no albums, where it
+          // is the whole row and explains what the section is for. Once there
+          // are albums it would be a cover-sized button sitting in front of
+          // them, so the small "+" in the heading does that job instead.
+          itemCount: _albums.isEmpty ? 1 : _albums.length,
           separatorBuilder: (_, _) => const SizedBox(width: 12),
           itemBuilder: (ctx, i) {
-            if (i == 0) {
+            if (_albums.isEmpty) {
               return InkWell(
                 borderRadius: BorderRadius.circular(kRadius),
                 onTap: _createAlbum,
@@ -383,7 +386,7 @@ class CollectionsHomeState extends State<CollectionsHome> {
                 ),
               );
             }
-            final a = _albums[i - 1];
+            final a = _albums[i];
             final name = '${a['name'] ?? 'Album'}';
             return SizedBox(
               width: 118,
@@ -573,10 +576,20 @@ class CollectionsHomeState extends State<CollectionsHome> {
 }
 
 class _Header extends StatelessWidget {
-  const _Header({required this.title, this.note, this.onSeeAll, this.accent = false});
+  const _Header({required this.title, this.note, this.onSeeAll,
+      this.onAdd, this.addLabel, this.accent = false});
   final String title;
   final String? note;
   final VoidCallback? onSeeAll;
+
+  /// A small "+" beside the heading, for the one thing this section makes.
+  ///
+  /// It lives here rather than in the row of covers below because a create
+  /// control the size of an album cover claims a slot the same size as a real
+  /// album, which makes the row read as one album more than there is — and on
+  /// a phone that slot is a third of what is on screen.
+  final VoidCallback? onAdd;
+  final String? addLabel;
   final bool accent;
 
   @override
@@ -603,6 +616,18 @@ class _Header extends StatelessWidget {
           ),
         ],
         const Spacer(),
+        if (onAdd != null)
+          // A 32pt tap target: small enough to read as a control rather than
+          // content, still within the 32-48pt range a thumb can hit.
+          IconButton(
+            onPressed: onAdd,
+            icon: const Icon(Icons.add, size: 20),
+            tooltip: addLabel ?? 'New',
+            visualDensity: VisualDensity.compact,
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+            color: kBrand,
+          ),
         if (onSeeAll != null)
           TextButton(onPressed: onSeeAll, child: const Text('See all')),
       ]),
