@@ -195,8 +195,15 @@ void main() {
       expect(find.text('8123 uploaded'), findsOneWidget);
       expect(find.text('12136 of 20431 checked · 4001 already there'),
           findsOneWidget);
-      expect(find.text('8123 sent'), findsOneWidget);
-      expect(find.text('4001 already there'), findsOneWidget);
+      // AND EXACTLY ONCE EACH. The pills below used to repeat the two figures
+      // the line above already gives, a few centimetres apart — which does
+      // not read as emphasis, it reads as two numbers that happen to match
+      // and invites the reader to check whether they do. While a run is going
+      // the pills now carry only what is NOT up there, which is the failures.
+      expect(find.text('8123 sent'), findsNothing);
+      expect(find.text('4001 already there'), findsNothing);
+      // The failures pill stays: it is the one count the headline does not
+      // carry, and it is the one somebody needs to act on.
       expect(find.text('12 not sent'), findsOneWidget);
     });
 
