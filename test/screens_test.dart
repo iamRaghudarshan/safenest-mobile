@@ -114,7 +114,10 @@ void main() {
       expect(find.textContaining('Sign out and back in'), findsOneWidget);
       expect(find.text('Backed up'), findsNothing);
       // And the count is named as an UPLOAD failure, not a read failure.
-      expect(find.textContaining('not sent'), findsOneWidget);
+      // "could not be sent" now, and it appears in the hero's summary line
+      // AND as the failures panel's heading — twice on purpose, because the
+      // first is the result and the second is the list it introduces.
+      expect(find.textContaining('could not be sent'), findsWidgets);
       expect(find.textContaining('could not be read'), findsNothing);
     });
 
@@ -128,13 +131,23 @@ void main() {
       await tester.pump();
 
       expect(tester.takeException(), isNull);
-      expect(find.text('Why they did not go'), findsOneWidget);
-      // Counted per cause and ordered by how many photos each is blocking —
-      // the point being that the 400 stuck in iCloud must not be hidden behind
-      // whichever failure happened to be last.
-      expect(find.textContaining('400 photos:'), findsOneWidget);
-      expect(find.textContaining('28 photos:'), findsOneWidget);
-      expect(find.textContaining('3 photos:'), findsOneWidget);
+      // The amber "Why they did not go" box is gone: causes are rows in the
+      // one failures panel now, with the count and the cause in two weights
+      // instead of glued together with a colon. Same requirement, which is
+      // what this test is actually for — every cause named, largest first,
+      // so the 400 stuck in iCloud cannot hide behind whichever failure
+      // happened to be last.
+      expect(find.textContaining('could not be sent'), findsWidgets);
+      expect(find.text('400 photos'), findsOneWidget);
+      expect(find.text('28 photos'), findsOneWidget);
+      // Only the first three are drawn — a fourth row is what pushes the
+      // buttons off a 390x844 phone, and the retry button acts on all of
+      // them regardless. Largest first is the part that matters.
+      final panel = tester.widgetList<Text>(find.byType(Text))
+          .map((t) => t.data ?? '')
+          .toList();
+      expect(panel.indexOf('400 photos') < panel.indexOf('28 photos'), isTrue,
+          reason: 'causes must be ordered by how many photos each blocks');
     });
 
     testWidgets('failures can be retried without rescanning the library',
@@ -193,7 +206,9 @@ void main() {
       // beneath it (see backup_screen.dart). The '59%' text is gone on purpose —
       // the percentage only ever lived inside that old headline.
       expect(find.text('8123 uploaded'), findsOneWidget);
-      expect(find.text('12136 of 20431 checked · 4001 already there'),
+      // Grouped. A five-digit library count read as one run of digits is a
+      // number people skim past rather than read.
+      expect(find.text('12,136 of 20,431 checked · 4,001 already there'),
           findsOneWidget);
       // AND EXACTLY ONCE EACH. The pills below used to repeat the two figures
       // the line above already gives, a few centimetres apart — which does
@@ -205,6 +220,8 @@ void main() {
       // The failures pill stays: it is the one count the headline does not
       // carry, and it is the one somebody needs to act on.
       expect(find.text('12 not sent'), findsOneWidget);
+      // The percentage is back, beside the headline rather than inside it.
+      expect(find.text('59%'), findsOneWidget);
     });
 
     testWidgets('dark theme lays out too', (tester) async {
@@ -288,7 +305,7 @@ void main() {
       // "0 uploaded" — but the run has LOOKED at 12000 of 20000, and the bar
       // moves with it. That reading is what used to sit frozen at zero.
       expect(find.text('0 uploaded'), findsOneWidget);
-      expect(find.text('12000 of 20000 checked · 12000 already there'),
+      expect(find.text('12,000 of 20,000 checked · 12,000 already there'),
           findsOneWidget);
       final bar = tester.widget<LinearProgressIndicator>(
           find.byType(LinearProgressIndicator));

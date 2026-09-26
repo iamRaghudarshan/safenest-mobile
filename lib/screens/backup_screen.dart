@@ -65,6 +65,56 @@ String _mb(int bytes) {
   return '${(bytes / 1024).round()} KB';
 }
 
+/// A count with its thousands grouped — `1,048`, not `1048`.
+///
+/// A phone library is four and five digits, and an ungrouped run of them is
+/// the difference between a number somebody reads and a number they skim past.
+/// Grouped by hand rather than through `intl`: the app carries no locale
+/// formatting anywhere else, and one comma is not worth a dependency.
+String _n(int v) {
+  final s = v.abs().toString();
+  final b = StringBuffer(v < 0 ? '-' : '');
+  for (var i = 0; i < s.length; i++) {
+    if (i > 0 && (s.length - i) % 3 == 0) b.write(',');
+    b.write(s[i]);
+  }
+  return b.toString();
+}
+
+/// Whether a run has ended with something worth stating in the hero.
+///
+/// Idle is deliberately excluded: before anybody has pressed the button there
+/// is no outcome, and a block reading "0 uploaded" on a fresh install is a
+/// reproach rather than a status.
+bool _hasOutcome(BackupProgress p) =>
+    (p.state == BackupState.done ||
+        p.state == BackupState.paused ||
+        p.state == BackupState.failed) &&
+    (p.total > 0 || p.message.isNotEmpty);
+
+/// The line under the big figure, or null when there is nothing to add.
+///
+/// Three different jobs, which is why it is a function rather than an
+/// expression buried in the tree: while running it is progress, after a
+/// failure it is the REASON, and after a finished run it is the breakdown
+/// that used to live in pills on a separate card.
+String? _heroSubtitle(BackupProgress p, {required bool running}) {
+  if (running) {
+    if (p.total == 0 || p.state == BackupState.scanning) return null;
+    return '${_n(p.handled)} of ${_n(p.total)} checked'
+        '${p.skipped > 0 ? ' · ${_n(p.skipped)} already there' : ''}';
+  }
+  // A failure's message is the only thing on the screen that says what to go
+  // and do, so it outranks the arithmetic.
+  if (p.state == BackupState.failed) {
+    return p.message.isEmpty ? null : p.message;
+  }
+  if (p.total == 0) return p.message.isEmpty ? null : p.message;
+  return '${_n(p.total)} checked'
+      '${p.skipped > 0 ? ' · ${_n(p.skipped)} already there' : ''}'
+      '${p.failed > 0 ? ' · ${_n(p.failed)} could not be sent' : ''}';
+}
+
 class _BackupScreenState extends State<BackupScreen> {
   BackupService? _service;
   bool _owns = false;   // only stop a service we created — a shared one keeps going
@@ -157,6 +207,19 @@ class _BackupScreenState extends State<BackupScreen> {
           // Repeated here as well as on the gallery: this is the screen
           // somebody opens when they have noticed nothing is happening.
           const BackupBlockedBanner(),
+          // CENTRED WHEN THERE IS LITTLE TO SAY.
+          //
+          // A finished run with nothing wrong is one block and one button,
+          // and pinned to the top that left most of a phone screen blank
+          // underneath — which reads as a page that stopped loading rather
+          // than as "it worked". A second flexible gap above the content
+          // splits the slack with the one below it, so the block sits in the
+          // middle of the screen and the whole thing looks composed.
+          //
+          // Only when it IS sparse. With a failures panel or a run in flight
+          // there is enough on the page to fill it, and a leading gap would
+          // just push the hero away from the top for no reason.
+          if (!running && !_hasFailures(p)) const Spacer(),
           // THE BADGE AND THE PITCH ARE THE IDLE STATE.
           //
           // While a run is going they are decoration above the only thing
@@ -248,6 +311,12 @@ class _BackupScreenState extends State<BackupScreen> {
                   listenable: _thumbs,
                   builder: (_, _) => BackupFlight(
                     running: running,
+                    done: done,
+                    // Lit once something has actually arrived. A failed run
+                    // that sent nothing gets an empty computer, which is the
+                    // truth and is also the only thing on the screen that
+                    // says it without words.
+                    filled: running || done || p.done > 0,
                     onDark: true,
                     photos: [
                       for (final it in p.inFlight)
@@ -255,7 +324,39 @@ class _BackupScreenState extends State<BackupScreen> {
                     ],
                   ),
                 ),
-                if (running) ...[
+                // THE OUTCOME LIVES HERE TOO, not only the progress.
+                //
+                // The hero used to go blank the moment a run ended: the
+                // figures were inside `if (running)`, so a finished backup
+                // left a big saturated block with a drawing in it and nothing
+                // to read, and the actual result — how many went — sat in a
+                // plain white card below, looking like a footnote. The most
+                // important sentence on the screen was in the quietest place
+                // on it.
+                //
+                // So the block states the result in both states. Green with
+                // "132 uploaded" across it is the whole answer at arm's
+                // length, which is how this screen is read.
+                if (running || _hasOutcome(p)) ...[
+                  // The state in a word, above the number. A bare "132
+                  // uploaded" does not say whether the run ENDED — and
+                  // "stopped after 132" and "finished with 132" are different
+                  // things to walk away from.
+                  if (!running) ...[
+                    Text(
+                      failed
+                          ? 'That did not work'
+                          : p.state == BackupState.paused
+                              ? 'Stopped'
+                              : 'Backed up',
+                      style: const TextStyle(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 0.3,
+                          color: Colors.white70),
+                    ),
+                    const SizedBox(height: 2),
+                  ],
                   Row(
                     crossAxisAlignment: CrossAxisAlignment.baseline,
                     textBaseline: TextBaseline.alphabetic,
@@ -264,19 +365,29 @@ class _BackupScreenState extends State<BackupScreen> {
                         child: Text(
                           p.state == BackupState.scanning
                               ? p.message
-                              : '${p.done} uploaded',
+                              : failed && p.done == 0
+                                  ? 'Nothing was sent'
+                                  : '${p.done} uploaded',
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                              fontSize: 34,
+                          style: TextStyle(
+                              // The failure sentence is words, not a figure,
+                              // and at 34 it ellipsises on a narrow phone —
+                              // which turns the one line that has to be read
+                              // into "Nothing was se…".
+                              fontSize: failed && p.done == 0 ? 27 : 34,
                               height: 1.05,
                               fontWeight: FontWeight.w800,
                               letterSpacing: -0.9,
                               color: Colors.white,
-                              fontFeatures: [FontFeature.tabularFigures()]),
+                              fontFeatures: const [
+                                FontFeature.tabularFigures()
+                              ]),
                         ),
                       ),
-                      if (p.total > 0 && p.state != BackupState.scanning)
+                      if (running &&
+                          p.total > 0 &&
+                          p.state != BackupState.scanning)
                         Text('${(p.fraction * 100).round()}%',
                             style: const TextStyle(
                                 fontSize: 17,
@@ -285,27 +396,37 @@ class _BackupScreenState extends State<BackupScreen> {
                                 fontFeatures: [FontFeature.tabularFigures()])),
                     ],
                   ),
-                  if (p.total > 0 && p.state != BackupState.scanning) ...[
+                  if (_heroSubtitle(p, running: running) case final sub?) ...[
                     const SizedBox(height: 4),
-                    Text(
-                        '${p.handled} of ${p.total} checked'
-                        '${p.skipped > 0 ? ' · ${p.skipped} already there' : ''}',
+                    Text(sub,
+                        // A failure reason is a sentence, not a tally. One
+                        // line would cut "Your session has expired — sign in
+                        // again" in half, and the half that survives is the
+                        // half that does not say what to do.
+                        maxLines: failed ? 3 : 2,
+                        overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
                             fontSize: 12.5,
+                            height: 1.45,
                             fontWeight: FontWeight.w600,
                             color: Colors.white70)),
                   ],
-                  const SizedBox(height: 12),
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(999),
-                    child: LinearProgressIndicator(
-                      value: p.total == 0 ? null : p.fraction,
-                      minHeight: 8,
-                      backgroundColor: Colors.white.withValues(alpha: 0.22),
-                      valueColor:
-                          const AlwaysStoppedAnimation<Color>(Colors.white),
+                  // Only while it is moving. A full bar under a finished run
+                  // is a second, weaker way of saying what the words above
+                  // already said; under a failed one it is a lie.
+                  if (running) ...[
+                    const SizedBox(height: 12),
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(999),
+                      child: LinearProgressIndicator(
+                        value: p.total == 0 ? null : p.fraction,
+                        minHeight: 8,
+                        backgroundColor: Colors.white.withValues(alpha: 0.22),
+                        valueColor:
+                            const AlwaysStoppedAnimation<Color>(Colors.white),
+                      ),
                     ),
-                  ),
+                  ],
                 ],
               ],
             ),
@@ -389,6 +510,16 @@ class _BackupScreenState extends State<BackupScreen> {
                 ],
               ]),
             ),
+            // THE SLACK GOES HERE, above the actions — not below them.
+            //
+            // It was one Spacer at the very end of the column, which is not
+            // the same thing at all: it packed everything against the top and
+            // left four hundred points of empty white under the last button.
+            // A screen with its content in the top half and a void beneath it
+            // looks like it failed to finish loading. Put above the buttons,
+            // the same flexible gap seats them on the bottom edge where a
+            // thumb already is.
+            const Spacer(),
             const SizedBox(height: 14),
             OutlinedButton.icon(
               onPressed: _service?.stop,
@@ -406,103 +537,32 @@ class _BackupScreenState extends State<BackupScreen> {
                   color: theme.colorScheme.outline),
             ),
           ] else ...[
-            // The outcome of the last run, before the button — it is what
-            // somebody opening this screen wants to know first.
-            if (p.message.isNotEmpty)
-              _card(
-                theme,
-                dark,
-                border: failed ? kDanger : (done ? kOk : null),
-                child: Column(children: [
-                  Row(children: [
-                    Icon(
-                        failed
-                            ? Icons.error_outline
-                            : p.state == BackupState.paused
-                                ? Icons.pause_circle_outline
-                                : Icons.check_circle_outline,
-                        size: 20,
-                        color: accent),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                          failed
-                              ? 'That did not work'
-                              : p.state == BackupState.paused
-                                  ? 'Stopped'
-                                  : 'Backed up',
-                          style: const TextStyle(
-                              fontSize: 15, fontWeight: FontWeight.w800)),
-                    ),
-                  ]),
-                  const SizedBox(height: 8),
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: Text(p.message,
-                        style: TextStyle(
-                            fontSize: 13.5,
-                            height: 1.5,
-                            color: theme.colorScheme.onSurfaceVariant)),
-                  ),
-                  if (p.total > 0) ...[
-                    const SizedBox(height: 12),
-                    Wrap(spacing: 6, runSpacing: 6, children: _counts(p)),
-                  ],
-                ]),
-              ),
-            if (p.message.isNotEmpty) const SizedBox(height: 16),
+            // The state, the figure and the counts have all moved into the
+            // hero above. What was here was a white card repeating them in
+            // smaller type, which is not emphasis — it is the reader being
+            // asked to check whether two sets of numbers a few centimetres
+            // apart agree.
+            //
+            // Only the paused and idle messages have anything left to say,
+            // and `_heroSubtitle` says those up there as well.
 
-            // WHY, per cause, not one sentence from whichever failure happened
-            // last. Forty photos stuck in iCloud and three hitting an expired
-            // session are two different jobs, and reporting only the second
-            // leaves the first invisible. Every line here is something a person
-            // can act on in under a minute.
-            if (p.reasons.isNotEmpty) ...[
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(13),
-                decoration: BoxDecoration(
-                  color: kWarn.withValues(alpha: 0.09),
-                  borderRadius: BorderRadius.circular(kRadiusSm),
-                  border: Border.all(color: kWarn.withValues(alpha: 0.35)),
-                ),
-                child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text('Why they did not go',
-                          style: TextStyle(
-                              fontWeight: FontWeight.w800, fontSize: 13.5)),
-                      const SizedBox(height: 7),
-                      for (final line in _reasonLines(p.reasons))
-                        Padding(
-                          padding: const EdgeInsets.only(bottom: 5),
-                          child: Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                const Text('• '),
-                                // Expanded, or a full sentence overflows the
-                                // row on a narrow phone.
-                                Expanded(
-                                  child: Text(line,
-                                      style: const TextStyle(
-                                          fontSize: 12.5, height: 1.4)),
-                                ),
-                              ]),
-                        ),
-                    ]),
-              ),
+            // WHAT DID NOT GO, in ONE panel.
+            //
+            // It was two: an amber box counting causes, and a red box of
+            // unlabelled thumbnails. Same subject, stacked, in two different
+            // warning colours — which reads as two problems, and neither box
+            // alone answered the question. "16 photos: could not be
+            // downloaded from iCloud" does not say WHICH, and a grid of
+            // sixteen squares does not say why. Joined, one row is a picture,
+            // a name and a reason.
+            if (_hasFailures(p)) ...[
+              _failuresCard(theme, dark, p),
               const SizedBox(height: 12),
             ],
 
-            // WHICH files, not just how many. "2 not sent" is a number to worry
-            // about; two thumbnails you recognise — "oh, those two clips still
-            // in iCloud" — is a thing you can act on. Tapping one says why it
-            // stuck. Only where there is a real service behind it: the test
-            // path renders a state with no photo library to draw from.
-            if (_service != null && _service!.failedAssets.isNotEmpty) ...[
-              _notSentGrid(theme),
-              const SizedBox(height: 12),
-            ],
+            // As above: the gap belongs between what happened and what to do
+            // about it, so the buttons sit on the bottom edge.
+            const Spacer(),
 
             // Retry only what failed. Nearly every cause here is one thing
             // affecting many photos and is fixed in seconds — a sleeping
@@ -566,10 +626,6 @@ class _BackupScreenState extends State<BackupScreen> {
               ),
             ],
           ],
-          // Pushes the actions to the bottom of the viewport when there is
-          // room to spare, so the page reads as one composed screen rather
-          // than a stack of things that stopped.
-          const Spacer(),
                 ],
               ),
             ),
@@ -613,67 +669,160 @@ class _BackupScreenState extends State<BackupScreen> {
     await _service?.forgetSent();
   }
 
-  /// Largest cause first — the one worth fixing is the one blocking the most.
-  List<String> _reasonLines(Map<String, int> reasons) {
-    final e = reasons.entries.toList()
-      ..sort((a, b) => b.value.compareTo(a.value));
-    return [
-      for (final x in e)
-        '${x.value} photo${x.value == 1 ? '' : 's'}: ${x.key}',
-    ];
-  }
+  // `_reasonLines` lived here: the causes as bullet strings for the amber
+  // box. The box is gone — `_failuresCard` sorts the same map itself and
+  // renders each cause as a row, because a count and a cause read better in
+  // two weights than glued together with a colon.
 
   bool _looksLikePermission(String m) =>
       m.contains('allowed to see') || m.contains('All Photos');
 
-  /// The actual files that did not go, as thumbnails read straight from the
-  /// phone's library — these never reached the computer, so there is nowhere
-  /// else a picture of them could come from. Capped: a backup that failed
-  /// wholesale (offline, expired session) can have thousands, and a Wrap of
-  /// thousands of image futures would jank the screen it is meant to explain.
-  Widget _notSentGrid(ThemeData theme) {
-    final assets = _service!.failedAssets;
-    const cap = 48;
-    final shown = assets.take(cap).toList();
-    final extra = assets.length - shown.length;
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(13),
-      decoration: BoxDecoration(
-        color: kDanger.withValues(alpha: 0.06),
-        borderRadius: BorderRadius.circular(kRadiusSm),
-        border: Border.all(color: kDanger.withValues(alpha: 0.30)),
-      ),
+  /// Is there anything to explain? Named files, bare causes, or just a count.
+  ///
+  /// The count alone counts. A run that fell over before it could attribute
+  /// anything — an expired session, a computer that never answered — still
+  /// has twenty thousand photos that did not go, and dropping the panel
+  /// because there is no detail is how that number disappeared off the screen
+  /// entirely when the old pills were removed.
+  bool _hasFailures(BackupProgress p) =>
+      p.failed > 0 ||
+      (_service?.failedAssets.isNotEmpty ?? false) ||
+      p.reasons.isNotEmpty;
+
+  /// How many rows fit before the page stops being one page.
+  ///
+  /// Three, and it is a layout number rather than a judgement about how much
+  /// somebody wants to read: the whole screen has to hold on a 390x844 phone
+  /// without a scroll, and a fourth row is what pushes the buttons off the
+  /// bottom. The rest are counted in a line underneath, and the retry button
+  /// acts on all of them regardless of how many are drawn.
+  static const _failRows = 3;
+
+  /// EVERYTHING THAT DID NOT GO, in one panel: picture, name, reason.
+  ///
+  /// The reason is the part that was missing and it is the only part that is
+  /// actionable. "Could not be downloaded from iCloud" means go and turn off
+  /// Optimise Storage; "unsupported image" means the computer needs a decoder;
+  /// "the connection dropped" means press the button again. Those are three
+  /// different afternoons, and until this panel they all arrived as the same
+  /// red number.
+  ///
+  /// White rather than the old tinted-red box. The hero above is already a
+  /// saturated slab, and a second coloured panel under it competes with it
+  /// instead of being read after it — the red belongs on the icon and the
+  /// count, where it marks the thing rather than the whole area.
+  Widget _failuresCard(ThemeData theme, bool dark, BackupProgress p) {
+    final assets = _service?.failedAssets ?? const <AssetEntity>[];
+    final shown = assets.take(_failRows).toList();
+    // Whichever number is real. `p.failed` is the run's own tally; the asset
+    // list is capped by what the service still holds, and on the debug path
+    // there is no service at all.
+    final total = p.failed > 0
+        ? p.failed
+        : assets.isNotEmpty
+            ? assets.length
+            : p.reasons.values.fold<int>(0, (a, b) => a + b);
+    // Causes, largest first — shown as rows when there are no files to name,
+    // and used to fill in a reason for a file the service has no note for.
+    final causes = p.reasons.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+    final fallbackReason = causes.isEmpty ? '' : causes.first.key;
+
+    return _card(
+      theme,
+      dark,
+      padding: const EdgeInsets.fromLTRB(15, 13, 15, 8),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text('The ${assets.length} not sent',
-            style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13.5)),
-        const SizedBox(height: 3),
-        Text(
-            'Tap one to see why. They are still on this phone — they just have '
-            'not reached your computer yet.',
-            style: TextStyle(
-                fontSize: 12,
-                height: 1.4,
-                color: theme.colorScheme.onSurfaceVariant)),
-        const SizedBox(height: 10),
-        Wrap(spacing: 7, runSpacing: 7, children: [
-          for (final a in shown)
-            _FailedThumb(a, reason: _service!.reasonFor(a.id)),
-          if (extra > 0)
-            Container(
-              width: 72,
-              height: 72,
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                color: theme.colorScheme.surfaceContainerHighest,
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Text('+$extra',
-                  style: const TextStyle(fontWeight: FontWeight.w800)),
-            ),
+        Row(children: [
+          Icon(Icons.warning_amber_rounded, size: 18, color: kDanger),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text('${_n(total)} could not be sent',
+                style:
+                    const TextStyle(fontWeight: FontWeight.w800, fontSize: 13.5)),
+          ),
         ]),
+        if (shown.isNotEmpty || causes.isNotEmpty) const Divider(height: 17),
+        // Nothing attributable — the run fell over before it could say which
+        // photo or why. The count in the header is then the whole content, so
+        // this line carries the one fact worth having at that moment: they
+        // are not lost, they are simply still here.
+        if (shown.isEmpty && causes.isEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 4, bottom: 6),
+            child: Text(
+                'They are all still on this phone. Nothing was deleted — '
+                'backing up only ever copies.',
+                style: TextStyle(
+                    fontSize: 11.5,
+                    height: 1.45,
+                    color: theme.colorScheme.onSurfaceVariant)),
+          ),
+        if (shown.isNotEmpty) ...[
+          for (final a in shown)
+            _FailedRow(a,
+                reason: _reasonOr(a.id, fallbackReason),
+                last: identical(a, shown.last)),
+          if (assets.length > shown.length)
+            Padding(
+              padding: const EdgeInsets.only(top: 2, bottom: 6),
+              child: Text(
+                  'and ${assets.length - shown.length} more — the button below '
+                  'tries all of them',
+                  style: TextStyle(
+                      fontSize: 11.5,
+                      height: 1.4,
+                      color: theme.colorScheme.onSurfaceVariant)),
+            ),
+        ] else
+          // No file list to draw from — a run that failed before it got that
+          // far, or the render path in a test. The causes are still the
+          // useful half, so they are shown in the same rows.
+          for (final c in causes.take(_failRows))
+            Padding(
+              padding: const EdgeInsets.only(bottom: 9),
+              child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Container(
+                  width: 34,
+                  height: 34,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: kDanger.withValues(alpha: 0.10),
+                    borderRadius: BorderRadius.circular(9),
+                  ),
+                  child: Icon(Icons.cloud_off, size: 16, color: kDanger),
+                ),
+                const SizedBox(width: 11),
+                Expanded(
+                  child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('${c.value} photo${c.value == 1 ? '' : 's'}',
+                            style: const TextStyle(
+                                fontSize: 13, fontWeight: FontWeight.w700)),
+                        const SizedBox(height: 1),
+                        Text(c.key,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                                fontSize: 11.5,
+                                height: 1.4,
+                                color: theme.colorScheme.onSurfaceVariant)),
+                      ]),
+                ),
+              ]),
+            ),
       ]),
     );
+  }
+
+  /// This file's own reason, or the run's dominant one when it has no note.
+  ///
+  /// Empty is the worst answer here — it is the state this whole panel exists
+  /// to replace — so a plausible shared cause beats nothing at all.
+  String _reasonOr(String id, String fallback) {
+    final own = _service?.reasonFor(id) ?? '';
+    return own.isNotEmpty ? own : fallback;
   }
 
   /// done / already there / could not be sent, as tinted pills.
@@ -699,9 +848,9 @@ class _BackupScreenState extends State<BackupScreen> {
       ];
 
   Widget _card(ThemeData theme, bool dark,
-          {required Widget child, Color? border}) =>
+          {required Widget child, Color? border, EdgeInsets? padding}) =>
       Container(
-        padding: const EdgeInsets.all(18),
+        padding: padding ?? const EdgeInsets.all(18),
         decoration: BoxDecoration(
           color: theme.colorScheme.surface,
           borderRadius: BorderRadius.circular(kRadius),
@@ -713,22 +862,36 @@ class _BackupScreenState extends State<BackupScreen> {
       );
 }
 
-/// One not-sent file as a small square, tapped for the reason it stuck.
+/// One not-sent file as a row: picture, name, and why it stuck.
+///
+/// It was a bare 72px square in a grid, and a grid of squares is a picture of
+/// a problem rather than a description of one — you can see that sixteen
+/// things failed and learn nothing else without tapping each. The reason is
+/// the whole content, so it is on the row.
 ///
 /// The picture comes from `photo_manager`, not the server: the whole point is
 /// that these files never reached the computer, so the library is the only
 /// place a thumbnail of them exists. A video carries a small marker so a stuck
 /// clip is not mistaken for a photo.
-class _FailedThumb extends StatelessWidget {
-  const _FailedThumb(this.asset, {required this.reason});
+class _FailedRow extends StatelessWidget {
+  const _FailedRow(this.asset, {required this.reason, this.last = false});
 
   final AssetEntity asset;
   final String reason;
+
+  /// No divider under the last one — a rule with nothing after it reads as a
+  /// row that failed to load.
+  final bool last;
+
+  String get _name => asset.title?.isNotEmpty == true
+      ? asset.title!
+      : 'This ${asset.type == AssetType.video ? 'video' : 'photo'}';
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return GestureDetector(
+      behavior: HitTestBehavior.opaque,
       onTap: () => showModalBottomSheet<void>(
         context: context,
         showDragHandle: true,
@@ -741,9 +904,7 @@ class _FailedThumb extends StatelessWidget {
                   : Icons.image_outlined),
               const SizedBox(width: 8),
               Expanded(
-                child: Text(asset.title?.isNotEmpty == true
-                    ? asset.title!
-                    : 'This ${asset.type == AssetType.video ? 'video' : 'photo'}',
+                child: Text(_name,
                     style: const TextStyle(fontWeight: FontWeight.w800)),
               ),
             ]),
@@ -758,44 +919,65 @@ class _FailedThumb extends StatelessWidget {
           ]),
         ),
       ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(10),
-        child: SizedBox(
-          width: 72,
-          height: 72,
-          child: Stack(fit: StackFit.expand, children: [
-            FutureBuilder<Uint8List?>(
-              future:
-                  asset.thumbnailDataWithSize(const ThumbnailSize.square(200)),
-              builder: (ctx, snap) => snap.data == null
-                  ? Container(
-                      color: theme.colorScheme.surfaceContainerHighest,
-                      child: Icon(Icons.photo_outlined,
-                          color: theme.colorScheme.outline, size: 20))
-                  : Image.memory(snap.data!,
-                      fit: BoxFit.cover, gaplessPlayback: true),
+      child: Padding(
+        padding: EdgeInsets.only(bottom: last ? 8 : 9),
+        child: Column(children: [
+          Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(9),
+              child: SizedBox(
+                width: 34,
+                height: 34,
+                child: Stack(fit: StackFit.expand, children: [
+                  FutureBuilder<Uint8List?>(
+                    future: asset
+                        .thumbnailDataWithSize(const ThumbnailSize.square(200)),
+                    builder: (ctx, snap) => snap.data == null
+                        ? Container(
+                            color: theme.colorScheme.surfaceContainerHighest,
+                            child: Icon(Icons.photo_outlined,
+                                color: theme.colorScheme.outline, size: 16))
+                        : Image.memory(snap.data!,
+                            fit: BoxFit.cover, gaplessPlayback: true),
+                  ),
+                  if (asset.type == AssetType.video)
+                    const Positioned(
+                      left: 1,
+                      bottom: 1,
+                      child: Icon(Icons.play_circle_fill,
+                          size: 13, color: Colors.white, shadows: [
+                            Shadow(color: Colors.black54, blurRadius: 3)
+                          ]),
+                    ),
+                ]),
+              ),
             ),
-            // A red corner so a stuck file reads as stuck at a glance, not just
-            // as another thumbnail in a grid.
-            Positioned(
-              right: 3,
-              top: 3,
-              child: Icon(Icons.cloud_off,
-                  size: 14, color: kDanger, shadows: const [
-                    Shadow(color: Colors.black54, blurRadius: 3)
+            const SizedBox(width: 11),
+            Expanded(
+              child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(_name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                            fontSize: 13, fontWeight: FontWeight.w700)),
+                    const SizedBox(height: 1),
+                    Text(
+                        reason.isEmpty
+                            ? 'It could not be sent this time'
+                            : reason,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                            fontSize: 11.5,
+                            height: 1.4,
+                            color: theme.colorScheme.onSurfaceVariant)),
                   ]),
             ),
-            if (asset.type == AssetType.video)
-              const Positioned(
-                left: 3,
-                bottom: 3,
-                child: Icon(Icons.play_circle_fill,
-                    size: 16, color: Colors.white, shadows: [
-                      Shadow(color: Colors.black54, blurRadius: 3)
-                    ]),
-              ),
           ]),
-        ),
+          if (!last) const Divider(height: 18),
+        ]),
       ),
     );
   }

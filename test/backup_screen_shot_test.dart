@@ -142,6 +142,54 @@ void main() {
         reason: 'the running screen must fit a 390x844 phone without scrolling');
   });
 
+  testWidgets('done — everything went', (tester) async {
+    // The state the hero was BLANK in until this change: the figures lived
+    // inside `if (running)`, so a finished run left a big coloured block with
+    // a drawing in it and no result anywhere near the top of the screen.
+    await _shoot(
+        tester,
+        const BackupProgress(
+          state: BackupState.done,
+          total: 1048,
+          done: 148,
+          skipped: 900,
+          message: 'Finished',
+        ),
+        'backup_done_clean.png');
+    expect(tester.takeException(), isNull);
+    expect(find.text('Backed up'), findsOneWidget);
+    expect(find.text('148 uploaded'), findsOneWidget);
+    expect(find.text('1,048 checked · 900 already there'), findsOneWidget);
+    expect(_scrollExtent(tester), 0.0);
+  });
+
+  testWidgets('failed — the reason is the headline', (tester) async {
+    // A failure has no figure worth enlarging, so the sentence takes the
+    // hero's place and the message becomes the sub-line. Rendered because
+    // that is a different layout from the other four, and an untested branch
+    // of a layout is an untested layout.
+    await _shoot(
+        tester,
+        const BackupProgress(
+          state: BackupState.failed,
+          total: 1048,
+          message: 'Your session has expired. Sign in again and try once more.',
+          reasons: {'the computer refused the upload': 12},
+          retryable: 12,
+        ),
+        'backup_failed.png');
+    expect(tester.takeException(), isNull);
+    expect(find.text('That did not work'), findsOneWidget);
+    expect(find.text('Nothing was sent'), findsOneWidget);
+    // The reason, not the arithmetic — this is the one line that says what to
+    // go and do.
+    expect(
+        find.text(
+            'Your session has expired. Sign in again and try once more.'),
+        findsOneWidget);
+    expect(_scrollExtent(tester), 0.0);
+  });
+
   testWidgets('done — with some that did not go', (tester) async {
     await _shoot(
         tester,

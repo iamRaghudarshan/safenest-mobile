@@ -34,12 +34,33 @@ class BackupFlight extends StatefulWidget {
   const BackupFlight({
     super.key,
     required this.running,
+    this.done = false,
+    this.filled = true,
     this.photos = const [],
     this.onDark = false,
   });
 
+  /// Whether the computer has anything on it.
+  ///
+  /// The laptop was always drawn with a lit screen full of photographs, which
+  /// is fine three states out of four and a flat contradiction in the fourth:
+  /// a red block reading "Nothing was sent" over a picture of a computer full
+  /// of pictures. People believe the drawing — it is the part they look at
+  /// first — so the drawing has to be true.
+  final bool filled;
+
   /// Whether photos are actually moving right now.
   final bool running;
+
+  /// The run FINISHED, and the photographs are on the computer.
+  ///
+  /// Stopping the loop was only half of it: a scene with a dashed, empty path
+  /// between two devices says "nothing is happening", which is also what it
+  /// says before anybody has pressed the button. Those are opposite facts and
+  /// the drawing could not tell them apart. Arrived draws the path solid and
+  /// puts a tick on the computer, so the picture agrees with the words above
+  /// it instead of quietly contradicting them.
+  final bool done;
 
   /// The thumbnails in flight, to fly instead of drawn tiles. Empty is
   /// perfectly normal — before the first has decoded, and on the retry
@@ -107,6 +128,8 @@ class _BackupFlightState extends State<BackupFlight>
           painter: _FlightPainter(
             t: _c.value,
             running: widget.running,
+            arrived: widget.done,
+            filled: widget.filled,
             photos: widget.photos,
             dark: dark,
             line: widget.onDark
@@ -130,6 +153,8 @@ class _FlightPainter extends CustomPainter {
   _FlightPainter({
     required this.t,
     required this.running,
+    required this.arrived,
+    required this.filled,
     required this.photos,
     required this.dark,
     required this.line,
@@ -139,6 +164,8 @@ class _FlightPainter extends CustomPainter {
 
   final double t;
   final bool running;
+  final bool arrived;
+  final bool filled;
   final List<ui.Image> photos;
   final bool dark;
   final Color line;
@@ -221,11 +248,17 @@ class _FlightPainter extends CustomPainter {
       ..shader = shader
       ..strokeWidth = 2.4
       ..strokeCap = StrokeCap.round;
-    final drift = running ? (t * 10) % 10 : 0.0;
-    for (var x = from + drift - 10; x < to; x += 10) {
-      final a = x.clamp(from, to);
-      final b = (x + 4).clamp(from, to);
-      if (b > a) canvas.drawLine(Offset(a, midY), Offset(b, midY), dash);
+    if (arrived) {
+      // Unbroken, because the journey is over. A dashed line is a line with
+      // gaps in it, and gaps are what "still going" looks like.
+      canvas.drawLine(Offset(from, midY), Offset(to, midY), dash);
+    } else {
+      final drift = running ? (t * 10) % 10 : 0.0;
+      for (var x = from + drift - 10; x < to; x += 10) {
+        final a = x.clamp(from, to);
+        final b = (x + 4).clamp(from, to);
+        if (b > a) canvas.drawLine(Offset(a, midY), Offset(b, midY), dash);
+      }
     }
 
     // ---- the two devices ---------------------------------------------------
@@ -233,7 +266,10 @@ class _FlightPainter extends CustomPainter {
     // photos are, the computer is where they are going, and colour is what
     // makes that read at a glance.
     _phone(canvas, Offset(leftX, midY), const Color(0xFF0176D3));
-    _computer(canvas, Offset(rightX, midY), const Color(0xFF16A06A));
+    // Unlit and empty when nothing has reached it. Slate rather than green,
+    // and the grid of arrived photos drops away with the colour.
+    _computer(canvas, Offset(rightX, midY),
+        filled ? const Color(0xFF16A06A) : const Color(0xFF454C54));
 
     // ---- the photos in flight ---------------------------------------------
     if (running) {
@@ -256,6 +292,33 @@ class _FlightPainter extends CustomPainter {
         _photo(canvas, Offset(x, midY - lift), fade, _hues[i % _hues.length],
             tilt, image);
       }
+    }
+
+    // ---- the tick, once they have all arrived ------------------------------
+    // On the COMPUTER, not floating in the middle. Where a confirmation is
+    // placed is half of what it says: on the computer it means "they are
+    // here", anywhere else it is a generic success mark that could as easily
+    // be about the phone.
+    if (arrived) {
+      final at = Offset(rightX + laptopHalf - 4, midY - 22);
+      canvas.drawCircle(
+          at.translate(0, 1.5),
+          6.5,
+          Paint()
+            ..color = Colors.black.withValues(alpha: 0.28)
+            ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 3));
+      canvas.drawCircle(at, 6.5, Paint()..color = Colors.white);
+      canvas.drawPath(
+          Path()
+            ..moveTo(at.dx - 3.0, at.dy + 0.2)
+            ..lineTo(at.dx - 0.8, at.dy + 2.4)
+            ..lineTo(at.dx + 3.2, at.dy - 2.4),
+          Paint()
+            ..color = const Color(0xFF14795A)
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 1.9
+            ..strokeCap = StrokeCap.round
+            ..strokeJoin = StrokeJoin.round);
     }
 
     // ---- labels ------------------------------------------------------------
@@ -505,7 +568,9 @@ class _FlightPainter extends CustomPainter {
             end: Alignment.bottomCenter,
             colors: [
               colour.withValues(alpha: 0.95),
-              Color.lerp(colour, const Color(0xFF07331F), 0.55)!,
+              Color.lerp(colour,
+                  filled ? const Color(0xFF07331F) : const Color(0xFF14181C),
+                  0.55)!,
             ],
           ).createShader(scrRect));
 
@@ -513,7 +578,10 @@ class _FlightPainter extends CustomPainter {
     // all end up.
     canvas.save();
     canvas.clipRRect(screen);
-    final tile = Paint()..color = Colors.white.withValues(alpha: 0.22);
+    // Fainter when nothing is there: an empty computer still has a screen, it
+    // just has no photographs on it.
+    final tile = Paint()
+      ..color = Colors.white.withValues(alpha: filled ? 0.22 : 0.07);
     for (var row = 0; row < 3; row++) {
       for (var col = 0; col < 5; col++) {
         canvas.drawRRect(
@@ -598,6 +666,8 @@ class _FlightPainter extends CustomPainter {
   bool shouldRepaint(covariant _FlightPainter old) =>
       old.t != t ||
       old.running != running ||
+      old.arrived != arrived ||
+      old.filled != filled ||
       old.dark != dark ||
       !identical(old.photos, photos);
 }
