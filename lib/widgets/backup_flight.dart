@@ -149,6 +149,45 @@ class _BackupFlightState extends State<BackupFlight>
   }
 }
 
+/// The device labels' preferred size, and the floor they may shrink to.
+///
+/// Public so the fitting rule can be asserted rather than eyeballed. A
+/// screenshot cannot judge this one: `flutter test` ships no font, so the
+/// labels render as filled boxes whose widths are nothing like a real
+/// phone's — which is exactly the kind of thing that "looked fine" and then
+/// ran off the edge of a real screen.
+const double kFlightLabelPt = 10.5;
+
+/// Below this it stops being readable, so the label is allowed to touch the
+/// gutter rather than shrink further. Reached only by a translation far
+/// longer than anything English produces.
+const double kFlightLabelMinPt = 7.5;
+
+/// Lay a device label out at a given size. Shared by the painter and its test
+/// so both measure the same thing.
+TextPainter layOutLabel(String text, Color colour, double pt) => TextPainter(
+      text: TextSpan(
+        text: text,
+        style: TextStyle(color: colour, fontSize: pt, fontWeight: FontWeight.w700),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+
+/// The largest size at which [text] fits [budget], never above
+/// [kFlightLabelPt] and never below [kFlightLabelMinPt].
+///
+/// One step, computed rather than searched: type width scales linearly with
+/// size, so the ratio lands inside on the first go and a loop would only
+/// spend layouts arriving at the same answer.
+double fitLabelPt(String text, Color colour, double budget) {
+  if (budget <= 0) return kFlightLabelMinPt;
+  final w = layOutLabel(text, colour, kFlightLabelPt).width;
+  if (w <= budget) return kFlightLabelPt;
+  return (kFlightLabelPt * budget / w)
+      .clamp(kFlightLabelMinPt, kFlightLabelPt)
+      .toDouble();
+}
+
 class _FlightPainter extends CustomPainter {
   _FlightPainter({
     required this.t,
@@ -645,20 +684,28 @@ class _FlightPainter extends CustomPainter {
 
   void _label(Canvas canvas, String text, Offset centre, Color colour,
       double width) {
-    final tp = TextPainter(
-      text: TextSpan(
-        text: text,
-        style: TextStyle(
-            color: colour, fontSize: 10.5, fontWeight: FontWeight.w700),
-      ),
-      textDirection: TextDirection.ltr,
-    )..layout();
-    // Kept inside the canvas. Centred under a device that sits near the edge,
-    // a long label runs off it — and "Your computer" is one word in English
-    // and three somewhere else. Clamped rather than ellipsised: the whole
-    // label matters and there is room for it, just not centred.
-    final x = (centre.dx - tp.width / 2).clamp(2.0, (width - tp.width - 2)
-        .clamp(2.0, double.infinity));
+    // SHRINK TO FIT, rather than only sliding sideways.
+    //
+    // This clamped the x position and left the size alone, which keeps the
+    // label's LEFT edge on the canvas and does nothing whatever about its
+    // right one: once the text is wider than the space, the clamp bottoms out
+    // at x=2 and the rest simply runs off the edge. On a 390pt phone "Your
+    // computer" cleared the edge by about four pixels, which is not fitting,
+    // it is luck — and any narrower phone spent it.
+    //
+    // Half the canvas each, so the two labels also cannot meet in the middle.
+    // That is a second failure the old version could not express: both were
+    // free to grow toward each other and the only thing keeping "This phone"
+    // and "Your computer" apart was that English happens to make them short.
+    final budget = width / 2 - 6;
+
+    final tp = layOutLabel(text, colour, fitLabelPt(text, colour, budget));
+
+    // Then centre it under its device, and keep it on the canvas — still
+    // needed, because a label that had to stop at the minimum size can be
+    // wider than its budget.
+    final maxX = (width - tp.width - 2).clamp(2.0, double.infinity);
+    final x = (centre.dx - tp.width / 2).clamp(2.0, maxX);
     tp.paint(canvas, Offset(x, centre.dy));
   }
 
