@@ -25,6 +25,7 @@
 /// are safe.
 library;
 
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -79,6 +80,55 @@ String _n(int v) {
     b.write(s[i]);
   }
   return b.toString();
+}
+
+/// What to say about a phone count and a computer count that differ.
+///
+/// Null when there is nothing worth saying — either a number is missing, or
+/// they agree. A row that appears only to announce that two numbers match is
+/// noise, and noise is what makes people stop reading the rows that matter.
+///
+/// THE DIFFERENCE IS USUALLY CORRECT, which is the whole reason this needs a
+/// sentence rather than just two figures. The phone counts ASSETS; the
+/// computer stores DISTINCT CONTENT. A picture that exists twice on the
+/// phone — a shared copy, a re-saved image, the same photo out of two apps —
+/// is one item on the computer, for ever, by design. Shown as bare numbers
+/// with no explanation, "1,948" against "1,773" reads as 175 lost
+/// photographs, and that is the opposite of true.
+///
+/// Pure, and separated from the widget, because it is the kind of wording
+/// that is easy to get subtly wrong — "missing" when it means "de-duplicated"
+/// — and a test can hold it to the honest version.
+String? tallyNote(int? phone, int? computer, {int failed = 0}) {
+  if (phone == null || computer == null) return null;
+  if (phone <= 0) return null;
+  final gap = phone - computer;
+  if (gap == 0) return 'Everything on this phone is on your computer.';
+  if (gap < 0) {
+    // The computer legitimately holds MORE: photos from the web, from another
+    // phone, or ones since deleted here. Not a fault, and not this screen's
+    // business to fret about.
+    return 'Your computer also holds ${_plural(-gap, 'item')} from elsewhere.';
+  }
+  if (failed >= gap) {
+    // The whole difference is accounted for by this run's failures, which are
+    // listed underneath. Do not also blame duplicates.
+    return 'The difference is the ${_plural(gap, 'item')} that could not be '
+        'sent, listed below.';
+  }
+  final dupes = gap - failed;
+  if (failed > 0) {
+    return '${_plural(failed, 'item')} could not be sent. The other '
+        '${_plural(dupes, 'is a copy', plural: 'are copies')} of something '
+        'already there — the computer keeps one of each.';
+  }
+  return '${_plural(dupes, 'is a copy', plural: 'are copies')} of something '
+      'already there — the computer keeps one of each, so this is expected.';
+}
+
+String _plural(int n, String one, {String? plural}) {
+  final word = n == 1 ? one : (plural ?? '${one}s');
+  return '${_n(n)} $word';
 }
 
 /// Whether a run has ended with something worth stating in the hero.
@@ -139,6 +189,12 @@ class _BackupScreenState extends State<BackupScreen> {
     s.addListener(_onChange);
     if (_owns) s.load();
     _service = s;
+    // Ask both sides how many they hold, so the comparison is on screen
+    // BEFORE a button is pressed — which is when somebody is standing there
+    // wondering whether the backup worked, not after starting another run to
+    // find out. Unawaited: it is two cheap lookups and the screen is useful
+    // without them, so nothing should wait on it.
+    if (s.progress.state != BackupState.running) unawaited(s.refreshCounts());
   }
 
   void _onChange() { if (mounted) setState(() {}); }
@@ -432,6 +488,19 @@ class _BackupScreenState extends State<BackupScreen> {
             ),
           ),
 
+          // WHAT EACH SIDE HOLDS. The question this answers is asked out
+          // loud every time somebody looks at the two apps side by side, and
+          // until now nothing in the product answered it: the phone knew both
+          // figures — it fetches the library count to size the run and the
+          // server count to notice a library deleted at the computer — and
+          // showed neither.
+          // A list rather than a collection-`if`: the condition is "not
+          // running AND there is something to say", and the something is a
+          // value the widget then needs. A pattern-`if` cannot be combined
+          // with `&&` like that, and forcing it produces a tree that looks
+          // right and does not compile.
+          ...(running ? const <Widget>[] : _tallyCard(theme, dark, p)),
+
           const SizedBox(height: 14),
 
           if (running) ...[
@@ -676,6 +745,55 @@ class _BackupScreenState extends State<BackupScreen> {
 
   bool _looksLikePermission(String m) =>
       m.contains('allowed to see') || m.contains('All Photos');
+
+  /// The two figures side by side, or nothing when there is nothing to say.
+  List<Widget> _tallyCard(ThemeData theme, bool dark, BackupProgress p) {
+    final note = tallyNote(p.libraryCount, p.serverCount, failed: p.failed);
+    if (note == null) return const <Widget>[];
+    return [
+      _card(
+        theme,
+        dark,
+        padding: const EdgeInsets.fromLTRB(15, 12, 15, 12),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            _tally(theme, 'This phone', p.libraryCount!),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: Icon(Icons.arrow_forward,
+                  size: 15, color: theme.colorScheme.outline),
+            ),
+            _tally(theme, 'Your computer', p.serverCount!),
+          ]),
+          const SizedBox(height: 7),
+          Text(note,
+              style: TextStyle(
+                  fontSize: 11.5,
+                  height: 1.45,
+                  color: theme.colorScheme.onSurfaceVariant)),
+        ]),
+      ),
+      const SizedBox(height: 12),
+    ];
+  }
+
+  /// One side's figure with its name under it.
+  Widget _tally(ThemeData theme, String label, int value) => Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(_n(value),
+              style: const TextStyle(
+                  fontSize: 19,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: -0.4,
+                  fontFeatures: [FontFeature.tabularFigures()])),
+          Text(label,
+              style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  color: theme.colorScheme.onSurfaceVariant)),
+        ],
+      );
 
   /// Is there anything to explain? Named files, bare causes, or just a count.
   ///

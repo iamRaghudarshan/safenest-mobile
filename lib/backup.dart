@@ -141,6 +141,8 @@ class BackupProgress {
     this.currentSent = 0,
     this.currentTotal = 0,
     this.inFlight = const [],
+    this.libraryCount,
+    this.serverCount,
   });
 
   final BackupState state;
@@ -175,6 +177,25 @@ class BackupProgress {
   /// Everything in the air right now, oldest first, so the screen can show
   /// the actual photographs rather than a name.
   final List<BackupItem> inFlight;
+
+  /// HOW MANY ARE ON THE PHONE, and how many the computer holds. Null until
+  /// each has been asked for.
+  ///
+  /// Both numbers were already being fetched — the library count to size the
+  /// run, the server count to notice a library deleted at the computer — and
+  /// neither was ever shown. So the one question they answer between them
+  /// went unanswered: "my phone says one number and the computer says
+  /// another, why?"
+  ///
+  /// THEY ARE NOT MEANT TO MATCH, and that is the point of showing both. The
+  /// phone counts ASSETS; the computer stores DISTINCT CONTENT, so a photo
+  /// that exists twice on the phone — a shared copy, a re-saved image, the
+  /// same picture out of two apps — is one item there. A lower number on the
+  /// computer is usually that, and occasionally it is something that could
+  /// not be sent, which is listed underneath. Left invisible, the difference
+  /// reads as loss.
+  final int? libraryCount;
+  final int? serverCount;
 
   /// 0..1 through the file being sent now, or null when nothing is in flight
   /// or its size is unknown. Null rather than 0 so the screen can tell "not
@@ -746,6 +767,7 @@ class BackupService extends ChangeNotifier {
       } catch (_) {/* the list above is cleared either way */}
     }
     if (serverCount != null) await prefs.setInt(_lastCountKey, serverCount);
+    _serverCount = serverCount;
 
     // Photos AND videos. This said `RequestType.image` with the note "videos
     // are not photos and the gallery cannot store them" — true when it was
@@ -766,6 +788,7 @@ class BackupService extends ChangeNotifier {
 
     final all = albums.first;
     final count = await all.assetCountAsync;
+    _libraryCount = count;
 
     // Paged rather than fetched whole: asking for a list of 40,000 asset objects
     // at once is how an app gets killed on a phone with the library it most
@@ -964,6 +987,10 @@ class BackupService extends ChangeNotifier {
       failed: handledFail,
       reasons: Map.unmodifiable(_problems),
       retryable: _failedAssets.length,
+      // Both totals survive onto the finished state, which is where
+      // somebody actually compares them.
+      libraryCount: _libraryCount,
+      serverCount: _serverCount,
       message: _stop
           ? 'Stopped — nothing is lost, it carries on from here next time.'
           : nothingWorked
@@ -1052,6 +1079,10 @@ class BackupService extends ChangeNotifier {
       failed: bad,
       reasons: Map.unmodifiable(_problems),
       retryable: _failedAssets.length,
+      // Both totals survive onto the finished state, which is where
+      // somebody actually compares them.
+      libraryCount: _libraryCount,
+      serverCount: _serverCount,
       message: _stop
           ? 'Stopped.'
           : bad == 0
@@ -1067,6 +1098,40 @@ class BackupService extends ChangeNotifier {
   /// walking the whole library again. A retry after fixing the cause — waking
   /// the computer, signing back in — should take seconds, not another full
   /// scan of twenty thousand photos.
+  /// The last counts either side reported. Kept on the service rather than
+  /// recomputed by the screen, because asking the photo library how big it is
+  /// costs a platform call and the screen rebuilds on every progress tick.
+  int? _libraryCount;
+  int? _serverCount;
+
+  /// Ask both sides how many they have, without running a backup.
+  ///
+  /// So the comparison is on screen BEFORE somebody presses the button, which
+  /// is when they are looking at the phone wondering whether it worked, not
+  /// after they have started another run to find out.
+  Future<void> refreshCounts() async {
+    try {
+      final albums = await PhotoManager.getAssetPathList(
+          onlyAll: true, type: RequestType.common);
+      if (albums.isNotEmpty) _libraryCount = await albums.first.assetCountAsync;
+    } catch (_) {
+      // A phone that will not answer is not a reason to fail the screen.
+    }
+    _serverCount = await _serverItemCount();
+    _emit(BackupProgress(
+      state: progress.state,
+      total: progress.total,
+      done: progress.done,
+      skipped: progress.skipped,
+      failed: progress.failed,
+      message: progress.message,
+      reasons: progress.reasons,
+      retryable: progress.retryable,
+      libraryCount: _libraryCount,
+      serverCount: _serverCount,
+    ));
+  }
+
   final List<AssetEntity> _failedAssets = [];
 
   /// The reason each failed asset did not go, keyed by asset id. `_problems`
