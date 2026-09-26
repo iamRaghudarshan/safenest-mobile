@@ -172,32 +172,9 @@ class _BackupScreenState extends State<BackupScreen> {
           // of an iPhone — measured, because a screenshot at a generous
           // height had made it look fine.
           if (!running && !done && !failed) ...[
-          Center(
-            child: Container(
-              width: 92,
-              height: 92,
-              decoration: BoxDecoration(
-                color: accent,
-                borderRadius: BorderRadius.circular(28),
-                boxShadow: [
-                  BoxShadow(
-                    color: accent.withValues(alpha: 0.40),
-                    blurRadius: 32,
-                    offset: const Offset(0, 14),
-                  ),
-                ],
-              ),
-              child: Icon(
-                failed
-                    ? Icons.error_outline
-                    : done
-                        ? Icons.cloud_done_outlined
-                        : Icons.cloud_upload_outlined,
-                size: 44,
-                color: Colors.white,
-              ),
-            ),
-          ),
+          // No badge. The hero below is the coloured block now, and
+          // two saturated slabs stacked in a column is a pile rather
+          // than a hierarchy — the eye has nowhere to land first.
           const SizedBox(height: 20),
           Text(
             'Every photo on this phone, copied to your own computer.',
@@ -229,18 +206,112 @@ class _BackupScreenState extends State<BackupScreen> {
           // It flies the REAL photographs now. ListenableBuilder because the
           // thumbnails arrive one at a time, off the photo library, after the
           // upload has already started.
-          ListenableBuilder(
-            listenable: _thumbs,
-            builder: (_, _) => BackupFlight(
-              running: running,
-              photos: [
-                for (final it in p.inFlight)
-                  if (_thumbs[it.id] != null) _thumbs[it.id]!,
+          //
+          // THE HERO. One deep block that owns the screen.
+          //
+          // The parts were all correct and the screen still read as timid: a
+          // drawing, then a number, then a bar, then some chips, each on the
+          // same flat white, none of them claiming to be the point. A screen
+          // that is protecting twenty thousand photographs should look certain
+          // of itself.
+          //
+          // So the animation and the figures are one saturated card, white
+          // type on the module's own colour, and everything else on the page
+          // is quiet underneath it. The colour carries the state as well —
+          // brand while working, green when it finished, red when it did not
+          // — which is legible from across a room, and across a room is where
+          // a phone sits during a long backup.
+          Container(
+            padding: const EdgeInsets.fromLTRB(18, 6, 18, 18),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(26),
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  Color.lerp(accent, Colors.white, 0.08)!,
+                  Color.lerp(accent, Colors.black, 0.30)!,
+                ],
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: accent.withValues(alpha: dark ? 0.30 : 0.36),
+                  blurRadius: 28,
+                  offset: const Offset(0, 12),
+                ),
+              ],
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                ListenableBuilder(
+                  listenable: _thumbs,
+                  builder: (_, _) => BackupFlight(
+                    running: running,
+                    onDark: true,
+                    photos: [
+                      for (final it in p.inFlight)
+                        if (_thumbs[it.id] != null) _thumbs[it.id]!,
+                    ],
+                  ),
+                ),
+                if (running) ...[
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.baseline,
+                    textBaseline: TextBaseline.alphabetic,
+                    children: [
+                      Expanded(
+                        child: Text(
+                          p.state == BackupState.scanning
+                              ? p.message
+                              : '${p.done} uploaded',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                              fontSize: 34,
+                              height: 1.05,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: -0.9,
+                              color: Colors.white,
+                              fontFeatures: [FontFeature.tabularFigures()]),
+                        ),
+                      ),
+                      if (p.total > 0 && p.state != BackupState.scanning)
+                        Text('${(p.fraction * 100).round()}%',
+                            style: const TextStyle(
+                                fontSize: 17,
+                                fontWeight: FontWeight.w800,
+                                color: Colors.white,
+                                fontFeatures: [FontFeature.tabularFigures()])),
+                    ],
+                  ),
+                  if (p.total > 0 && p.state != BackupState.scanning) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                        '${p.handled} of ${p.total} checked'
+                        '${p.skipped > 0 ? ' · ${p.skipped} already there' : ''}',
+                        style: const TextStyle(
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.white70)),
+                  ],
+                  const SizedBox(height: 12),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(999),
+                    child: LinearProgressIndicator(
+                      value: p.total == 0 ? null : p.fraction,
+                      minHeight: 8,
+                      backgroundColor: Colors.white.withValues(alpha: 0.22),
+                      valueColor:
+                          const AlwaysStoppedAnimation<Color>(Colors.white),
+                    ),
+                  ),
+                ],
               ],
             ),
           ),
 
-          const SizedBox(height: 10),
+          const SizedBox(height: 14),
 
           if (running) ...[
             _card(
@@ -249,82 +320,9 @@ class _BackupScreenState extends State<BackupScreen> {
               child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                // THE FIGURE FIRST, THEN ITS BAR.
-                //
-                // It was the other way round, which reads as a loading
-                // indicator with a caption under it rather than a number with
-                // its progress. The number is the answer; the bar qualifies
-                // it.
-                //
-                // Left-aligned, not centred: centred text in a card reads as a
-                // poster. A figure you check repeatedly wants to be where the
-                // eye already is, and the percentage sits opposite it on the
-                // same line so both are read in one movement.
-                // THE HEADLINE IS WHAT IS BEING UPLOADED, not the size of the
-                // library.
-                //
-                // It used to read "68 of 1048", which is arithmetically exact
-                // and says the wrong thing. 1048 is every photo on the phone —
-                // the number this run has to LOOK at — and almost all of them
-                // are usually skipped without a byte being sent. But it is also
-                // exactly the number somebody recognises as their whole
-                // library, so the screen read as "uploading all 1048 again",
-                // twice reported as a bug that was not there.
-                //
-                // Now the big number is the photos actually sent, and the
-                // library figure is demoted to the line that explains it. A
-                // repeat backup reads "0 uploaded / 900 of 1048 checked, 900
-                // already there", which is the truth and is reassuring instead
-                // of alarming.
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.baseline,
-                  textBaseline: TextBaseline.alphabetic,
-                  children: [
-                    Expanded(
-                      child: Text(
-                        p.state == BackupState.scanning
-                            ? p.message
-                            : '${p.done} uploaded',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                            fontSize: 28,
-                            fontWeight: FontWeight.w800,
-                            letterSpacing: -0.6,
-                            fontFeatures: [FontFeature.tabularFigures()]),
-                      ),
-                    ),
-                    if (p.total > 0 && p.state != BackupState.scanning)
-                      Text('${(p.fraction * 100).round()}%',
-                          style: TextStyle(
-                              fontSize: 15,
-                              fontWeight: FontWeight.w800,
-                              color: accent,
-                              fontFeatures: const [
-                                FontFeature.tabularFigures()
-                              ])),
-                  ],
-                ),
-                if (p.total > 0 && p.state != BackupState.scanning) ...[
-                  const SizedBox(height: 4),
-                  Text(
-                      '${p.handled} of ${p.total} checked'
-                      '${p.skipped > 0 ? ' · ${p.skipped} already there' : ''}',
-                      style: TextStyle(
-                          fontSize: 12.5,
-                          fontWeight: FontWeight.w600,
-                          color: theme.colorScheme.onSurfaceVariant)),
-                ],
-                const SizedBox(height: 12),
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(999),
-                  child: LinearProgressIndicator(
-                    value: p.total == 0 ? null : p.fraction,
-                    minHeight: 8,
-                    backgroundColor: theme.colorScheme.surfaceContainerHighest,
-                    valueColor: AlwaysStoppedAnimation(accent),
-                  ),
-                ),
+                // The figures moved into the hero above. What stays here
+                // is the part that is about individual photographs rather
+                // than the run as a whole.
                 // THE PHOTOGRAPHS GOING UP RIGHT NOW.
                 //
                 // Photos go four at a time, so this is a row rather than one

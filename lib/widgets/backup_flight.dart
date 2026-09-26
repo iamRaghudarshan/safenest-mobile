@@ -35,6 +35,7 @@ class BackupFlight extends StatefulWidget {
     super.key,
     required this.running,
     this.photos = const [],
+    this.onDark = false,
   });
 
   /// Whether photos are actually moving right now.
@@ -44,6 +45,15 @@ class BackupFlight extends StatefulWidget {
   /// perfectly normal — before the first has decoded, and on the retry
   /// screen — and the painter falls back to the drawn tile.
   final List<ui.Image> photos;
+
+  /// Drawn on a dark surface, whatever the app's theme is.
+  ///
+  /// The scene picks its shells and label colour from the theme's brightness,
+  /// which is right until it is placed on a deep hero card in a light app —
+  /// where a pale phone body and grey labels disappear. This says "the
+  /// surface under me is dark", which is a different question from "the app
+  /// is in dark mode".
+  final bool onDark;
 
   @override
   State<BackupFlight> createState() => _BackupFlightState();
@@ -84,7 +94,8 @@ class _BackupFlightState extends State<BackupFlight>
 
   @override
   Widget build(BuildContext context) {
-    final dark = Theme.of(context).brightness == Brightness.dark;
+    final dark = widget.onDark ||
+        Theme.of(context).brightness == Brightness.dark;
     return SizedBox(
       // Fills the card it sits in rather than perching in the top of it. The
       // painter scales to whatever it is given, so this is the only number
@@ -98,9 +109,15 @@ class _BackupFlightState extends State<BackupFlight>
             running: widget.running,
             photos: widget.photos,
             dark: dark,
-            line: Theme.of(context).colorScheme.outlineVariant,
-            ink: Theme.of(context).colorScheme.onSurface,
-            soft: Theme.of(context).colorScheme.onSurfaceVariant,
+            line: widget.onDark
+                ? Colors.white24
+                : Theme.of(context).colorScheme.outlineVariant,
+            ink: widget.onDark
+                ? Colors.white
+                : Theme.of(context).colorScheme.onSurface,
+            soft: widget.onDark
+                ? Colors.white70
+                : Theme.of(context).colorScheme.onSurfaceVariant,
           ),
           size: Size.infinite,
         ),
@@ -242,8 +259,9 @@ class _FlightPainter extends CustomPainter {
     }
 
     // ---- labels ------------------------------------------------------------
-    _label(canvas, 'This phone', Offset(leftX, midY + 40), soft);
-    _label(canvas, 'Your computer', Offset(rightX, midY + 40), soft);
+    _label(canvas, 'This phone', Offset(leftX, midY + 40), soft, size.width);
+    _label(canvas, 'Your computer', Offset(rightX, midY + 40), soft,
+        size.width);
   }
 
   void _photo(Canvas canvas, Offset at, double opacity, Color hue,
@@ -557,7 +575,8 @@ class _FlightPainter extends CustomPainter {
         Paint()..color = Colors.black.withValues(alpha: dark ? 0.40 : 0.16));
   }
 
-  void _label(Canvas canvas, String text, Offset centre, Color colour) {
+  void _label(Canvas canvas, String text, Offset centre, Color colour,
+      double width) {
     final tp = TextPainter(
       text: TextSpan(
         text: text,
@@ -566,7 +585,13 @@ class _FlightPainter extends CustomPainter {
       ),
       textDirection: TextDirection.ltr,
     )..layout();
-    tp.paint(canvas, Offset(centre.dx - tp.width / 2, centre.dy));
+    // Kept inside the canvas. Centred under a device that sits near the edge,
+    // a long label runs off it — and "Your computer" is one word in English
+    // and three somewhere else. Clamped rather than ellipsised: the whole
+    // label matters and there is room for it, just not centred.
+    final x = (centre.dx - tp.width / 2).clamp(2.0, (width - tp.width - 2)
+        .clamp(2.0, double.infinity));
+    tp.paint(canvas, Offset(x, centre.dy));
   }
 
   @override
