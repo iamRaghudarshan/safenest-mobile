@@ -205,7 +205,9 @@ void main() {
       // The headline is what was UPLOADED; the library figure moved to the line
       // beneath it (see backup_screen.dart). The '59%' text is gone on purpose —
       // the percentage only ever lived inside that old headline.
-      expect(find.text('8123 uploaded'), findsOneWidget);
+      // Grouped, like every other figure on this screen now — the
+      // headline goes through the same formatter as the line under it.
+      expect(find.text('8,123 uploaded'), findsOneWidget);
       // Grouped. A five-digit library count read as one run of digits is a
       // number people skim past rather than read.
       expect(find.text('12,136 of 20,431 checked · 4,001 already there'),

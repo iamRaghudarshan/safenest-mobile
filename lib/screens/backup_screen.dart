@@ -131,6 +131,34 @@ String _plural(int n, String one, {String? plural}) {
   return '${_n(n)} $word';
 }
 
+/// The hero's headline: the words, how big, and how many lines they may use.
+///
+/// A FIGURE AND A SENTENCE ARE NOT THE SAME KIND OF HEADLINE, and treating
+/// them as one is what went wrong. "132 uploaded" is a number and wants to be
+/// large — that is the whole design of this block. "Looking for your
+/// computer…" is a sentence that happens to occupy the same slot, and at 34pt
+/// on one line it rendered as "Looking for your com…": the app's most
+/// reassuring moment, cut off mid-word.
+///
+/// So the size follows the CONTENT rather than the position. Sentences are
+/// set at reading size and given room to wrap; only an actual count gets the
+/// big type.
+({String text, double size, int lines}) heroTitle(BackupProgress p) {
+  if (p.state == BackupState.scanning) {
+    // Never a figure — there is nothing counted yet, which is exactly why
+    // this state exists.
+    return (
+      text: p.message.isEmpty ? 'Looking for your computer…' : p.message,
+      size: 19,
+      lines: 2,
+    );
+  }
+  if (p.state == BackupState.failed && p.done == 0) {
+    return (text: 'Nothing was sent', size: 24, lines: 2);
+  }
+  return (text: '${_n(p.done)} uploaded', size: 34, lines: 1);
+}
+
 /// Whether a run has ended with something worth stating in the hero.
 ///
 /// Idle is deliberately excluded: before anybody has pressed the button there
@@ -419,22 +447,19 @@ class _BackupScreenState extends State<BackupScreen> {
                     children: [
                       Expanded(
                         child: Text(
-                          p.state == BackupState.scanning
-                              ? p.message
-                              : failed && p.done == 0
-                                  ? 'Nothing was sent'
-                                  : '${p.done} uploaded',
-                          maxLines: 1,
+                          heroTitle(p).text,
+                          maxLines: heroTitle(p).lines,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
-                              // The failure sentence is words, not a figure,
-                              // and at 34 it ellipsises on a narrow phone —
-                              // which turns the one line that has to be read
-                              // into "Nothing was se…".
-                              fontSize: failed && p.done == 0 ? 27 : 34,
-                              height: 1.05,
+                              // Set by what the words ARE, not by where they
+                              // sit. See heroTitle: a count gets the big
+                              // type, a sentence gets reading size and room
+                              // to wrap.
+                              fontSize: heroTitle(p).size,
+                              height: heroTitle(p).lines > 1 ? 1.2 : 1.05,
                               fontWeight: FontWeight.w800,
-                              letterSpacing: -0.9,
+                              letterSpacing:
+                                  heroTitle(p).size > 30 ? -0.9 : -0.4,
                               color: Colors.white,
                               fontFeatures: const [
                                 FontFeature.tabularFigures()
@@ -504,6 +529,15 @@ class _BackupScreenState extends State<BackupScreen> {
           const SizedBox(height: 14),
 
           if (running) ...[
+            // ONLY IF IT HAS SOMETHING IN IT.
+            //
+            // Every row inside this card is conditional, and during scanning
+            // none of them are true yet — so it rendered as an empty white
+            // rounded box sitting under the hero, which looks like a panel
+            // that failed to load. Found by rendering the scanning state,
+            // which had never been rendered before today.
+            if (p.state == BackupState.running &&
+                (p.inFlight.isNotEmpty || p.failed > 0))
             _card(
               theme,
               dark,

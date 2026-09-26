@@ -142,6 +142,24 @@ void main() {
         reason: 'the running screen must fit a 390x844 phone without scrolling');
   });
 
+  testWidgets('scanning — the sentence that was being set as a number',
+      (tester) async {
+    // "Looking for your computer…" sits in the slot designed for "132
+    // uploaded", and was inheriting its 34pt single line — so it rendered as
+    // "Looking for your com…". Rendered here because it is the first thing
+    // anybody sees after pressing the button.
+    await _shoot(
+        tester,
+        const BackupProgress(
+          state: BackupState.scanning,
+          message: 'Looking for your computer…',
+        ),
+        'backup_scanning.png');
+    expect(tester.takeException(), isNull);
+    expect(find.text('Looking for your computer…'), findsOneWidget);
+    expect(_scrollExtent(tester), 0.0);
+  });
+
   testWidgets('done — everything went', (tester) async {
     // The state the hero was BLANK in until this change: the figures lived
     // inside `if (running)`, so a finished run left a big coloured block with
