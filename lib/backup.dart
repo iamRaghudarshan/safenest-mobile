@@ -941,6 +941,7 @@ class BackupService extends ChangeNotifier {
     }
 
     await _flush();
+    await _reportFailures();
 
     // A run where NOTHING got through is a failure, not a success with a small
     // number in it. The old message was "Backed up. 0 new, 0 already there."
@@ -1086,6 +1087,48 @@ class BackupService extends ChangeNotifier {
     _failReason[asset.id] = reason;
   }
 
+  /// Tell the COMPUTER what this phone could not send.
+  ///
+  /// The server's refusal log has answered every upload question so far, and
+  /// it has one blind spot that is structural rather than an oversight: it
+  /// can only see requests that arrive. Everything `_blame` records here
+  /// happens BEFORE a request — a video still in iCloud, a file that will not
+  /// open, a read that throws — so the server sees nothing and the log stays
+  /// empty.
+  ///
+  /// That is precisely how two videos went missing today. The log had not one
+  /// line about any video, which reads as "nothing was tried" and is the
+  /// opposite of what was happening. The phone knew the reason for both the
+  /// whole time and had no way to say it.
+  ///
+  /// One request at the end of the run, not one per failure: a phone that has
+  /// just failed to upload forty photos should not then make forty more
+  /// requests to complain about it.
+  Future<void> _reportFailures() async {
+    if (_failedAssets.isEmpty) return;
+    try {
+      final entries = [
+        for (final a in _failedAssets.take(100))
+          {
+            'name': a.title ?? a.id,
+            'video': a.type == AssetType.video,
+            'bytes': _lastKnownSize[a.id] ?? 0,
+            'reason': _failReason[a.id] ?? 'no reason recorded',
+          }
+      ];
+      await _net.post('/api/gallery/backup/report', entries);
+    } catch (_) {
+      // Never let the diagnostic break the run it is describing. A backup
+      // that fails because it could not file a complaint would be a worse
+      // bug than the one this exists to find.
+    }
+  }
+
+  /// How big each item was, for the report. Recorded as the upload starts,
+  /// because by the time it fails the file may be exactly what could not be
+  /// read — asking its length again is asking the question that failed.
+  final Map<String, int> _lastKnownSize = {};
+
   /// The causes, worst first, as sentences a person can act on.
   List<String> get problemLines {
     final e = _problems.entries.toList()
@@ -1185,6 +1228,7 @@ class BackupService extends ChangeNotifier {
       // driven hard and works.
       final label = asset.title ?? '${asset.id}.jpg';
       final ms = asset.duration > 0 ? asset.duration * 1000 : 0;
+      _lastKnownSize[asset.id] = fileSize;
       _beginItem(asset, label, fileSize);
       onFileStart?.call(label, fileSize);
       String? streamedDigest;
