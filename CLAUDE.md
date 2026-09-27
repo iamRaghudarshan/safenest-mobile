@@ -3,6 +3,42 @@
 The Flutter companion to **SafeNest**, the private personal-finance and
 life-records app. Read this before changing anything here.
 
+## 0. The standing rules, so nobody has to be told twice
+
+These are the owner's own instructions, written down here because they were
+given repeatedly across sessions and kept having to be given again.
+
+1. **This is a photos app and a files app first.** Self-hosted Google Photos
+   and Google Drive. Money, notes, habits, reminders and the vault are the
+   "all in one" bonus — they must never lead a screen. Home opens on a Photos
+   tile and a Files tile with their counts; everything else sits below.
+   Two redesigns were thrown out for opening Home with expenses.
+
+2. **Show a design before implementing any UI.** An HTML design canvas, one
+   artboard per screen, clickable so the flow can be walked — then wait for a
+   pick. Screens get rejected on their concept, not their code, and an
+   artboard costs nothing to throw away.
+
+3. **Never build or release without explicit approval in that same message.**
+   "build" or "build and release" is approval; "fix it", "do it", "make it
+   work" is not, and approval never carries over from an earlier build.
+   Writing, committing and pushing need no approval — only tagging does.
+
+4. **Bump `VERSION` BEFORE tagging.** The store version comes from
+   `$(cat VERSION)`, not from the tag. Tagging first ships a build labelled
+   with the previous version; it has happened three times, most recently at
+   1.74.0.
+
+5. **Finish the work and report without being asked.** Do not hand back a
+   list of what is left. Audit by grep and by running things, state a
+   percentage unprompted, and say plainly what is NOT done — especially when
+   code is written but not live.
+
+6. **Two skins.** Classic is the default and must stay exactly what it was;
+   Colourful is the redesign. See §12.
+
+---
+
 **The server is a separate repository and has its own, much longer guide:**
 `D:\AI PRO\finmate-react\CLAUDE.md`. Read that too — most of what constrains
 this app is decided there, especially §1 (records never leave the customer's
