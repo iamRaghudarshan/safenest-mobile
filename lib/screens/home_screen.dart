@@ -299,6 +299,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 brand: widget.brand,
                 onOpenPhotos: () => _open('gallery'),
                 onOpenFiles: () => _open('documents'),
+                onOpen: _open,
               )
             : DashboardScreen(onOpen: _open, refreshTick: _refreshTick);
       case 'modules':
