@@ -38,6 +38,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../api.dart';
 import '../dates.dart';
 import '../session.dart';
+import '../widgets/file_kinds.dart';
 import '../sharing.dart';
 import 'doc_preview.dart';
 import 'doc_recent.dart';
@@ -80,6 +81,12 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
   /// search REPLACES it, and mixing them gives "search inside the filter" or
   /// "filter inside the search" depending on which ran last.
   String _ftype = '';
+
+  /// How many of each kind there are, for the Colourful skin's row across the
+  /// top. A kind that is absent has not been counted yet and draws a dash —
+  /// never a zero, which while a request is in flight reads as "you have
+  /// none" and stops somebody looking.
+  final Map<String, int> _kindCounts = {};
   String _since = '';
   String _until = '';
   String _sort = '';
@@ -108,6 +115,25 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
 
   /// The user's own document categories, with their emoji.
   List<MasterItem> _masters = const [];
+
+  /// One cheap count per kind, asked of the server rather than tallied from
+  /// whatever page happens to be loaded — a count of the current page is not
+  /// a count of the library, and it would change as you scrolled.
+  Future<void> _loadKindCounts() async {
+    final api = context.read<Session>().api;
+    for (final kind in kFileKinds) {
+      try {
+        final r = await api.get(
+            '/api/documents', {'ftype': kind.key, 'limit': '1'});
+        final total = (r is Map ? r['total'] : null) as num?;
+        if (total != null && mounted) {
+          setState(() => _kindCounts[kind.key] = total.toInt());
+        }
+      } catch (_) {
+        // One kind failing leaves a dash on one tile, not a broken row.
+      }
+    }
+  }
 
   Future<void> _loadCategories() async {
     try {
@@ -170,6 +196,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
     super.initState();
     _load();
     _loadCategories();
+    _loadKindCounts();
     // Restore the remembered grid/list choice, if there is one.
     SharedPreferences.getInstance().then((p) {
       final v = p.getBool(_viewKey);
@@ -1089,6 +1116,26 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
               ),
             ),
           ),
+          // WHAT KIND OF FILE, across the top — Colourful only.
+          //
+          // People ask for "the insurance PDF", not "the file in the second
+          // folder". The kind is the one property of a document that is
+          // obvious before you open it and the fastest thing to scan for, so
+          // it gets the colour and the top of the screen. The category chips
+          // below answer a different question — what it is ABOUT — and stay
+          // exactly where they were.
+          if (context.skin.isVivid)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(14, 10, 14, 2),
+              child: FileKindBar(
+                counts: _kindCounts,
+                selected: _ftype,
+                onPick: (k) {
+                  setState(() => _ftype = k);
+                  _load();
+                },
+              ),
+            ),
           SizedBox(
             height: 54,
             child: ListView(

@@ -137,33 +137,38 @@ class _SearchScreenState extends State<SearchScreen> {
   /// being dropped: a group this app has not heard of is new, not wrong.
   ({Color colour, IconData icon, String? module}) _lookOf(String kind) {
     final k = kind.toLowerCase();
+    // FROM THE SKIN, not from a constant. A search result is the one place
+    // every module meets, so it is also where a colour that disagreed with
+    // the rest of the app would show up first: a photograph filed under a
+    // blue heading on Home and a pink one here reads as two applications.
+    final t = context.skin;
     if (k.startsWith('photo')) {
       return (
-        colour: kModuleColours['gallery']!,
+        colour: t.module('gallery'),
         icon: Icons.photo_outlined,
         module: 'gallery'
       );
     }
     if (k.startsWith('doc')) {
       return (
-        colour: kModuleColours['documents']!,
+        colour: t.module('documents'),
         icon: Icons.description_outlined,
         module: 'documents'
       );
     }
     if (k.startsWith('vault') || k.startsWith('password')) {
       return (
-        colour: kModuleColours['vault']!,
+        colour: t.module('vault'),
         icon: Icons.lock_outline,
         module: 'vault'
       );
     }
     for (final m in kModules) {
       if (k.startsWith(m.key.substring(0, m.key.length - 1))) {
-        return (colour: m.colour, icon: m.icon, module: m.key);
+        return (colour: t.module(m.key), icon: m.icon, module: m.key);
       }
     }
-    return (colour: kBrand, icon: Icons.search, module: null);
+    return (colour: t.brand, icon: Icons.search, module: null);
   }
 
   /// Matching faces, as circles — the same shape as the People tab, because a

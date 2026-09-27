@@ -74,12 +74,35 @@ const _allTabs = <_Tab>[
       Color(0xFF0D9488), 'documents'),
   _Tab('habits', 'Habits', Icons.local_fire_department_outlined,
       Icons.local_fire_department, Color(0xFFF97316), 'habits'),
+  // Search as a TAB, not only as a pushed route. It is the screen that makes
+  // the case for keeping everything in one app — "car insurance" finds the
+  // photographs with that text in them, the PDFs AND the reminder — and a
+  // feature reached only by a magnifying glass on one screen is a feature
+  // most people never meet.
+  _Tab('search', 'Search', Icons.search, Icons.search, Color(0xFF0EA5E9)),
   _Tab('vault', 'Vault', Icons.lock_outline, Icons.lock,
       Color(0xFF64748B), 'vault'),
 ];
 
 /// The bar as it ships, before anyone customises it.
 const _defaultBar = ['home', 'modules', 'expenses', 'reminders', 'gallery', 'profile'];
+
+/// COLOURFUL SHIPS FIVE, AND DIFFERENT ONES.
+///
+/// Six is over the guidance on both platforms and it shows: at 390pt the
+/// labels have no room and the icons crowd. It is also the wrong six for what
+/// this app is — Expenses and Reminders sit in the bar while Documents, the
+/// second of the two things the product exists for, does not.
+///
+/// So: Home, Photos, Files, Modules, Profile. Money and reminders are one tap
+/// away on Modules, which is what that screen is for, and both are on Home as
+/// well.
+///
+/// Only the DEFAULT changes. Anybody who has customised their own bar keeps
+/// it, in either skin — `_visible` prefers `Customize.navBar` and only falls
+/// back to a default, so choosing Colourful never silently rearranges a bar
+/// somebody arranged themselves.
+const _defaultBarVivid = ['home', 'gallery', 'search', 'documents', 'profile'];
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({
@@ -172,7 +195,9 @@ class _HomeScreenState extends State<HomeScreen> {
     final byKey = {for (final t in _allTabs) t.key: t};
     // The person's chosen bar, or the default set. Then drop anything this
     // account is not permitted to see.
-    final chosen = Customize.navBar.isNotEmpty ? Customize.navBar : _defaultBar;
+    final chosen = Customize.navBar.isNotEmpty
+        ? Customize.navBar
+        : (context.skin.isVivid ? _defaultBarVivid : _defaultBar);
     final out = <_Tab>[];
     for (final k in chosen) {
       final t = byKey[k];
@@ -246,6 +271,8 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Widget _screenFor(_Tab t) {
     switch (t.key) {
+      case 'search':
+        return SearchScreen(onOpen: _open);
       case 'home':
         // WHICH HOME depends on the skin, and it is a different SCREEN
         // rather than the same one recoloured. Classic opens on money and
