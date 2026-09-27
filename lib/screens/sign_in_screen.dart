@@ -129,6 +129,60 @@ class _SignInScreenState extends State<SignInScreen> {
                     style: Theme.of(context).textTheme.bodySmall,
                   ),
                   const SizedBox(height: 28),
+
+                  // FINDING THE COMPUTER IS THE PRIMARY ACTION — Colourful.
+                  //
+                  // You are not signing in to a service here, you are saying
+                  // WHICH COMPUTER IS YOURS, and that address is the single
+                  // most likely reason a new install fails: a number most
+                  // people have never had to look up, that lives on the other
+                  // machine, and that a router can change overnight. Leading
+                  // with the field asks somebody to do the hardest part of
+                  // the setup before they have seen anything work.
+                  //
+                  // So the search is a full-width button and the field below
+                  // becomes the fallback. Classic keeps the order it has
+                  // always had; it is the look people already chose, and
+                  // rearranging their sign-in screen is not a recolour.
+                  if (context.skin.isVivid) ...[
+                    SizedBox(
+                      height: 54,
+                      child: FilledButton.icon(
+                        onPressed: _busy || _finding ? null : _find,
+                        icon: _finding
+                            ? const SizedBox(
+                                width: 17,
+                                height: 17,
+                                child: CircularProgressIndicator(
+                                    strokeWidth: 2.2, color: Colors.white))
+                            : const Icon(Icons.wifi_find, size: 20),
+                        label: Text(_finding
+                            ? 'Looking on this wifi…'
+                            : 'Find my computer'),
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    Row(children: [
+                      Expanded(
+                          child: Divider(
+                              color: Theme.of(context).colorScheme.outlineVariant)),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 10),
+                        child: Text('or type it',
+                            style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .onSurfaceVariant)),
+                      ),
+                      Expanded(
+                          child: Divider(
+                              color: Theme.of(context).colorScheme.outlineVariant)),
+                    ]),
+                    const SizedBox(height: 14),
+                  ],
+
                   TextField(
                     controller: _address,
                     keyboardType: TextInputType.url,
@@ -171,6 +225,10 @@ class _SignInScreenState extends State<SignInScreen> {
                   ],
 
                   const SizedBox(height: 6),
+                  // Colourful already has this as the button above; two ways
+                  // to start the same search, one under the other, reads as
+                  // an interface that forgot what it had just offered.
+                  if (!context.skin.isVivid)
                   Align(
                     alignment: Alignment.centerLeft,
                     child: TextButton.icon(

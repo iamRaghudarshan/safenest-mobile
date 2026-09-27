@@ -53,7 +53,13 @@ class PeopleStrip extends StatelessWidget {
     final t = context.skin;
     final shown = people.take(_max).toList();
 
-    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+    return Column(
+        // Sized by its content, like every other Column in this wave. It is
+        // correct already inside a sliver, which gives an unbounded main
+        // axis — but the widget should not depend on where it was put.
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
       Padding(
         padding: const EdgeInsets.fromLTRB(4, 2, 4, 0),
         child: Row(children: [

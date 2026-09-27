@@ -128,6 +128,13 @@ class _KindTile extends StatelessWidget {
             constraints: const BoxConstraints(minHeight: 58),
             padding: const EdgeInsets.symmetric(vertical: 11, horizontal: 8),
             child: Column(
+              // Sized by its content. A Column defaults to taking every pixel
+              // its parent will give, which inside a Row with loose vertical
+              // constraints is the whole screen — four colour bars down the
+              // page instead of a row across the top. The same default caught
+              // the theme picker an hour earlier; it is the most expensive
+              // default in Flutter.
+              mainAxisSize: MainAxisSize.min,
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 Text(

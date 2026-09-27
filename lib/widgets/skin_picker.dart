@@ -30,7 +30,12 @@ class SkinPicker extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final dark = Theme.of(context).brightness == Brightness.dark;
-    return Row(children: [
+    return Row(
+        // Top-aligned rather than stretched: the two cards are the same
+        // height anyway, and a stretch here would hide the bug above rather
+        // than fix it.
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
       Expanded(
         child: _SkinCard(
           brand: brand,
@@ -111,7 +116,14 @@ class _SkinCard extends StatelessWidget {
               width: selected ? 2.2 : 1,
             ),
           ),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          child: Column(
+              // Sized by its content. Without this the column takes every
+              // pixel the row will give it, and in a settings list that is
+              // the whole remaining screen — two cards with a caption at the
+              // top and a field of nothing beneath.
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
             _Preview(theme: theme, tokens: t),
             Padding(
               padding: const EdgeInsets.fromLTRB(7, 9, 7, 5),
