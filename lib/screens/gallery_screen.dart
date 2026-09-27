@@ -33,7 +33,9 @@ import 'package:provider/provider.dart';
 import '../api.dart';
 import '../dates.dart';
 import '../session.dart';
+import '../theme.dart';
 import '../widgets/face_circle.dart';
+import '../widgets/people_strip.dart';
 import '../sharing.dart';
 import '../widgets/date_scrubber.dart';
 import '../widgets/selection_bar.dart';
@@ -1395,6 +1397,38 @@ class _GalleryScreenState extends State<GalleryScreen>
                         'it takes the whole library, not a selection.'),
               )
             else ...[
+              // THE FACES, INLINE — Colourful only.
+              //
+              // A face is how people look for a photograph: not a date, not a
+              // folder, "the one of Anita at the beach". The app already knew
+              // who was in each picture and kept it three taps down behind a
+              // menu and a sheet, which for anybody who never opened that menu
+              // is the same as not having it at all.
+              //
+              // Classic does not get it, and that is not an oversight: Classic
+              // is the look people already chose, and adding a row to the top
+              // of their photo grid is not a recolour.
+              if (context.skin.isVivid && stripPeople(_people).isNotEmpty)
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                    child: PeopleStrip(
+                      people: stripPeople(_people),
+                      selected: _personIds,
+                      onToggle: (p) {
+                        _togglePerson(p);
+                        _load(reset: true);
+                      },
+                      onSeeAll: _pickPeople,
+                      thumbUrl: (p) {
+                        final raw = p['cover_url'] as String?;
+                        if (raw == null || raw.isEmpty) return null;
+                        return absoluteMedia(
+                            raw, context.read<Session>().baseUrl ?? '');
+                      },
+                    ),
+                  ),
+                ),
               SliverToBoxAdapter(
                 child: Padding(
                   padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
