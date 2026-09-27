@@ -23,6 +23,7 @@ import '../session.dart';
 import '../theme.dart';
 import '../update.dart';
 import 'dashboard_screen.dart';
+import 'vivid_home.dart';
 import 'documents_screen.dart';
 import 'notes_screen.dart';
 import 'habits_screen.dart';
@@ -246,7 +247,20 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget _screenFor(_Tab t) {
     switch (t.key) {
       case 'home':
-        return DashboardScreen(onOpen: _open, refreshTick: _refreshTick);
+        // WHICH HOME depends on the skin, and it is a different SCREEN
+        // rather than the same one recoloured. Classic opens on money and
+        // dues; Colourful opens on photos and files, which is what the
+        // product actually is. Threading that through one widget would put a
+        // conditional at every level of the tree — the shape where each
+        // later change has to be made twice anyway, in a form where neither
+        // version can be read on its own.
+        return context.skin.isVivid
+            ? VividHome(
+                brand: widget.brand,
+                onOpenPhotos: () => _open('gallery'),
+                onOpenFiles: () => _open('documents'),
+              )
+            : DashboardScreen(onOpen: _open, refreshTick: _refreshTick);
       case 'modules':
         return ModulesScreen(
             onOpen: _open, allowed: _allowed, refreshTick: _refreshTick);
