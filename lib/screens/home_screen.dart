@@ -526,6 +526,56 @@ class _ColourfulNavBar extends StatelessWidget {
     final active = tabs.isEmpty
         ? theme.colorScheme.primary
         : tabs[index].colourIn(skin);
+    // ── A FLOATING BAR IN COLOURFUL ──────────────────────────────────────
+    //
+    // Lifted off the page with a margin and a real corner radius, rather than
+    // welded to the bottom edge. It is the single change that makes the whole
+    // app feel like it has depth, because the bar is the one element on every
+    // screen — and a bar that floats tells you the page continues underneath
+    // it, which is true and which an edge-to-edge bar denies.
+    //
+    // Classic keeps the bar it has always had.
+    if (skin.isVivid) {
+      return GestureDetector(
+        onLongPress: onCustomise,
+        child: SafeArea(
+          top: false,
+          child: Container(
+            margin: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+            decoration: BoxDecoration(
+              color: theme.colorScheme.surface,
+              borderRadius: BorderRadius.circular(24),
+              border: Border.all(
+                  color: theme.colorScheme.outlineVariant
+                      .withValues(alpha: dark ? 1 : 0.6)),
+              boxShadow: [
+                BoxShadow(
+                    color: Colors.black.withValues(alpha: dark ? 0.44 : 0.13),
+                    blurRadius: 24,
+                    offset: const Offset(0, 8)),
+              ],
+            ),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 7, horizontal: 4),
+              child: Row(
+                children: [
+                  for (var i = 0; i < tabs.length; i++)
+                    Expanded(
+                      child: _NavItem(
+                        tab: tabs[i],
+                        selected: i == index,
+                        onTap: () => onTap(i),
+                        onLongPress: onCustomise,
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
     return GestureDetector(
       onLongPress: onCustomise,
       child: Container(

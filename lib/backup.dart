@@ -246,6 +246,24 @@ class BackupService extends ChangeNotifier {
   // a genuine loss on the computer (the count DROPPING) without being fooled by
   // duplicate photos on the phone — see the staleness check in _runFullBackup.
   static const _lastCountKey = 'backup.server.count';
+
+  /// WHEN A RUN LAST FINISHED. Nothing recorded this before, so the app could
+  /// say how many photographs were safe but never when it had last checked —
+  /// and "1,773 safe" with no date is a claim about the past tense that could
+  /// be a year old.
+  static const _lastRunKey = 'backup.last_run';
+
+  /// The last time a run ended, or null if none has. Static so a screen can
+  /// ask without owning a service: Home wants the time, not the engine.
+  static Future<DateTime?> lastRunAt() async {
+    try {
+      final p = await SharedPreferences.getInstance();
+      final ms = p.getInt(_lastRunKey);
+      return ms == null ? null : DateTime.fromMillisecondsSinceEpoch(ms);
+    } catch (_) {
+      return null;
+    }
+  }
   static const _concurrency = 4;
 
   BackupProgress _p = const BackupProgress();
@@ -965,6 +983,12 @@ class BackupService extends ChangeNotifier {
 
     await _flush();
     await _reportFailures();
+    try {
+      final p = await SharedPreferences.getInstance();
+      await p.setInt(_lastRunKey, DateTime.now().millisecondsSinceEpoch);
+    } catch (_) {
+      // A missing timestamp hides one line on Home. It must never fail a run.
+    }
 
     // A run where NOTHING got through is a failure, not a success with a small
     // number in it. The old message was "Backed up. 0 new, 0 already there."

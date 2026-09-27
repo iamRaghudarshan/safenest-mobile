@@ -18,8 +18,10 @@ library;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../backup.dart';
 import '../session.dart';
 import '../theme.dart';
+import '../widgets/library_growth.dart';
 import '../widgets/memory_hero.dart';
 import '../widgets/photo_tile.dart' show absoluteMedia;
 import 'backup_screen.dart';
@@ -76,6 +78,8 @@ class VividHomeData {
     this.people = const [],
     this.albums = const [],
     this.kinds = const {},
+    this.months = const [],
+    this.lastRun,
   });
 
   final String name;
@@ -93,6 +97,17 @@ class VividHomeData {
   final List<VividCard> albums;
   final Map<String, int> kinds;
 
+  /// The last twelve months of the phone's own library, oldest first.
+  ///
+  /// Counted from the PHONE rather than asked of the server, and that is the
+  /// honest source: the server has no photos-per-month endpoint, and the
+  /// question people mean by "added this month" is what they took, which is
+  /// exactly what the phone knows.
+  final List<int> months;
+
+  /// When the backup last finished, for the pill in the header.
+  final DateTime? lastRun;
+
   VividHomeData copyWith({
     String? name,
     int? photos,
@@ -104,6 +119,8 @@ class VividHomeData {
     List<VividCard>? people,
     List<VividCard>? albums,
     Map<String, int>? kinds,
+    List<int>? months,
+    DateTime? lastRun,
   }) =>
       VividHomeData(
         name: name ?? this.name,
@@ -116,6 +133,8 @@ class VividHomeData {
         people: people ?? this.people,
         albums: albums ?? this.albums,
         kinds: kinds ?? this.kinds,
+        months: months ?? this.months,
+        lastRun: lastRun ?? this.lastRun,
       );
 }
 
@@ -129,6 +148,30 @@ String vividCount(int? v) {
     b.write(s[i]);
   }
   return b.toString();
+}
+
+/// "Tuesday, 27 September" — written out, because a date is read rather than
+/// parsed and 27/09 is a format not a sentence.
+String vividDate(DateTime d) {
+  const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday',
+      'Saturday', 'Sunday'];
+  const months = ['January', 'February', 'March', 'April', 'May', 'June',
+      'July', 'August', 'September', 'October', 'November', 'December'];
+  return '${days[d.weekday - 1]}, ${d.day} ${months[d.month - 1]}';
+}
+
+/// "14 min ago", "3 hours ago", "Yesterday". For the header pill, where the
+/// only thing that matters is whether it was recent.
+String vividAgo(DateTime then, DateTime now) {
+  final d = now.difference(then);
+  if (d.inMinutes < 1) return 'just now';
+  if (d.inMinutes < 60) return '${d.inMinutes} min ago';
+  if (d.inHours < 24) {
+    return '${d.inHours} hour${d.inHours == 1 ? '' : 's'} ago';
+  }
+  if (d.inDays == 1) return 'yesterday';
+  if (d.inDays < 7) return '${d.inDays} days ago';
+  return '${(d.inDays / 7).round()} weeks ago';
 }
 
 String vividGreeting(DateTime now) {
@@ -276,6 +319,19 @@ class _VividHomeState extends State<VividHome> {
     if (kinds.isNotEmpty) next = next.copyWith(kinds: kinds);
 
     if (mounted) setState(() => _d = next);
+
+    // THE PHONE'S OWN LIBRARY, LAST. Twelve platform counts are cheap but not
+    // free, and none of the screen above waits on them — the card appears
+    // when it has an answer rather than holding the page for one.
+    final when = await BackupService.lastRunAt();
+    if (when != null && mounted) {
+      setState(() => _d = _d.copyWith(lastRun: when));
+    }
+
+    final months = await countByMonth();
+    if (months.isNotEmpty && mounted) {
+      setState(() => _d = _d.copyWith(months: months));
+    }
   }
 
   @override
@@ -288,7 +344,16 @@ class _VividHomeState extends State<VividHome> {
       body: RefreshIndicator(
         onRefresh: _load,
         child: ListView(padding: EdgeInsets.zero, children: [
-          _Header(brand: widget.brand, name: _d.name, colour: t.brand),
+          _Header(
+            brand: widget.brand,
+            name: _d.name,
+            colour: t.brand,
+            ok: t.ok,
+            safe: _d.photos == null && _d.documents == null
+                ? null
+                : (_d.photos ?? 0) + (_d.documents ?? 0),
+            lastRun: _d.lastRun,
+          ),
 
           // ── THE PHOTOGRAPH ────────────────────────────────────────────
           if (_d.memory != null)
@@ -315,6 +380,12 @@ class _VividHomeState extends State<VividHome> {
               onFiles: widget.onOpenFiles,
             ),
           ),
+
+          if (_d.months.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(18, 12, 18, 0),
+              child: LibraryGrowth(months: _d.months),
+            ),
 
           if (_d.people.isNotEmpty) ...[
             _SectionHead(
@@ -377,51 +448,142 @@ class _VividHomeState extends State<VividHome> {
 }
 
 class _Header extends StatelessWidget {
-  const _Header({required this.brand, required this.name, required this.colour});
+  const _Header({
+    required this.brand,
+    required this.name,
+    required this.colour,
+    required this.ok,
+    this.safe,
+    this.lastRun,
+  });
 
   final Brand brand;
   final String name;
   final Color colour;
+  final Color ok;
+
+  /// How many items the computer holds, and when it last checked.
+  final int? safe;
+  final DateTime? lastRun;
 
   @override
   Widget build(BuildContext context) {
     final media = MediaQuery.of(context);
+    final now = DateTime.now();
     return Container(
-      padding: EdgeInsets.fromLTRB(18, media.padding.top + 14, 18, 20),
+      padding: EdgeInsets.fromLTRB(18, media.padding.top + 14, 18, 18),
       decoration: BoxDecoration(
         color: colour,
         borderRadius: const BorderRadius.vertical(bottom: Radius.circular(26)),
       ),
-      child: Row(children: [
-        Expanded(
-          child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(vividGreeting(DateTime.now()),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          Expanded(
+            child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // THE DATE, not the greeting alone. "Good morning" says
+                  // nothing a person does not already know; the date is the
+                  // one line that places the photographs below it in time.
+                  Text(vividDate(now),
+                      style: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.white70)),
+                  const SizedBox(height: 1),
+                  Text(
+                      name.isEmpty
+                          ? brand.shortName
+                          : '${vividGreeting(now).split(' ').last.replaceFirstMapped(RegExp('^.'), (m) => m[0]!.toUpperCase())}, $name',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                          fontSize: 22,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: -0.4,
+                          color: Colors.white)),
+                ]),
+          ),
+          const SizedBox(width: 10),
+          // DRAWN HERE rather than reusing the shared Avatar, and the reason
+          // is the contract this screen rests on: `debugData` exists so Home
+          // renders with no server behind it, and the shared Avatar reads a
+          // Session. One widget needing a provider is enough to make the
+          // whole page untestable — and it took the layout down with it when
+          // the provider was missing, which is how it was found.
+          _Initial(name: name.isEmpty ? brand.shortName : name),
+        ]),
+        if (safe != null) ...[
+          const SizedBox(height: 14),
+          // THE REASSURANCE, AS A PILL. It was a whole row of its own before;
+          // as a pill it reads in one glance and takes the width it needs
+          // rather than the width it is given, which is what stops it looking
+          // like another item of content.
+          Container(
+            padding: const EdgeInsets.fromLTRB(9, 7, 13, 7),
+            decoration: BoxDecoration(
+              color: ok.withValues(alpha: 0.22),
+              borderRadius: BorderRadius.circular(99),
+            ),
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              Container(
+                width: 16,
+                height: 16,
+                decoration: BoxDecoration(color: ok, shape: BoxShape.circle),
+                child: const Icon(Icons.check, size: 11, color: Colors.white),
+              ),
+              const SizedBox(width: 8),
+              Text('${vividCount(safe)} safe',
+                  style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      color: Colors.white)),
+              if (lastRun != null) ...[
+                const SizedBox(width: 7),
+                Container(
+                    width: 3,
+                    height: 3,
+                    decoration: const BoxDecoration(
+                        color: Colors.white38, shape: BoxShape.circle)),
+                const SizedBox(width: 7),
+                Text(vividAgo(lastRun!, now),
                     style: const TextStyle(
-                        fontSize: 12.5,
+                        fontSize: 12,
                         fontWeight: FontWeight.w600,
                         color: Colors.white70)),
-                const SizedBox(height: 1),
-                Text(name.isEmpty ? brand.shortName : name,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                        fontSize: 23,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: -0.4,
-                        color: Colors.white)),
-              ]),
-        ),
-        IconButton(
-          onPressed: () {},
-          icon: const Icon(Icons.search, color: Colors.white),
-          style: IconButton.styleFrom(
-            backgroundColor: Colors.white.withValues(alpha: 0.16),
-            minimumSize: const Size(44, 44),
+              ],
+            ]),
           ),
-        ),
+        ],
       ]),
+    );
+  }
+}
+
+/// The person, as one letter on a disc.
+///
+/// A photograph of them would be better and the app does not have one: this
+/// is their own account, not a contact.
+class _Initial extends StatelessWidget {
+  const _Initial({required this.name});
+
+  final String name;
+
+  @override
+  Widget build(BuildContext context) {
+    final letter = name.trim().isEmpty ? '?' : name.trim()[0].toUpperCase();
+    return Container(
+      width: 40,
+      height: 40,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: Colors.white.withValues(alpha: 0.2),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.38), width: 2),
+      ),
+      child: Text(letter,
+          style: const TextStyle(
+              fontSize: 16, fontWeight: FontWeight.w800, color: Colors.white)),
     );
   }
 }
