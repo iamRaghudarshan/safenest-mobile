@@ -96,6 +96,33 @@ void main() {
     );
   });
 
+  for (final skin in AppSkin.values) {
+    testWidgets('an ordinary page in ${skin.name}', (tester) async {
+      tester.view.physicalSize = const Size(390 * 3, 620 * 3);
+      tester.view.devicePixelRatio = 3.0;
+      addTearDown(tester.view.reset);
+      await _font();
+      final key = GlobalKey();
+      await tester.pumpWidget(MaterialApp(
+        theme: buildTheme(const Brand(), Brightness.light, skin: skin),
+        home: RepaintBoundary(key: key, child: _ordinaryPage()),
+      ));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      await tester.runAsync(() async {
+        final b =
+            key.currentContext!.findRenderObject() as RenderRepaintBoundary;
+        final img = await b.toImage(pixelRatio: 2);
+        final png = await img.toByteData(format: ui.ImageByteFormat.png);
+        img.dispose();
+        if (png != null && Directory(_out).existsSync()) {
+          File('$_out\\page_${skin.name}.png')
+              .writeAsBytesSync(png.buffer.asUint8List());
+        }
+      });
+    });
+  }
+
   testWidgets('the faces on Photos', (tester) async {
     await _shoot(
       tester,
@@ -119,3 +146,40 @@ void main() {
 }
 
 void _ignore(String _) {}
+
+/// A page nobody hand-edited, in both skins, side by side.
+///
+/// Ordinary Material widgets only — no SafeNest screen. What it shows is
+/// whether the LOOK is inherited, which is the difference between a skin that
+/// reaches six screens and one that reaches all of them.
+Widget _ordinaryPage() => Scaffold(
+      appBar: AppBar(
+        title: const Text('Reminders'),
+        actions: const [Icon(Icons.more_vert), SizedBox(width: 8)],
+      ),
+      body: ListView(
+        padding: const EdgeInsets.all(14),
+        children: [
+          const TextField(
+              decoration: InputDecoration(hintText: 'Search reminders')),
+          const SizedBox(height: 12),
+          const Card(
+            child: ListTile(
+              title: Text('Car insurance renewal'),
+              subtitle: Text('Due today'),
+            ),
+          ),
+          const SizedBox(height: 10),
+          const Card(
+            child: ListTile(
+              title: Text("Anita's birthday"),
+              subtitle: Text('Tomorrow'),
+            ),
+          ),
+          const SizedBox(height: 16),
+          FilledButton(onPressed: () {}, child: const Text('Add a reminder')),
+          const SizedBox(height: 10),
+          OutlinedButton(onPressed: () {}, child: const Text('Show past ones')),
+        ],
+      ),
+    );

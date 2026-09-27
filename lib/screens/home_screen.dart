@@ -45,7 +45,20 @@ class _Tab {
   /// Each tab keeps its own colour in the bottom bar, always — not a wall of
   /// grey with one tinted item. It makes the bar read at a glance and matches
   /// the colourful module tiles.
+  ///
+  /// This is the CLASSIC colour, baked in beside the icon. `colourIn` is what
+  /// screens should ask, because Colourful assigns module hues from the theme
+  /// and a bar painted from these constants would be the one place in that
+  /// skin where Photos is not blue.
   final Color colour;
+
+  /// This tab's colour in the skin being drawn.
+  Color colourIn(SkinTokens t) => t.isVivid
+      // `mod` is the module key where there is one; where there is not, the
+      // tab key doubles as it ('home', 'modules', 'search'), and anything
+      // neither map names falls back to the brand rather than to nothing.
+      ? t.modules[mod ?? key] ?? t.brand
+      : colour;
 
   /// Hidden unless this module is permitted — the `mod` field in App.tsx.
   final String? mod;
@@ -373,10 +386,11 @@ class _HomeScreenState extends State<HomeScreen> {
                 width: 40,
                 height: 40,
                 decoration: BoxDecoration(
-                  color: t.colour.withValues(alpha: 0.16),
+                  color: t.colourIn(context.skin).withValues(alpha: 0.16),
                   borderRadius: BorderRadius.circular(12),
                 ),
-                child: Icon(t.activeIcon, color: t.colour, size: 20),
+                child: Icon(t.activeIcon,
+                    color: t.colourIn(context.skin), size: 20),
               );
           return SafeArea(
             child: Padding(
@@ -449,7 +463,8 @@ class _HomeScreenState extends State<HomeScreen> {
                     children: [
                       for (final t in available)
                         ActionChip(
-                          avatar: Icon(t.icon, size: 18, color: t.colour),
+                          avatar: Icon(t.icon,
+                              size: 18, color: t.colourIn(context.skin)),
                           label: Text(t.label),
                           onPressed: inBar.length >= Customize.navBarMax
                               ? null
@@ -506,7 +521,10 @@ class _ColourfulNavBar extends StatelessWidget {
     final theme = Theme.of(context);
     final dark = theme.brightness == Brightness.dark;
     final colourful = Customize.colourfulNav;
-    final active = tabs.isEmpty ? theme.colorScheme.primary : tabs[index].colour;
+    final skin = context.skin;
+    final active = tabs.isEmpty
+        ? theme.colorScheme.primary
+        : tabs[index].colourIn(skin);
     return GestureDetector(
       onLongPress: onCustomise,
       child: Container(
@@ -574,7 +592,7 @@ class _NavItem extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final colour = tab.colour;
+    final colour = tab.colourIn(context.skin);
     final colourful = Customize.colourfulNav;
 
     // Plain style: a simple monochrome icon that tints to the tab's colour when

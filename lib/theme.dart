@@ -15,6 +15,7 @@
 library;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';  // SystemUiOverlayStyle on the app bar
 
 /// --brand and --brand-2. Buttons are a gradient of the two, not a flat fill.
 const kBrand = Color(0xFF0176D3);
@@ -243,9 +244,13 @@ List<BoxShadow> softShadow(bool dark) => [
     ];
 
 /// The glow under a filled button — rgba(91, 61, 245, 0.32).
-List<BoxShadow> brandGlow() => [
+///
+/// Takes the colour rather than reading the constant, so the glow under a
+/// button matches the button. Defaults to classic's, which is what every
+/// existing caller meant.
+List<BoxShadow> brandGlow([Color colour = kBrand]) => [
       BoxShadow(
-        color: kBrand.withValues(alpha: 0.32),
+        color: colour.withValues(alpha: 0.32),
         blurRadius: 20,
         offset: const Offset(0, 8),
       ),
@@ -334,32 +339,70 @@ ThemeData buildTheme(Brand brand, Brightness brightness,
     // Transparent so the app-wide NatureBackdrop (mounted in main.dart via
     // MaterialApp.builder) shows behind every screen. Cards, app bars and sheets
     // keep their own opaque surfaces, so content stays legible over the scene.
-    scaffoldBackgroundColor: Colors.transparent,
+    // COLOURFUL HAS A GROUND OF ITS OWN.
+    //
+    // Classic is transparent so the app-wide backdrop — the nature scene,
+    // mounted in main.dart — shows through every screen. Colourful is built
+    // on a flat, cool, near-white page with saturated blocks on it, and a
+    // photograph behind that fights every one of them: the coloured header
+    // stops reading as a header and starts reading as another picture.
+    //
+    // So this skin paints its own page. The backdrop setting still exists and
+    // still applies to Classic; it simply has nothing to show through here.
+    scaffoldBackgroundColor: vivid ? bg : Colors.transparent,
 
     // -apple-system on iOS, Roboto on Android — which is what the CSS asks for
     // by naming the system stack. Flutter uses each platform's default already,
     // so naming a font here would make it LESS like the web app, not more.
     fontFamily: null,
 
+    // THE APP BAR IS WHAT MAKES A SKIN REACH EVERY SCREEN.
+    //
+    // The redesign was hand-built on six screens and the other thirty kept
+    // Classic's plain bar, which is worse than not having a skin at all: an
+    // app that changes appearance depending on which page you are on reads as
+    // broken rather than as themed. Almost every screen in this app has an
+    // AppBar and almost none of them style it, so one entry here is the
+    // difference between six screens and all of them.
+    //
+    // Filled with the brand colour, white on it, no elevation. That is the
+    // coloured head from the design, applied by inheritance.
     appBarTheme: AppBarTheme(
       centerTitle: false,
       elevation: 0,
       scrolledUnderElevation: 0,
-      backgroundColor: bg,          // the web top bar sits on the page, not on a card
-      foregroundColor: ink,
+      backgroundColor: vivid ? t.brand : bg,
+      foregroundColor: vivid ? Colors.white : ink,
+      iconTheme: IconThemeData(color: vivid ? Colors.white : ink),
+      actionsIconTheme: IconThemeData(color: vivid ? Colors.white : ink),
       titleTextStyle: TextStyle(
-        color: ink,
-        fontSize: 21,
-        fontWeight: FontWeight.w700,
+        color: vivid ? Colors.white : ink,
+        fontSize: vivid ? 20 : 21,
+        fontWeight: FontWeight.w800,
         letterSpacing: -0.3,
       ),
+      systemOverlayStyle:
+          vivid ? SystemUiOverlayStyle.light : null,
+      shape: vivid
+          ? const RoundedRectangleBorder(
+              borderRadius:
+                  BorderRadius.vertical(bottom: Radius.circular(22)))
+          : null,
     ),
 
     cardTheme: CardThemeData(
       color: elev,
       elevation: 0,
       margin: EdgeInsets.zero,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(t.radius)),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(t.radius),
+        // A hairline in Colourful, because its cards sit on a light cool
+        // ground where a white card with no edge simply disappears. Classic's
+        // ground is warmer and its cards carry a shadow instead.
+        side: vivid
+            ? BorderSide(color: line)
+            : BorderSide.none,
+      ),
       clipBehavior: Clip.antiAlias,
     ),
 
@@ -376,23 +419,35 @@ ThemeData buildTheme(Brand brand, Brightness brightness,
 
     inputDecorationTheme: InputDecorationTheme(
       filled: true,
+      // WHITE, WITH A HAIRLINE — in both skins.
+      //
+      // The first attempt filled Colourful's fields with the page colour,
+      // reasoning that a white field on a white card needs an outline to
+      // exist. It does, but that is the rare case: most screens put a search
+      // box straight onto the PAGE, and there a page-coloured field with no
+      // border is invisible. Rendering an ordinary screen showed a search box
+      // that simply was not there.
+      //
+      // A raised fill with a hairline reads on both — on the page it lifts,
+      // on a card the line holds it.
       fillColor: elev,
       // .searchbar — 13px radius, a real 1px line, not Material's underline.
       border: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(13),
+        borderRadius: BorderRadius.circular(vivid ? 15 : 13),
         borderSide: BorderSide(color: line),
       ),
       enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(13),
+        borderRadius: BorderRadius.circular(vivid ? 15 : 13),
         borderSide: BorderSide(color: line),
       ),
       focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(13),
-        borderSide: BorderSide(color: t.brand, width: 1.6),
+        borderRadius: BorderRadius.circular(vivid ? 15 : 13),
+        borderSide: BorderSide(color: t.brand, width: vivid ? 1.8 : 1.6),
       ),
       hintStyle: TextStyle(color: inkFaint, fontSize: 15),
       labelStyle: TextStyle(color: inkSoft, fontSize: 14),
-      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+      contentPadding: EdgeInsets.symmetric(
+          horizontal: vivid ? 16 : 14, vertical: vivid ? 16 : 14),
     ),
 
     // .btn is a GRADIENT, which ThemeData cannot express — see BrandButton in
@@ -402,18 +457,22 @@ ThemeData buildTheme(Brand brand, Brightness brightness,
       style: FilledButton.styleFrom(
         backgroundColor: t.brand,
         foregroundColor: Colors.white,
-        minimumSize: const Size.fromHeight(48),
+        minimumSize: Size.fromHeight(vivid ? 54 : 48),
         padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 13),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-        textStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(vivid ? 16 : 14)),
+        textStyle:
+            TextStyle(fontSize: vivid ? 15.5 : 15, fontWeight: FontWeight.w700),
       ),
     ),
     outlinedButtonTheme: OutlinedButtonThemeData(
       style: OutlinedButton.styleFrom(
         foregroundColor: ink,
-        minimumSize: const Size.fromHeight(48),
-        side: BorderSide(color: line),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        backgroundColor: vivid ? elev : null,
+        minimumSize: Size.fromHeight(vivid ? 52 : 48),
+        side: BorderSide(color: line, width: vivid ? 1.5 : 1),
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(vivid ? 16 : 14)),
         textStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
       ),
     ),
@@ -469,13 +528,22 @@ ThemeData buildTheme(Brand brand, Brightness brightness,
       labelStyle: TextStyle(fontSize: 13, color: ink, fontWeight: FontWeight.w600),
       secondaryLabelStyle: const TextStyle(
           fontSize: 13, color: Colors.white, fontWeight: FontWeight.w600),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(vivid ? 999 : 10)),
+      padding: vivid
+          ? const EdgeInsets.symmetric(horizontal: 6, vertical: 8)
+          : null,
     ),
 
+    // Sheets and dialogs are where a skin is most often forgotten, and they
+    // are half the app: every picker, every confirm, every "why did this
+    // fail" lives in one. Left at Classic's radius they are the seam where
+    // Colourful visibly stops.
     bottomSheetTheme: BottomSheetThemeData(
       backgroundColor: elev,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      shape: RoundedRectangleBorder(
+        borderRadius:
+            BorderRadius.vertical(top: Radius.circular(vivid ? 26 : 20)),
       ),
     ),
 

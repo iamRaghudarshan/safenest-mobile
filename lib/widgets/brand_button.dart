@@ -61,14 +61,18 @@ class BrandButton extends StatelessWidget {
       opacity: enabled ? 1 : 0.55,
       child: DecoratedBox(
         decoration: BoxDecoration(
-          gradient: const LinearGradient(
+          gradient: LinearGradient(
             // 135deg in CSS starts top-left and runs to bottom-right.
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
-            colors: [kBrand, kBrand2],
+            // FROM THE SKIN. This is the app's primary button and it is on
+            // nearly every screen, so a hard-coded gradient here is the one
+            // control that stays in the other look no matter what the theme
+            // says — and the most visible possible place for that to happen.
+            colors: [context.skin.brand, context.skin.brand2],
           ),
-          borderRadius: BorderRadius.circular(14),
-          boxShadow: enabled ? brandGlow() : null,
+          borderRadius: BorderRadius.circular(context.skin.isVivid ? 16 : 14),
+          boxShadow: enabled ? brandGlow(context.skin.brand) : null,
         ),
         child: Material(
           color: Colors.transparent,
@@ -211,12 +215,12 @@ class Segmented extends StatelessWidget {
                   padding: EdgeInsets.symmetric(
                       vertical: 9, horizontal: tight ? 2 : 6),
                   decoration: BoxDecoration(
-                    color: i == index ? kBrand : Colors.transparent,
+                    color: i == index ? context.skin.brand : Colors.transparent,
                     borderRadius: BorderRadius.circular(10),
                     boxShadow: i == index
                         ? [
                             BoxShadow(
-                              color: kBrand.withValues(alpha: 0.30),
+                              color: context.skin.brand.withValues(alpha: 0.30),
                               blurRadius: 12,
                               offset: const Offset(0, 4),
                             )
