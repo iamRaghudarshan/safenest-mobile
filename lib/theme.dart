@@ -46,6 +46,173 @@ const kDanger = Color(0xFFE5484D);  // --danger
 const kRadius = 18.0;
 const kRadiusSm = 12.0;
 
+// ───────────────────────── the second look ──────────────────────────────
+//
+// THE APP HAS TWO SKINS NOW, and this is the only file that knows the
+// difference. `classic` is everything above: the web app's palette,
+// transcribed, so the phone and the browser read as one product. `vivid` is
+// the redesign, where colour carries MEANING rather than decoration — one hue
+// per module, in the same place every time, so people navigate by colour
+// without reading labels.
+//
+// Classic stays the default. An update that silently repaints somebody's app
+// is a shock rather than a feature; this one is reached by choosing it in
+// Profile → Personalise.
+//
+// What a skin may change is deliberately narrow: colour, shape and weight. It
+// does NOT change the typeface, because the app bundles no fonts and adding
+// one is a few hundred kilobytes in every download — a real cost, and a
+// separate decision from picking a palette.
+
+/// Vivid's ground and ink. Cooler and brighter than classic's.
+const _vividBg = Color(0xFFF5F7FC);
+const _vividElev = Color(0xFFFFFFFF);
+const _vividInk = Color(0xFF10131C);
+const _vividInkSoft = Color(0xFF3B4254);
+const _vividInkFaint = Color(0xFF5A6275);
+const _vividLine = Color(0xFFE4E8F0);
+
+const _vividDarkBg = Color(0xFF0B0D11);
+const _vividDarkElev = Color(0xFF161A22);
+const _vividDarkInk = Color(0xFFF2F4F7);
+const _vividDarkInkSoft = Color(0xFFB4BCCA);
+const _vividDarkInkFaint = Color(0xFF7A8598);
+const _vividDarkLine = Color(0xFF232935);
+
+/// A deeper blue than classic's #0176D3, and the reason is contrast rather
+/// than taste: vivid puts white text and white icons ON the brand colour —
+/// the home header, the primary button, the Photos tile — and #0176D3 carries
+/// white at about 3.4:1, under the 4.5:1 that body-sized text needs. #1559C0
+/// clears it.
+const kBrandVivid = Color(0xFF1559C0);
+const kBrandVivid2 = Color(0xFF1668DC);
+
+const _vividOk = Color(0xFF0A7350);
+const _vividWarn = Color(0xFF9A5B08);
+const _vividDanger = Color(0xFFB3261E);
+
+/// Vivid's module hues. The two that matter lead: PHOTOS is blue and FILES is
+/// green, everywhere, without exception — the tile on Home, the tab, the chip
+/// on a search result, the segment of the storage bar.
+///
+/// Every one of these carries white text at 4.5:1 or better, because in this
+/// skin they are used as FILLS and not only as dots. Classic's accents are
+/// lighter and were never asked to do that.
+const kModuleColoursVivid = <String, Color>{
+  'gallery': Color(0xFF1668DC),     // photos — the first of the two
+  'documents': Color(0xFF0A7350),   // files — the second
+  'expenses': Color(0xFF9A5B08),
+  'reminders': Color(0xFFAE1250),
+  'notes': Color(0xFF5B2FC4),
+  'vault': Color(0xFF10459A),
+  'habits': Color(0xFF00676F),
+  'todos': Color(0xFF0E7490),
+  'loans': Color(0xFF4A24AD),
+  'cards': Color(0xFFA81B62),
+  'insurance': Color(0xFF0B6CA8),
+  'investments': Color(0xFF0A7350),
+};
+
+const kRadiusVivid = 20.0;
+const kRadiusVividSm = 14.0;
+
+/// Which look the app is wearing.
+enum AppSkin { classic, vivid }
+
+/// Everything a skin decides, in one object, so no screen has to ask "which
+/// skin am I?" — it asks the theme for a colour and gets the right one.
+class SkinTokens {
+  const SkinTokens({
+    required this.skin,
+    required this.brand,
+    required this.brand2,
+    required this.ok,
+    required this.warn,
+    required this.danger,
+    required this.radius,
+    required this.radiusSm,
+    required this.modules,
+  });
+
+  final AppSkin skin;
+  final Color brand;
+  final Color brand2;
+  final Color ok;
+  final Color warn;
+  final Color danger;
+  final double radius;
+  final double radiusSm;
+  final Map<String, Color> modules;
+
+  bool get isVivid => skin == AppSkin.vivid;
+
+  /// A module's colour in the current skin, falling back to the brand for a
+  /// module neither map names — a new module must never render colourless.
+  Color module(String key) => modules[key] ?? brand;
+
+  static const classic = SkinTokens(
+    skin: AppSkin.classic,
+    brand: kBrand,
+    brand2: kBrand2,
+    ok: kOk,
+    warn: kWarn,
+    danger: kDanger,
+    radius: kRadius,
+    radiusSm: kRadiusSm,
+    modules: kModuleColours,
+  );
+
+  static const vivid = SkinTokens(
+    skin: AppSkin.vivid,
+    brand: kBrandVivid,
+    brand2: kBrandVivid2,
+    ok: _vividOk,
+    warn: _vividWarn,
+    danger: _vividDanger,
+    radius: kRadiusVivid,
+    radiusSm: kRadiusVividSm,
+    modules: kModuleColoursVivid,
+  );
+
+  static SkinTokens of(AppSkin skin) =>
+      skin == AppSkin.vivid ? vivid : classic;
+}
+
+/// The skin a widget is being built under.
+///
+/// Carried as a ThemeExtension rather than read from `Customize` at the point
+/// of use, and that is the whole point: a widget asks the THEME it was handed,
+/// so a test can render either look without touching global state, and a
+/// preview of one skin inside a screen drawn in the other is a plain
+/// `Theme(data: ...)` wrapper instead of a special case.
+class SkinExtension extends ThemeExtension<SkinExtension> {
+  const SkinExtension(this.tokens);
+
+  final SkinTokens tokens;
+
+  @override
+  SkinExtension copyWith({SkinTokens? tokens}) =>
+      SkinExtension(tokens ?? this.tokens);
+
+  /// Skins do not cross-fade: a half-classic, half-vivid frame is not a look
+  /// anybody chose. It flips at the midpoint.
+  @override
+  SkinExtension lerp(ThemeExtension<SkinExtension>? other, double t) {
+    if (other is! SkinExtension) return this;
+    return t < 0.5 ? this : other;
+  }
+}
+
+/// The skin in force, for any widget with a BuildContext.
+///
+/// Never null: a theme built without the extension (an older test, a widget
+/// rendered under a bare ThemeData) answers classic, which is what the app
+/// looked like before any of this existed.
+extension SkinAccess on BuildContext {
+  SkinTokens get skin =>
+      Theme.of(this).extension<SkinExtension>()?.tokens ?? SkinTokens.classic;
+}
+
 /// The per-module accents, exactly as the web app assigns them. These are what
 /// make a list of modules recognisable at a glance, and inventing a second set
 /// of colours for the phone would undo that.
@@ -108,28 +275,49 @@ class Brand {
       );
 }
 
-ThemeData buildTheme(Brand brand, Brightness brightness) {
+/// [skin] defaults to classic so every existing caller — and every one of the
+/// three hundred tests that builds a theme — keeps the app it already had.
+/// Only main.dart passes the other one, from the saved preference.
+ThemeData buildTheme(Brand brand, Brightness brightness,
+    {AppSkin skin = AppSkin.classic}) {
   final dark = brightness == Brightness.dark;
-  final bg = dark ? _darkBg : _lightBg;
-  final elev = dark ? _darkElev : _lightElev;
-  final ink = dark ? _darkInk : _lightInk;
-  final inkSoft = dark ? _darkInkSoft : _lightInkSoft;
-  final inkFaint = dark ? _darkInkFaint : _lightInkFaint;
-  final line = dark ? _darkLine : _lightLine;
+  final t = SkinTokens.of(skin);
+  final vivid = t.isVivid;
+
+  final bg = vivid
+      ? (dark ? _vividDarkBg : _vividBg)
+      : (dark ? _darkBg : _lightBg);
+  final elev = vivid
+      ? (dark ? _vividDarkElev : _vividElev)
+      : (dark ? _darkElev : _lightElev);
+  final ink = vivid
+      ? (dark ? _vividDarkInk : _vividInk)
+      : (dark ? _darkInk : _lightInk);
+  final inkSoft = vivid
+      ? (dark ? _vividDarkInkSoft : _vividInkSoft)
+      : (dark ? _darkInkSoft : _lightInkSoft);
+  final inkFaint = vivid
+      ? (dark ? _vividDarkInkFaint : _vividInkFaint)
+      : (dark ? _darkInkFaint : _lightInkFaint);
+  final line = vivid
+      ? (dark ? _vividDarkLine : _vividLine)
+      : (dark ? _darkLine : _lightLine);
 
   final scheme = ColorScheme(
     brightness: brightness,
-    primary: kBrand,
+    primary: t.brand,
     onPrimary: Colors.white,
-    primaryContainer: kBrand.withValues(alpha: dark ? 0.24 : 0.12),
-    onPrimaryContainer: dark ? Colors.white : kBrand,
-    secondary: kBrand2,
+    primaryContainer: t.brand.withValues(alpha: dark ? 0.24 : 0.12),
+    onPrimaryContainer: dark ? Colors.white : t.brand,
+    secondary: t.brand2,
     onSecondary: Colors.white,
-    error: kDanger,
+    error: t.danger,
     onError: Colors.white,
     surface: elev,
     onSurface: ink,
-    surfaceContainerHighest: dark ? const Color(0xFF1F2133) : const Color(0xFFEDEEF6),
+    surfaceContainerHighest: vivid
+        ? (dark ? const Color(0xFF212733) : const Color(0xFFEBEEF5))
+        : (dark ? const Color(0xFF1F2133) : const Color(0xFFEDEEF6)),
     onSurfaceVariant: inkSoft,
     outline: inkFaint,
     outlineVariant: line,
@@ -139,6 +327,10 @@ ThemeData buildTheme(Brand brand, Brightness brightness) {
     useMaterial3: true,
     brightness: brightness,
     colorScheme: scheme,
+    // The skin travels WITH the theme, so `context.skin` answers correctly
+    // anywhere below a MaterialApp — including inside a Theme() override,
+    // which is how one skin gets previewed while the app wears the other.
+    extensions: <ThemeExtension<dynamic>>[SkinExtension(t)],
     // Transparent so the app-wide NatureBackdrop (mounted in main.dart via
     // MaterialApp.builder) shows behind every screen. Cards, app bars and sheets
     // keep their own opaque surfaces, so content stays legible over the scene.
@@ -167,7 +359,7 @@ ThemeData buildTheme(Brand brand, Brightness brightness) {
       color: elev,
       elevation: 0,
       margin: EdgeInsets.zero,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(kRadius)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(t.radius)),
       clipBehavior: Clip.antiAlias,
     ),
 
@@ -196,7 +388,7 @@ ThemeData buildTheme(Brand brand, Brightness brightness) {
       ),
       focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(13),
-        borderSide: const BorderSide(color: kBrand, width: 1.6),
+        borderSide: BorderSide(color: t.brand, width: 1.6),
       ),
       hintStyle: TextStyle(color: inkFaint, fontSize: 15),
       labelStyle: TextStyle(color: inkSoft, fontSize: 14),
@@ -208,7 +400,7 @@ ThemeData buildTheme(Brand brand, Brightness brightness) {
     // anything not using that widget is still the right shape and weight.
     filledButtonTheme: FilledButtonThemeData(
       style: FilledButton.styleFrom(
-        backgroundColor: kBrand,
+        backgroundColor: t.brand,
         foregroundColor: Colors.white,
         minimumSize: const Size.fromHeight(48),
         padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 13),
@@ -227,21 +419,21 @@ ThemeData buildTheme(Brand brand, Brightness brightness) {
     ),
     textButtonTheme: TextButtonThemeData(
       style: TextButton.styleFrom(
-        foregroundColor: kBrand,
+        foregroundColor: t.brand,
         textStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
       ),
     ),
 
     // .seg4 button.on — brand fill, white text, and the same glow.
     tabBarTheme: TabBarThemeData(
-      labelColor: kBrand,
+      labelColor: t.brand,
       unselectedLabelColor: inkSoft,
       labelStyle: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600),
       unselectedLabelStyle: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600),
       indicatorSize: TabBarIndicatorSize.label,
       dividerColor: Colors.transparent,
       indicator: UnderlineTabIndicator(
-        borderSide: const BorderSide(color: kBrand, width: 2.5),
+        borderSide: BorderSide(color: t.brand, width: 2.5),
         borderRadius: BorderRadius.circular(2),
       ),
     ),
@@ -251,28 +443,28 @@ ThemeData buildTheme(Brand brand, Brightness brightness) {
       backgroundColor: elev,
       surfaceTintColor: Colors.transparent,
       elevation: 0,
-      indicatorColor: kBrand.withValues(alpha: dark ? 0.26 : 0.12),
+      indicatorColor: t.brand.withValues(alpha: dark ? 0.26 : 0.12),
       labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
       labelTextStyle: WidgetStateProperty.resolveWith((s) => TextStyle(
             fontSize: 11.5,
             fontWeight: FontWeight.w600,
-            color: s.contains(WidgetState.selected) ? kBrand : inkFaint,
+            color: s.contains(WidgetState.selected) ? t.brand : inkFaint,
           )),
       iconTheme: WidgetStateProperty.resolveWith((s) => IconThemeData(
             size: 24,
-            color: s.contains(WidgetState.selected) ? kBrand : inkFaint,
+            color: s.contains(WidgetState.selected) ? t.brand : inkFaint,
           )),
     ),
 
-    floatingActionButtonTheme: const FloatingActionButtonThemeData(
-      backgroundColor: kBrand,
+    floatingActionButtonTheme: FloatingActionButtonThemeData(
+      backgroundColor: t.brand,
       foregroundColor: Colors.white,
       elevation: 6,
     ),
 
     chipTheme: ChipThemeData(
       backgroundColor: elev,
-      selectedColor: kBrand,
+      selectedColor: t.brand,
       side: BorderSide(color: line),
       labelStyle: TextStyle(fontSize: 13, color: ink, fontWeight: FontWeight.w600),
       secondaryLabelStyle: const TextStyle(
@@ -289,7 +481,7 @@ ThemeData buildTheme(Brand brand, Brightness brightness) {
 
     dialogTheme: DialogThemeData(
       backgroundColor: elev,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(kRadius)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(t.radius)),
     ),
 
     // THE WHOLE SCALE, not six of fifteen.

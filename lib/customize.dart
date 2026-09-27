@@ -20,6 +20,7 @@ class Customize {
   static const _kNavBar = 'nav_bar_v1';          // explicit tabs shown in the bar
   static const _kNavStyle = 'nav_style_v1';     // 'colour' | 'plain'
   static const _kBackground = 'background_v1';   // 'nature' | 'plain'
+  static const _kSkin = 'skin_v1';               // 'classic' | 'vivid'
 
   /// How many tabs the bottom bar can hold before it gets cramped, and the fewest
   /// it may have and still be a bar. Enforced by the customise sheet.
@@ -33,6 +34,20 @@ class Customize {
   static const backgroundNature = 'nature';
   static const backgroundPlain = 'plain';
 
+  /// THE TWO LOOKS.
+  ///
+  /// `classic` is the app exactly as it has always been — the web app's own
+  /// palette, transcribed, so the phone and the browser read as one product.
+  /// It stays the default on purpose: an update that silently repaints
+  /// somebody's app is a shock, not a feature, and this one is reached by a
+  /// person choosing it.
+  ///
+  /// `vivid` is the redesign: photos and files lead, and colour carries
+  /// meaning rather than decoration — one hue per module, everywhere it
+  /// appears, so people navigate by colour without reading.
+  static const skinClassic = 'classic';
+  static const skinVivid = 'vivid';
+
   /// Bumped whenever an order changes, so screens listening rebuild. A plain
   /// ValueNotifier rather than Provider: this is read in two places and wiring a
   /// new provider through main() for a list of strings is more machinery than it
@@ -44,6 +59,7 @@ class Customize {
   static List<String> _navBar = const [];
   static String _navStyle = navStyleColour;
   static String _background = backgroundNature;
+  static String _skin = skinClassic;
   static bool _loaded = false;
 
   /// Safe to call repeatedly — the first read wins and the rest are no-ops.
@@ -55,6 +71,11 @@ class Customize {
     _navBar = p.getStringList(_kNavBar) ?? const [];
     _navStyle = p.getString(_kNavStyle) ?? navStyleColour;
     _background = p.getString(_kBackground) ?? backgroundNature;
+    // Anything unrecognised falls back to classic rather than to whatever was
+    // written: a preference file carried forward from a build that knew a skin
+    // this one does not must not leave the app with no theme at all.
+    final skin = p.getString(_kSkin);
+    _skin = skin == skinVivid ? skinVivid : skinClassic;
     _loaded = true;
   }
 
@@ -81,6 +102,20 @@ class Customize {
     _navStyle = v;
     final p = await SharedPreferences.getInstance();
     await p.setString(_kNavStyle, v);
+    revision.value++;
+  }
+
+  /// Which look the app wears. `classic` unless it says otherwise.
+  static String get skin => _skin;
+  static bool get vividSkin => _skin == skinVivid;
+
+  static Future<void> setSkin(String v) async {
+    _skin = v == skinVivid ? skinVivid : skinClassic;
+    final p = await SharedPreferences.getInstance();
+    await p.setString(_kSkin, _skin);
+    // The whole app is rebuilt from this, not just the screen that set it:
+    // main.dart builds its MaterialApp inside a listener on `revision`, so a
+    // theme change has to travel the same way a nav change does.
     revision.value++;
   }
 

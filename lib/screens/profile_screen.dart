@@ -40,6 +40,7 @@ import '../dates.dart';
 import '../session.dart';
 import '../theme.dart';
 import '../widgets/notification_settings.dart';
+import '../widgets/skin_picker.dart';
 import 'masters_screen.dart';
 import '../widgets/brand_button.dart';
 import '../widgets/avatar.dart';
@@ -248,6 +249,29 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       : null,
                   onTap: () => widget.onThemeChanged?.call(m),
                 ),
+            ],
+          ),
+
+          // THE LOOK OF THE WHOLE APP, shown rather than named.
+          //
+          // Two rows saying "Classic" and "Colourful" would be a setting
+          // nobody can judge without flipping it, and flipping this one
+          // repaints everything. The cards are drawn in the skin they offer,
+          // from the same tokens the app uses, so they cannot drift from the
+          // real thing.
+          SettingsGroup(
+            title: 'Theme',
+            footer: 'Classic is the look this app has always had, matching '
+                'SafeNest in a browser. Colourful leads with your photos and '
+                'files, and gives every part of the app its own colour.',
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(14, 6, 14, 10),
+                child: SkinPicker(
+                  brand: widget.brand,
+                  onChanged: () { if (mounted) setState(() {}); },
+                ),
+              ),
             ],
           ),
 

@@ -127,11 +127,25 @@ class _SafeNestAppState extends State<SafeNestApp> {
         Provider<OfflineRecords>.value(value: _records),
       ],
       child: Consumer<Session>(
-        builder: (context, session, _) => MaterialApp(
+        // THE SKIN IS PART OF THE THEME, so the listener has to be ABOVE the
+        // MaterialApp rather than inside its `builder`.
+        //
+        // There was already a ValueListenableBuilder on the same revision
+        // down in `builder:` below, and it would not have worked for this:
+        // `builder` wraps the app's CHILD, so it rebuilds the backdrop and
+        // leaves `theme:` exactly as it was. Switching skins would have
+        // repainted the wallpaper and nothing else — which looks like a
+        // setting that half works, the worst kind to ship.
+        builder: (context, session, _) => ValueListenableBuilder<int>(
+          valueListenable: Customize.revision,
+          builder: (context, _, _) {
+            final skin =
+                Customize.vividSkin ? AppSkin.vivid : AppSkin.classic;
+            return MaterialApp(
           title: _brand.name,
           debugShowCheckedModeBanner: false,
-          theme: buildTheme(_brand, Brightness.light),
-          darkTheme: buildTheme(_brand, Brightness.dark),
+          theme: buildTheme(_brand, Brightness.light, skin: skin),
+          darkTheme: buildTheme(_brand, Brightness.dark, skin: skin),
           themeMode: _themeMode,
           // A single backdrop behind every route. Scaffolds are transparent (see
           // theme.dart) so it shows through the whole app and the sign-in page.
@@ -175,6 +189,8 @@ class _SafeNestAppState extends State<SafeNestApp> {
                           onThemeChanged: _setThemeMode,
                         )
                       : SignInScreen(brand: _brand, onSignedIn: _loadBrand),
+            );
+          },
         ),
       ),
     );
