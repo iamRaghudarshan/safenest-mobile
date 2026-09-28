@@ -24,6 +24,8 @@ import 'package:safenest/screens/home_screen.dart';
 import 'package:safenest/session.dart';
 import 'package:safenest/theme.dart';
 
+import 'nav_finder.dart';
+
 const _out =
     r'C:\Users\Pro-TEAM\AppData\Local\Temp\claude\d--AI-TUBE\4dda9227-6269-4d42-aac1-051ae3b25e79\scratchpad';
 
@@ -123,8 +125,7 @@ void main() {
           .children
           .length;
       for (var i = 0; i < count; i++) {
-        await tester.tap(find.byType(InkWell).at(
-            tester.widgetList(find.byType(InkWell)).length - count + i));
+        await tester.tap(navItemAt(tester, i));
         await tester.pump(const Duration(milliseconds: 500));
         await shoot('${skin.name}_$i');
       }

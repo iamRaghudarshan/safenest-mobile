@@ -573,6 +573,7 @@ class _ColourfulNavBar extends StatelessWidget {
                     for (var i = 0; i < tabs.length; i++)
                       Expanded(
                         child: _NavItem(
+                          key: ValueKey('nav-${tabs[i].key}'),
                           tab: tabs[i],
                           selected: i == index,
                           onTap: () => onTap(i),
@@ -626,6 +627,7 @@ class _ColourfulNavBar extends StatelessWidget {
                 for (var i = 0; i < tabs.length; i++)
                   Expanded(
                     child: _NavItem(
+                      key: ValueKey('nav-${tabs[i].key}'),
                       tab: tabs[i],
                       selected: i == index,
                       onTap: () => onTap(i),
@@ -642,8 +644,14 @@ class _ColourfulNavBar extends StatelessWidget {
 }
 
 class _NavItem extends StatelessWidget {
+  // The key is what makes the bar addressable from a test. Tests used to reach
+  // it by counting InkWells and taking the last N, which is arithmetic over
+  // whatever the selected screen happened to render — it worked, until a slow
+  // run made it not, and a flaky test is worse than none because it teaches
+  // people to re-run rather than look.
   const _NavItem(
-      {required this.tab,
+      {super.key,
+      required this.tab,
       required this.selected,
       required this.onTap,
       required this.onLongPress});

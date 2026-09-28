@@ -25,6 +25,8 @@ import 'package:safenest/screens/home_screen.dart';
 import 'package:safenest/session.dart';
 import 'package:safenest/theme.dart';
 
+import 'nav_finder.dart';
+
 /// EVERY provider main.dart supplies, not just the one a screen happened to
 /// need. A shell test that mounts real screens has to stand them up the way
 /// the app does — with Session alone, PhotosHome threw ProviderNotFound, the
@@ -178,12 +180,8 @@ void main() {
       for (var i = 0; i < count; i++) {
         // Tap the tab by its position in the bar rather than by label, so this
         // does not have to know which tabs a skin ships.
-        final items = find.descendant(
-            of: find.byType(Row).last, matching: find.byType(InkWell));
-        await tester.tap(find.byType(InkWell).at(
-            tester.widgetList(find.byType(InkWell)).length - count + i));
+        await tester.tap(navItemAt(tester, i));
         await tester.pump(const Duration(milliseconds: 400));
-        expect(items, findsWidgets);
 
         // PROVE THE TAP LANDED. Without this the loop can miss the bar
         // entirely, keep showing tab 0, and pass every assertion below it —
