@@ -31,7 +31,7 @@ ROOT = Path(__file__).resolve().parent.parent / "build" / "webapp"
 API = "https://app.safenesthub.in"
 
 # Hop-by-hop headers are about one connection and must not be relayed.
-DROP = {
+_HOP = {
     "connection",
     "keep-alive",
     "proxy-authenticate",
@@ -40,13 +40,36 @@ DROP = {
     "trailers",
     "transfer-encoding",
     "upgrade",
+}
+
+DROP_REQUEST = _HOP | {
     "host",
+    "content-length",
+    # ASK FOR PLAIN BYTES.
+    #
+    # This one cost an afternoon and produced a bug report about the app. A
+    # browser sends "Accept-Encoding: gzip, deflate, br"; relaying that made
+    # the upstream compress, and this proxy then forwarded the compressed body
+    # while dropping the Content-Encoding header that said so. The app read
+    # gzip as text and failed with "FormatException: Unexpected extension byte
+    # (at offset 1)" on the sign-in screen — a message with nothing in it to
+    # suggest the proxy, on a screen where everybody reasonably suspects their
+    # password.
+    #
+    # Not relaying it is better than decompressing here: there is then only one
+    # representation of every body in flight, and no branch that can be wrong.
+    "accept-encoding",
+}
+
+DROP_RESPONSE = _HOP | {
     "content-length",
     # The upstream's own CORS answer is for its own origin. Same-origin here
     # means the browser never looks, and a stale header only confuses it.
     "access-control-allow-origin",
     "access-control-allow-credentials",
     "content-security-policy",
+    # Nothing is encoded any more — see above — so saying it is would be a lie
+    # the browser acts on.
     "content-encoding",
 }
 
@@ -57,6 +80,16 @@ class Handler(BaseHTTPRequestHandler):
 
     def log_message(self, fmt, *args):  # quieter; failures still print below
         pass
+
+    def handle_one_request(self):
+        # A browser drops connections constantly — it abandons an image as soon
+        # as it scrolls out of view — and the default handler prints a full
+        # traceback for each. In a log whose whole job is to show what the app
+        # asked for, that noise is what hides the one line that matters.
+        try:
+            super().handle_one_request()
+        except (ConnectionResetError, ConnectionAbortedError, BrokenPipeError):
+            self.close_connection = True
 
     # ---- the app itself -------------------------------------------------
     def _serve_file(self):
@@ -83,7 +116,7 @@ class Handler(BaseHTTPRequestHandler):
         body = self.rfile.read(length) if length else None
         req = urllib.request.Request(API + self.path, data=body, method=self.command)
         for k, v in self.headers.items():
-            if k.lower() not in DROP:
+            if k.lower() not in DROP_REQUEST:
                 req.add_header(k, v)
         ctx = ssl.create_default_context()
         try:
@@ -105,9 +138,19 @@ class Handler(BaseHTTPRequestHandler):
             print(f"  !! {self.command} {self.path} -> {e}", flush=True)
             return
 
+        # EVERY CALL IS PRINTED. When a sign-in fails in a browser the only
+        # thing on screen is the sentence the app chose, and that sentence is
+        # the app's guess at what went wrong. The proxy sees the actual request
+        # and the actual answer, which is the difference between diagnosing
+        # this and asking somebody to describe it.
+        note = ""
+        if status >= 400:
+            note = f"  {data[:200].decode('utf-8', 'replace')}"
+        print(f"  {status} {self.command} {self.path}{note}", flush=True)
+
         self.send_response(status)
         for k, v in headers.items():
-            if k.lower() not in DROP:
+            if k.lower() not in DROP_RESPONSE:
                 self.send_header(k, v)
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
@@ -132,6 +175,13 @@ class Handler(BaseHTTPRequestHandler):
 
 def main():
     global API, ROOT
+    # Windows consoles default to cp1252, which cannot write the dashes in the
+    # lines below — and a log that cannot be read back is not a log.
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
     ap = argparse.ArgumentParser()
     ap.add_argument("port", nargs="?", type=int, default=5601)
     ap.add_argument("--api", default=API)
