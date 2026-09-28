@@ -11,6 +11,8 @@ library;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import 'two_factor_screen.dart';
+
 import '../api.dart';
 import '../discover.dart';
 import '../session.dart';
@@ -98,6 +100,19 @@ class _SignInScreenState extends State<SignInScreen> {
           .read<Session>()
           .signIn(_address.text, _email.text, _password.text);
       widget.onSignedIn?.call();
+    } on TwoFactorRequired catch (pending) {
+      // Not a failure — half a sign-in. The password was accepted and the
+      // server is holding a short-lived challenge; this screen stays put
+      // underneath so that a cancelled or expired code lands back on it with
+      // the address and email still filled in.
+      if (!mounted) return;
+      await Navigator.of(context).push(MaterialPageRoute<void>(
+        builder: (_) => TwoFactorScreen(
+          brand: widget.brand,
+          pending: pending,
+          onSignedIn: widget.onSignedIn,
+        ),
+      ));
     } on ApiError catch (e) {
       setState(() => _error = e.message);
     } catch (e) {

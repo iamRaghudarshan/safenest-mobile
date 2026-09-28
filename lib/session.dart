@@ -22,6 +22,35 @@ import 'api.dart';
 import 'push.dart';
 import 'masters.dart';
 
+/// The password was right, and the account wants a code as well.
+///
+/// Thrown by [Session.signIn] rather than returned, so that every existing
+/// caller keeps its shape and a caller that has NOT been taught about codes
+/// fails loudly instead of silently treating half a sign-in as a whole one.
+/// It carries the address because the second step has to go to the same server
+/// the first one did, and threading it through beats stashing it on the
+/// session where nothing says when it stops being valid.
+class TwoFactorRequired implements Exception {
+  TwoFactorRequired({
+    required this.url,
+    required this.challenge,
+    required this.methods,
+  });
+
+  final String url;
+  final String challenge;
+
+  /// What the server will accept — `totp`, `recovery`, or both. Named so the
+  /// screen can say so: somebody who has lost their phone should not have to
+  /// guess that a recovery code goes in the same box.
+  final List<String> methods;
+
+  bool get acceptsRecovery => methods.contains('recovery');
+
+  @override
+  String toString() => 'TwoFactorRequired($url)';
+}
+
 class Session extends ChangeNotifier {
   static const _store = FlutterSecureStorage(
     aOptions: AndroidOptions(encryptedSharedPreferences: true),
@@ -161,16 +190,59 @@ class Session extends ChangeNotifier {
       'email': email.trim(),
       'password': password,
     });
-    // The account asked for a second factor. The server is right to withhold a
-    // session here — but this app has no screen to type a code into yet, and
-    // "Signed in, but no session came back" would send somebody hunting for a
-    // fault that is not there. Say what actually happened.
+    // THE ACCOUNT ASKED FOR A CODE. The server withholds the session here and
+    // hands back a short-lived challenge instead, which is the right shape: a
+    // token issued before the second factor is checked would make the second
+    // factor decorative.
+    //
+    // This used to be a dead end — the app said "not supported in the phone
+    // app yet" and stopped, which meant that turning on two-step sign-in
+    // anywhere locked you out of the phone entirely, including the owner's own
+    // account. It is not an error condition; it is half of a sign-in, and the
+    // caller is told so rather than being handed a sentence to display.
     if (out is Map && out['two_factor'] == true) {
-      throw ApiError(0,
-          'This account uses two-step sign-in. That is not supported in the '
-          'phone app yet — sign in on the computer, or turn it off there.');
+      final challenge = out['challenge'];
+      if (challenge is! String || challenge.isEmpty) {
+        throw ApiError(0, 'That account needs a code, but none was offered.');
+      }
+      throw TwoFactorRequired(
+        url: url,
+        challenge: challenge,
+        methods: [
+          for (final m in (out['methods'] as List? ?? const ['totp']))
+            m.toString(),
+        ],
+      );
     }
 
+    await _adopt(url, out);
+  }
+
+  /// Finish a sign-in that asked for a code.
+  ///
+  /// `challenge` comes from the [TwoFactorRequired] thrown by [signIn]. The
+  /// code is either the six digits from the authenticator or one of the
+  /// recovery codes, and the server decides which — the app does not try to
+  /// tell them apart, because a recovery code that looks wrong to a regex here
+  /// is a person locked out by a guess this end.
+  Future<void> completeTwoFactor({
+    required String url,
+    required String challenge,
+    required String code,
+  }) async {
+    final probe = Api(baseUrl: url);
+    final out = await probe.post('/api/auth/login/2fa', {
+      'challenge': challenge,
+      'code': code.trim(),
+    });
+    await _adopt(url, out);
+  }
+
+  /// Everything that happens once a token exists, whichever door it came
+  /// through. Shared rather than duplicated: a sign-in that skipped `_remember`
+  /// or the profile fetch would look like it worked and then behave subtly
+  /// differently for the rest of the session.
+  Future<void> _adopt(String url, dynamic out) async {
     final token = (out is Map) ? (out['token'] ?? out['access_token']) : null;
     if (token is! String || token.isEmpty) {
       throw ApiError(0, 'Signed in, but no session came back.');
