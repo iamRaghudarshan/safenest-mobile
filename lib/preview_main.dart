@@ -23,7 +23,15 @@ library;
 
 import 'package:flutter/material.dart';
 
+import 'package:provider/provider.dart';
+
+import 'offline/mode.dart';
+import 'offline/records.dart';
+import 'offline/store.dart';
+import 'offline/sync.dart';
 import 'screens/backup_screen.dart';
+import 'screens/home_screen.dart';
+import 'session.dart';
 import 'screens/vivid_home.dart';
 import 'theme.dart';
 import 'widgets/file_kinds.dart';
@@ -52,7 +60,26 @@ class _PreviewAppState extends State<PreviewApp> {
   Brightness _mode = Brightness.light;
   int _screen = 0;
 
-  static const _screens = ['Home', 'Backup', 'Pieces'];
+  static const _screens = ['Home', 'Shell', 'Backup', 'Pieces'];
+
+  /// The address bar picks the screen: `#shell`, `#backup`, `#pieces`, and
+  /// `#dark` or `#classic` alongside them. A Flutter web app paints into a
+  /// canvas, so nothing outside it can click these buttons — which means a
+  /// screenshot script, and therefore any automated check of this preview, can
+  /// only ever reach the screen that happens to load first. A fragment costs
+  /// nothing and makes every screen addressable.
+  @override
+  void initState() {
+    super.initState();
+    // `Uri.base` is the page's own URL on the web target, so this needs no
+    // package beyond dart:core.
+    final hash = Uri.base.fragment.toLowerCase();
+    if (hash.contains('shell')) _screen = 1;
+    if (hash.contains('backup')) _screen = 2;
+    if (hash.contains('pieces')) _screen = 3;
+    if (hash.contains('dark')) _mode = Brightness.dark;
+    if (hash.contains('classic')) _skin = AppSkin.classic;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -106,8 +133,10 @@ class _PreviewAppState extends State<PreviewApp> {
   Widget _body() {
     switch (_screen) {
       case 1:
-        return const BackupScreen(debugProgress: _running);
+        return const _Shell();
       case 2:
+        return const BackupScreen(debugProgress: _running);
+      case 3:
         return const _Pieces();
       default:
         return const VividHome(brand: Brand(), debugData: _home);
@@ -158,6 +187,46 @@ const _running = BackupProgress(
     BackupItem(id: 'a3', label: 'IMG_4104.HEIC', isVideo: false),
   ],
 );
+
+/// THE ASSEMBLED APP, not a screen out of it.
+///
+/// Every other entry here renders one screen from fixed data, which is exactly
+/// the blind spot that let Home ship blank with the tab bar floating in the
+/// middle: the fault was in the shell that puts a bar under a body, and no
+/// screen drawn on its own contains one. This mounts `HomeScreen` with the
+/// providers `main.dart` supplies, so the bar, the body and the way they share
+/// the screen can be looked at here rather than on a phone.
+///
+/// The tabs will show empty states — there is no server and no camera roll in
+/// a browser — and that is fine. What is being judged is the geometry.
+class _Shell extends StatefulWidget {
+  const _Shell();
+
+  @override
+  State<_Shell> createState() => _ShellState();
+}
+
+class _ShellState extends State<_Shell> {
+  late final Session _session = Session();
+  late final OfflineStore _store = OfflineStore();
+  late final OfflineMode _mode = OfflineMode();
+  late final OfflineRecords _records =
+      OfflineRecords(store: _store, mode: _mode);
+
+  @override
+  Widget build(BuildContext context) => MultiProvider(
+        providers: [
+          ChangeNotifierProvider<Session>.value(value: _session),
+          Provider<OfflineStore>.value(value: _store),
+          ChangeNotifierProvider<OfflineMode>.value(value: _mode),
+          Provider<OfflineRecords>.value(value: _records),
+          ChangeNotifierProvider<SyncService>.value(
+              value: SyncService(
+                  store: _store, api: () => _session.api, records: _records)),
+        ],
+        child: const HomeScreen(brand: Brand()),
+      );
+}
 
 /// The parts that are hard to see inside a whole screen.
 class _Pieces extends StatelessWidget {
