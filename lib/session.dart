@@ -66,6 +66,22 @@ class Session extends ChangeNotifier {
   /// which one works depends on where the phone is.
   static const _kKnown = 'server.known';
 
+  /// EVERY address becomes this one, when it is set.
+  ///
+  /// Set ONLY by `web_main.dart`, the browser harness, and never in a shipped
+  /// build. A Flutter web page has to reach its server through the origin it
+  /// was served from — anything else is a cross-origin request the browser
+  /// refuses — so the harness serves the app and proxies the API from one
+  /// address. Typing the real domain into the sign-in box therefore fails with
+  /// "Cannot reach your SafeNest", which is a true sentence about a situation
+  /// nobody should have to understand to look at a screen.
+  ///
+  /// It belongs here rather than in `Api` because `baseUrl` is not only used
+  /// for API calls: a dozen screens build photo and document URLs from it
+  /// directly, and overriding only the API client would leave every image
+  /// going cross-origin while the JSON worked.
+  static String? forcedAddress;
+
   String? _baseUrl;
   String? _token;
   Map<String, dynamic>? _user;
@@ -131,7 +147,7 @@ class Session extends ChangeNotifier {
   }
 
   Future<void> restore() async {
-    _baseUrl = await _store.read(key: _kUrl);
+    _baseUrl = forcedAddress ?? await _store.read(key: _kUrl);
     _token = await _store.read(key: _kToken);
     if (signedIn) {
       // Confirm the token is still good rather than assuming. Changing the
@@ -353,6 +369,8 @@ class Session extends ChangeNotifier {
   /// the app unusable for someone who has not set up a domain, which is most
   /// people on the day they install it.
   static String normaliseAddress(String raw) {
+    // The harness answers for every address, including an empty one.
+    if (forcedAddress != null) return forcedAddress!;
     // Lower case, because host names are case-insensitive and the remembered
     // address list is not: without this, "SafeNest.example.com" and
     // "safenest.example.com" are the same computer and two separate chips on

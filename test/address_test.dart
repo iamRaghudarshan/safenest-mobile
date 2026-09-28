@@ -55,4 +55,32 @@ void main() {
           'http://192.168.0.170:8080');
     });
   });
+
+  group('the browser harness override', () {
+    tearDown(() => Session.forcedAddress = null);
+
+    test('is off unless something sets it', () {
+      // THE POINT OF THIS TEST. `forcedAddress` is set by web_main.dart, which
+      // no phone build imports — but it is a mutable static on a class every
+      // screen touches, and if it ever came to be set in a shipped build the
+      // app would silently ignore the address the person typed and send their
+      // password somewhere else. It is the kind of switch that is invisible
+      // until it is catastrophic, so its default is pinned.
+      expect(Session.forcedAddress, isNull);
+      expect(Session.normaliseAddress('safenest.example.com'),
+          'https://safenest.example.com');
+    });
+
+    test('when set, it answers for every address — including a real domain', () {
+      // Which is the whole reason it exists: a browser cannot reach another
+      // origin, so the harness has to route everything back through the page
+      // it was served from.
+      Session.forcedAddress = 'http://127.0.0.1:5601';
+      expect(Session.normaliseAddress('app.safenesthub.in'),
+          'http://127.0.0.1:5601');
+      expect(Session.normaliseAddress('192.168.0.170:8080'),
+          'http://127.0.0.1:5601');
+      expect(Session.normaliseAddress(''), 'http://127.0.0.1:5601');
+    });
+  });
 }

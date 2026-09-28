@@ -27,10 +27,22 @@ import 'package:flutter/material.dart';
 
 import 'customize.dart';
 import 'main.dart' show SafeNestApp;
+import 'session.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Customize.ensureLoaded();
+
+  // EVERY ADDRESS IS THIS PAGE. A browser refuses a cross-origin request, so
+  // typing the real domain into the sign-in box fails with "Cannot reach your
+  // SafeNest" — a true sentence about a situation nobody should have to
+  // understand to look at a screen. The local server proxies /api to the real
+  // one, so the app talks to where it was served from and everything works,
+  // including photos, which are built from the same base. The caption under
+  // the phone says so, because silently ignoring what somebody typed is worse
+  // than the error it replaces.
+  Session.forcedAddress = Uri.base.origin;
+
   // `#wide` fills the browser window instead, for looking at the tablet layout.
   runApp(_PhoneFrame(
     framed: !Uri.base.fragment.toLowerCase().contains('wide'),
@@ -61,8 +73,33 @@ class _PhoneFrame extends StatelessWidget {
       textDirection: TextDirection.ltr,
       child: ColoredBox(
         color: const Color(0xFF1B1F28),
+        // Centred, and SCROLLABLE. The phone is a fixed 854pt of content, and a
+        // browser window shorter than that would otherwise overflow — which
+        // paints a yellow-and-black stripe over the very screen this page
+        // exists to let somebody look at. Scrolling is the right answer for a
+        // window, where clipping the phone is not.
         child: Center(
-          child: SizedBox(
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _phone(),
+                const SizedBox(height: 10),
+                const Text(
+                  'Local preview — sign in with any address; every request '
+                  'goes through this page to the real server.',
+                  style: TextStyle(color: Color(0xFF8D96A8), fontSize: 12),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _phone() {
+    return SizedBox(
             width: _size.width,
             height: _size.height,
             child: ClipRRect(
@@ -83,9 +120,6 @@ class _PhoneFrame extends StatelessWidget {
                 child: child,
               ),
             ),
-          ),
-        ),
-      ),
-    );
+          );
   }
 }
