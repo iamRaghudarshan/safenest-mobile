@@ -31,6 +31,22 @@ import 'package:safenest/theme.dart';
 /// IndexedStack collapsed to nothing, and the harness produced the very
 /// symptom it was written to catch. A test that fails for its own reasons is
 /// worse than no test: it sends you looking for a bug that is not there.
+/// The real app does not hand `HomeScreen` straight to `MaterialApp.home`. It
+/// puts a backdrop behind everything through `MaterialApp.builder` — a Stack
+/// with the wallpaper filling it and the app laid over the top — because every
+/// Scaffold in the Classic skin is transparent and something has to be behind
+/// them. A shell test that skips that layer is testing a tree the phone never
+/// builds, and the constraints a Stack hands its children are exactly the kind
+/// of thing that turned out to matter here.
+Widget _withBackdrop(BuildContext context, Widget? child) => Stack(
+      children: [
+        Positioned.fill(
+          child: ColoredBox(color: Theme.of(context).colorScheme.surface),
+        ),
+        if (child != null) Positioned.fill(child: child),
+      ],
+    );
+
 Widget _shell(AppSkin skin) {
   final session = Session();
   final store = OfflineStore();
@@ -48,6 +64,7 @@ Widget _shell(AppSkin skin) {
     ],
     child: MaterialApp(
       theme: buildTheme(const Brand(), Brightness.light, skin: skin),
+      builder: _withBackdrop,
       home: const HomeScreen(brand: Brand()),
     ),
   );
