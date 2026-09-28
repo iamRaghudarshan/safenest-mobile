@@ -103,16 +103,31 @@ void main() {
       ));
       await tester.pump(const Duration(milliseconds: 500));
 
-      await tester.runAsync(() async {
-        final b = key.currentContext!.findRenderObject() as RenderRepaintBoundary;
-        final image = await b.toImage(pixelRatio: 2);
-        final png = await image.toByteData(format: ui.ImageByteFormat.png);
-        image.dispose();
-        if (png != null && Directory(_out).existsSync()) {
-          File('$_out/shell_${skin.name}.png')
-              .writeAsBytesSync(png.buffer.asUint8List());
-        }
-      });
+      Future<void> shoot(String name) => tester.runAsync(() async {
+            final b =
+                key.currentContext!.findRenderObject() as RenderRepaintBoundary;
+            final image = await b.toImage(pixelRatio: 2);
+            final png = await image.toByteData(format: ui.ImageByteFormat.png);
+            image.dispose();
+            if (png != null && Directory(_out).existsSync()) {
+              File('$_out/shell_$name.png')
+                  .writeAsBytesSync(png.buffer.asUint8List());
+            }
+          });
+
+      // EVERY TAB, not just the one that was reported broken. Home was blank,
+      // so Home got looked at — and four other screens sit in the same body
+      // under the same bar, each able to go wrong the same way.
+      final count = tester
+          .widget<IndexedStack>(find.byType(IndexedStack).first)
+          .children
+          .length;
+      for (var i = 0; i < count; i++) {
+        await tester.tap(find.byType(InkWell).at(
+            tester.widgetList(find.byType(InkWell)).length - count + i));
+        await tester.pump(const Duration(milliseconds: 500));
+        await shoot('${skin.name}_$i');
+      }
     });
   }
 }

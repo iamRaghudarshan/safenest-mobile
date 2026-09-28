@@ -139,6 +139,60 @@ void main() {
     });
   }
 
+  for (final skin in AppSkin.values) {
+    testWidgets('${skin.name}: every tab draws something, not just the first',
+        (tester) async {
+      // Home was the tab that was reported blank, so Home is the tab that got
+      // checked. That is not the same as the shell being right: an IndexedStack
+      // builds all of them, they each sit in the same body, and a fault in how
+      // one of them fills that body is invisible until it is the selected one.
+      // Tap through the whole bar.
+      tester.view.physicalSize = const Size(390 * 3, 844 * 3);
+      tester.view.devicePixelRatio = 3.0;
+      addTearDown(tester.view.reset);
+
+      await tester.pumpWidget(_shell(skin));
+      await tester.pump(const Duration(milliseconds: 400));
+
+      final stack = find.byType(IndexedStack).first;
+      final count = tester.widget<IndexedStack>(stack).children.length;
+      expect(count, greaterThanOrEqualTo(5), reason: 'the bar lost its tabs');
+
+      for (var i = 0; i < count; i++) {
+        // Tap the tab by its position in the bar rather than by label, so this
+        // does not have to know which tabs a skin ships.
+        final items = find.descendant(
+            of: find.byType(Row).last, matching: find.byType(InkWell));
+        await tester.tap(find.byType(InkWell).at(
+            tester.widgetList(find.byType(InkWell)).length - count + i));
+        await tester.pump(const Duration(milliseconds: 400));
+        expect(items, findsWidgets);
+
+        // PROVE THE TAP LANDED. Without this the loop can miss the bar
+        // entirely, keep showing tab 0, and pass every assertion below it —
+        // which is a test that reports five tabs checked and has checked one.
+        expect(tester.widget<IndexedStack>(find.byType(IndexedStack).first).index,
+            i,
+            reason: 'tapping bar item $i did not select tab $i');
+
+        // The body still has to be the body: full height, under the bar.
+        final size = tester.getSize(find.byType(IndexedStack).first);
+        expect(size.height, greaterThan(300),
+            reason: 'tab $i collapsed the body to '
+                '${size.height.toStringAsFixed(0)}pt');
+
+        // And something has to be PAINTED in it — a tab that builds but draws
+        // nothing is the same blank page to whoever is holding the phone.
+        final drawn = find
+            .descendant(of: stack, matching: find.byType(Text))
+            .evaluate()
+            .length;
+        expect(drawn, greaterThan(0),
+            reason: 'tab $i rendered no text at all — a blank page');
+      }
+    });
+  }
+
   testWidgets('the bar survives somebody who has asked for larger text',
       (tester) async {
     // The floating bar is a FIXED height, which is what keeps it from resizing
