@@ -557,18 +557,30 @@ class _ColourfulNavBar extends StatelessWidget {
             ),
             child: Padding(
               padding: const EdgeInsets.symmetric(vertical: 7, horizontal: 4),
-              child: Row(
-                children: [
-                  for (var i = 0; i < tabs.length; i++)
-                    Expanded(
-                      child: _NavItem(
-                        tab: tabs[i],
-                        selected: i == index,
-                        onTap: () => onTap(i),
-                        onLongPress: onCustomise,
+              // A FLOOR, not a fixed height, and both halves of that matter.
+              // The floor is what keeps the bar still: the selected glyph
+              // animates 40->46, so a purely self-sizing bar would grow and
+              // shrink on every tap and relayout the whole page underneath it.
+              // 66 is measured rather than guessed — 46 glyph + 4 + the label's
+              // line box comes to 65 at the default text scale. And it is only
+              // a floor because a hard height overflows for anyone who has
+              // asked for larger text, which on a phone is a yellow-and-black
+              // stripe across the one element that appears on every screen.
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(minHeight: 66),
+                child: Row(
+                  children: [
+                    for (var i = 0; i < tabs.length; i++)
+                      Expanded(
+                        child: _NavItem(
+                          tab: tabs[i],
+                          selected: i == index,
+                          onTap: () => onTap(i),
+                          onLongPress: onCustomise,
+                        ),
                       ),
-                    ),
-                ],
+                  ],
+                ),
               ),
             ),
           ),
@@ -693,6 +705,14 @@ class _NavItem extends StatelessWidget {
       onLongPress: onLongPress,
       borderRadius: BorderRadius.circular(18),
       child: Column(
+        // WITHOUT THIS THE WHOLE APP IS BLANK. A Column defaults to
+        // MainAxisSize.max, so asked for its natural height this answers "all
+        // of it" — and Scaffold lays a bottomNavigationBar out against the full
+        // screen height. The bar then became the entire screen, the body got
+        // 0pt, and Home came up empty with the tabs stranded in the middle.
+        // The classic bar never showed it because a SizedBox(height: 70) around
+        // it happened to supply the bound this was relying on.
+        mainAxisSize: MainAxisSize.min,
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           glyph,
@@ -701,6 +721,12 @@ class _NavItem extends StatelessWidget {
             tab.label,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
+            // The bar is a fixed height, so an unbounded text scale would
+            // overflow it and stripe the bar yellow on a real phone. Clamped
+            // rather than switched off: somebody who has asked for larger text
+            // still gets some of it, and the icon carries the meaning anyway.
+            textScaler: MediaQuery.textScalerOf(context)
+                .clamp(maxScaleFactor: 1.15),
             style: TextStyle(
               fontSize: 10,
               fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
