@@ -643,6 +643,15 @@ class _ColourfulNavBar extends StatelessWidget {
   }
 }
 
+/// The bar's sizing rule, exposed so it can be tested as arithmetic.
+/// See `_NavItem.glyphFor`.
+@visibleForTesting
+double navGlyphFor(double cell, {required bool selected}) =>
+    _NavItem.glyphFor(cell, selected: selected);
+
+@visibleForTesting
+double navLabelFor(double cell) => _NavItem.labelFor(cell);
+
 class _NavItem extends StatelessWidget {
   // The key is what makes the bar addressable from a test. Tests used to reach
   // it by counting InkWells and taking the last N, which is arithmetic over
@@ -660,11 +669,38 @@ class _NavItem extends StatelessWidget {
   final VoidCallback onTap;
   final VoidCallback onLongPress;
 
+  /// How big the coloured chip may be, given the width this tab actually got.
+  ///
+  /// It was a flat 46. Five tabs at 390pt is a 70pt cell, so 46 left a
+  /// comfortable 24pt of air — but the bar is customisable up to six, and a
+  /// bar somebody arranged is deliberately kept when they switch skin. Six at
+  /// 390pt is a 58pt cell, which left twelve: the chips nearly touched, the
+  /// labels ran into each other, and it was reported as the bottom menu not
+  /// being proper. It was not an overflow, so nothing caught it; it was
+  /// simply too tight to read.
+  ///
+  /// Derived from the cell rather than from the NUMBER of tabs, because the
+  /// same squeeze arrives from a narrow phone as from an extra tab, and a rule
+  /// written against tab count would miss a 320pt screen entirely.
+  static double glyphFor(double cell, {required bool selected}) {
+    final big = (cell - 18).clamp(32.0, 46.0);
+    return selected ? big : big - 6;
+  }
+
+  /// Below this the label is shrunk a little rather than ellipsised: "Remind…"
+  /// is worse than a slightly smaller "Reminders".
+  static double labelFor(double cell) => cell < 62 ? 9.5 : 10.0;
+
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => LayoutBuilder(
+      builder: (context, c) => _build(context, c.maxWidth));
+
+  Widget _build(BuildContext context, double cell) {
     final theme = Theme.of(context);
     final colour = tab.colourIn(context.skin);
     final colourful = Customize.colourfulNav;
+    final size = glyphFor(cell, selected: selected);
+    final labelSize = labelFor(cell);
 
     // Plain style: a simple monochrome icon that tints to the tab's colour when
     // selected, sitting on a soft pill — a standard, quiet tab bar for people
@@ -673,8 +709,8 @@ class _NavItem extends StatelessWidget {
         ? AnimatedContainer(
             duration: const Duration(milliseconds: 200),
             curve: Curves.easeOut,
-            width: selected ? 46.0 : 40.0,
-            height: selected ? 46.0 : 40.0,
+            width: size,
+            height: size,
             decoration: BoxDecoration(
               gradient: LinearGradient(
                 begin: Alignment.topLeft,
@@ -690,7 +726,7 @@ class _NavItem extends StatelessWidget {
               ],
             ),
             child: Icon(selected ? tab.activeIcon : tab.icon,
-                size: selected ? 24 : 22, color: Colors.white),
+                size: size * (selected ? 0.52 : 0.55), color: Colors.white),
           )
         : AnimatedContainer(
             duration: const Duration(milliseconds: 180),
@@ -736,7 +772,7 @@ class _NavItem extends StatelessWidget {
             textScaler: MediaQuery.textScalerOf(context)
                 .clamp(maxScaleFactor: 1.15),
             style: TextStyle(
-              fontSize: 10,
+              fontSize: labelSize,
               fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
               color: selected ? colour : theme.colorScheme.onSurfaceVariant,
             ),

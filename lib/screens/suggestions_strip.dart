@@ -23,13 +23,24 @@ import '../session.dart';
 import '../widgets/photo_tile.dart';
 
 class SuggestionsStrip extends StatefulWidget {
-  const SuggestionsStrip({super.key, required this.api, this.onMade});
+  const SuggestionsStrip(
+      {super.key, required this.api, this.onMade, this.debugItems});
 
   final Api api;
 
   /// Called after something is created, so the grid behind can reload — the
   /// creation is an ordinary photo and belongs in the timeline immediately.
   final VoidCallback? onMade;
+
+  /// Suggestions to draw instead of fetching any — for tests and the browser
+  /// preview only, the same door `VividHome.debugData` and
+  /// `BackupScreen.debugProgress` already use.
+  ///
+  /// It exists because this panel loads itself, and a widget test runs in a
+  /// zone where a real socket's callbacks are never delivered — so the card
+  /// could not be drawn at a phone's width without one, which is exactly how
+  /// it came to ship setting its own text one character per line.
+  final List<Map<String, dynamic>>? debugItems;
 
   @override
   State<SuggestionsStrip> createState() => _SuggestionsStripState();
@@ -52,6 +63,11 @@ class _SuggestionsStripState extends State<SuggestionsStrip> {
   @override
   void initState() {
     super.initState();
+    if (widget.debugItems != null) {
+      _items = widget.debugItems!;
+      _loaded = true;
+      return;
+    }
     _load();
   }
 
@@ -234,41 +250,92 @@ class _SuggestionsStripState extends State<SuggestionsStrip> {
         border: Border.all(color: Colors.black.withValues(alpha: 0.12)),
         borderRadius: BorderRadius.circular(12),
       ),
-      child: Row(
+      // CONTENT ABOVE, ACTIONS BELOW — not everything in one row.
+      //
+      // One row could not fit them on a phone. The covers take 72, the two
+      // buttons another 160, and what was left for the sentence was under a
+      // hundred points on a 390pt screen — which is how "122 photos that day"
+      // came to be set one character per line, straight down the middle of the
+      // card, with the right half of it empty. Stacking gives the text the
+      // whole width and cannot be squeezed by a longer button label later.
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
         children: [
-          _covers(
-              s,
-              kind == 'reel'
-                  ? Icons.movie_filter_outlined
-                  : kind == 'collage'
-                      ? Icons.auto_awesome_mosaic_outlined
-                      : Icons.folder_open),
-          const SizedBox(width: 11),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('${s['title'] ?? ''}',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                        fontSize: 14, fontWeight: FontWeight.w600)),
-                Text('${s['detail'] ?? ''}',
-                    style: const TextStyle(fontSize: 12, color: Colors.grey)),
+          Row(
+            children: [
+              _covers(
+                  s,
+                  kind == 'reel'
+                      ? Icons.movie_filter_outlined
+                      : kind == 'collage'
+                          ? Icons.auto_awesome_mosaic_outlined
+                          : Icons.folder_open),
+              const SizedBox(width: 11),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if ('${s['title'] ?? ''}'.isNotEmpty)
+                      Text('${s['title']}',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                              fontSize: 14, fontWeight: FontWeight.w600)),
+                    Text('${s['detail'] ?? ''}',
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                            fontSize: 12,
+                            color: Theme.of(context)
+                                .colorScheme
+                                .onSurfaceVariant)),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              TextButton(
+                style: _compact,
+                onPressed: _busy.isEmpty ? () => _no(s) : null,
+                child: const Text('No thanks'),
+              ),
+              if (canMake) ...[
+                const SizedBox(width: 8),
+                FilledButton(
+                  style: _compact,
+                  onPressed: _busy.isEmpty ? () => _make(s) : null,
+                  child: Text(_busy == key ? 'Making…' : 'Make it'),
+                ),
               ],
-            ),
+            ],
           ),
-          TextButton(
-            onPressed: _busy.isEmpty ? () => _no(s) : null,
-            child: const Text('No thanks'),
-          ),
-          if (canMake)
-            FilledButton(
-              onPressed: _busy.isEmpty ? () => _make(s) : null,
-              child: Text(_busy == key ? 'Making…' : 'Make it'),
-            ),
         ],
       ),
     );
   }
+
+  /// A button that is allowed to be as wide as its label and no wider.
+  ///
+  /// THE THEME MAKES BUTTONS FULL WIDTH. `filledButtonTheme` sets
+  /// `minimumSize: Size.fromHeight(h)`, and `Size.fromHeight` is
+  /// `Size(double.infinity, h)` — a minimum WIDTH of infinity. Inside a Column
+  /// that is what is wanted and what every screen relies on: the button fills
+  /// the page. Inside a Row it is a trap, because a Row lays its non-flexible
+  /// children out with unbounded width, so the button asks for infinity, the
+  /// layout throws "BoxConstraints forces an infinite width", and in a release
+  /// build there is no message — just an Expanded sibling starved to nothing.
+  ///
+  /// So a button in a row has to say it is not a block button. This is the
+  /// whole of that.
+  static final ButtonStyle _compact = ButtonStyle(
+    minimumSize: WidgetStateProperty.all(const Size(0, 38)),
+    padding: WidgetStateProperty.all(
+        const EdgeInsets.symmetric(horizontal: 14)),
+  );
 }
