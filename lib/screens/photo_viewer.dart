@@ -309,35 +309,52 @@ class _PhotoViewerState extends State<PhotoViewer> {
                 color: Colors.black38,
                 padding: EdgeInsets.only(
                     bottom: MediaQuery.of(context).padding.bottom + 6, top: 6),
+                // SIX ACTIONS, ONE PHONE. Laid out with spaceEvenly and their
+                // natural widths, these came to 623pt against a 390pt screen
+                // and overflowed by 233 — a yellow-and-black stripe across the
+                // bottom of every photograph, at every width the app ships
+                // into. Each one takes an equal share now, and its label
+                // shrinks to fit rather than pushing its neighbours off.
                 child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                   children: [
-                    _Action(
-                      icon: p.isFavourite ? Icons.star : Icons.star_border,
-                      label: 'Favourite',
-                      active: p.isFavourite,
-                      onTap: _toggleFavourite,
+                    Expanded(
+                      child: _Action(
+                        icon: p.isFavourite ? Icons.star : Icons.star_border,
+                        label: 'Favourite',
+                        active: p.isFavourite,
+                        onTap: _toggleFavourite,
+                      ),
                     ),
-                    _Action(
-                        icon: Icons.ios_share,
-                        label: 'Share',
-                        onTap: _share),
-                    _Action(
-                        icon: p.isVideo ? Icons.content_cut : Icons.tune,
-                        label: p.isVideo ? 'Trim' : 'Edit',
-                        onTap: _edit),
-                    _Action(
-                        icon: Icons.archive_outlined,
-                        label: 'Archive',
-                        onTap: _archive),
-                    _Action(
-                        icon: Icons.info_outline,
-                        label: 'Details',
-                        onTap: _info),
-                    _Action(
-                        icon: Icons.delete_outline,
-                        label: 'Trash',
-                        onTap: _trash),
+                    Expanded(
+                      child: _Action(
+                          icon: Icons.ios_share,
+                          label: 'Share',
+                          onTap: _share),
+                    ),
+                    Expanded(
+                      child: _Action(
+                          icon: p.isVideo ? Icons.content_cut : Icons.tune,
+                          label: p.isVideo ? 'Trim' : 'Edit',
+                          onTap: _edit),
+                    ),
+                    Expanded(
+                      child: _Action(
+                          icon: Icons.archive_outlined,
+                          label: 'Archive',
+                          onTap: _archive),
+                    ),
+                    Expanded(
+                      child: _Action(
+                          icon: Icons.info_outline,
+                          label: 'Details',
+                          onTap: _info),
+                    ),
+                    Expanded(
+                      child: _Action(
+                          icon: Icons.delete_outline,
+                          label: 'Trash',
+                          onTap: _trash),
+                    ),
                   ],
                 ),
               ),
@@ -369,7 +386,15 @@ class _Action extends StatelessWidget {
         child: Column(mainAxisSize: MainAxisSize.min, children: [
           Icon(icon, color: colour),
           const SizedBox(height: 4),
-          Text(label, style: TextStyle(color: colour, fontSize: 11)),
+          // An equal share of a 320pt screen is 53pt, and "Favourite" does
+          // not fit that at 11pt. Shrunk rather than ellipsised: "Favour…"
+          // under a star tells you less than a smaller word that is whole.
+          Text(label,
+              maxLines: 1,
+              softWrap: false,
+              overflow: TextOverflow.fade,
+              textScaler: TextScaler.noScaling,
+              style: TextStyle(color: colour, fontSize: 10)),
         ]),
       ),
     );

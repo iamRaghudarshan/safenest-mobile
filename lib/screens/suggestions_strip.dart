@@ -19,6 +19,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../api.dart';
+import '../theme.dart';
 import '../session.dart';
 import '../widgets/photo_tile.dart';
 
@@ -301,14 +302,14 @@ class _SuggestionsStripState extends State<SuggestionsStrip> {
             mainAxisAlignment: MainAxisAlignment.end,
             children: [
               TextButton(
-                style: _compact,
+                style: compactButtonStyle,
                 onPressed: _busy.isEmpty ? () => _no(s) : null,
                 child: const Text('No thanks'),
               ),
               if (canMake) ...[
                 const SizedBox(width: 8),
                 FilledButton(
-                  style: _compact,
+                  style: compactButtonStyle,
                   onPressed: _busy.isEmpty ? () => _make(s) : null,
                   child: Text(_busy == key ? 'Making…' : 'Make it'),
                 ),
@@ -320,22 +321,4 @@ class _SuggestionsStripState extends State<SuggestionsStrip> {
     );
   }
 
-  /// A button that is allowed to be as wide as its label and no wider.
-  ///
-  /// THE THEME MAKES BUTTONS FULL WIDTH. `filledButtonTheme` sets
-  /// `minimumSize: Size.fromHeight(h)`, and `Size.fromHeight` is
-  /// `Size(double.infinity, h)` — a minimum WIDTH of infinity. Inside a Column
-  /// that is what is wanted and what every screen relies on: the button fills
-  /// the page. Inside a Row it is a trap, because a Row lays its non-flexible
-  /// children out with unbounded width, so the button asks for infinity, the
-  /// layout throws "BoxConstraints forces an infinite width", and in a release
-  /// build there is no message — just an Expanded sibling starved to nothing.
-  ///
-  /// So a button in a row has to say it is not a block button. This is the
-  /// whole of that.
-  static final ButtonStyle _compact = ButtonStyle(
-    minimumSize: WidgetStateProperty.all(const Size(0, 38)),
-    padding: WidgetStateProperty.all(
-        const EdgeInsets.symmetric(horizontal: 14)),
-  );
 }

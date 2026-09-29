@@ -283,6 +283,19 @@ class Brand {
 /// [skin] defaults to classic so every existing caller — and every one of the
 /// three hundred tests that builds a theme — keeps the app it already had.
 /// Only main.dart passes the other one, from the saved preference.
+/// A button that may sit in a Row: as wide as its label and no wider.
+///
+/// The button themes above set a minimum width of infinity so that buttons
+/// fill the page, which is right in a Column and fatal in a Row — see the note
+/// beside `filledButtonTheme`. This cancels it, and it is the whole fix.
+///
+/// Use it for any FilledButton or OutlinedButton whose parent is a Row.
+final ButtonStyle compactButtonStyle = ButtonStyle(
+  minimumSize: WidgetStateProperty.all(const Size(0, 38)),
+  padding:
+      WidgetStateProperty.all(const EdgeInsets.symmetric(horizontal: 14)),
+);
+
 ThemeData buildTheme(Brand brand, Brightness brightness,
     {AppSkin skin = AppSkin.classic}) {
   final dark = brightness == Brightness.dark;
@@ -453,6 +466,17 @@ ThemeData buildTheme(Brand brand, Brightness brightness,
     // .btn is a GRADIENT, which ThemeData cannot express — see BrandButton in
     // widgets/brand_button.dart. This styles the plain and outlined variants so
     // anything not using that widget is still the right shape and weight.
+    //
+    // ⚠ `Size.fromHeight(h)` IS `Size(double.infinity, h)` — A MINIMUM WIDTH OF
+    // INFINITY. That is deliberate: it makes every button a block button that
+    // fills the page, which is what nearly every screen here wants and relies
+    // on. But a Row lays its non-flexible children out with UNBOUNDED width, so
+    // a button dropped into a Row asks for infinity. In debug that throws
+    // "BoxConstraints forces an infinite width"; in a release build there is no
+    // message at all — the Expanded beside it is simply starved to nothing, and
+    // what ships is a card with its text set one character per line.
+    //
+    // That shipped. A button in a Row must pass `compactButtonStyle`.
     filledButtonTheme: FilledButtonThemeData(
       style: FilledButton.styleFrom(
         backgroundColor: t.brand,

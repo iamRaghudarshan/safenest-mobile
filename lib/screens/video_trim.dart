@@ -24,6 +24,7 @@ library;
 import 'package:flutter/material.dart';
 
 import '../api.dart';
+import '../theme.dart';
 
 class VideoTrimScreen extends StatefulWidget {
   const VideoTrimScreen({
@@ -275,6 +276,10 @@ class _VideoTrimScreenState extends State<VideoTrimScreen> {
           ),
           const SizedBox(width: 8),
           FilledButton(
+            // In a Row, so it must say it is not a block button — the theme
+            // gives every button a minimum width of infinity. See
+            // `compactButtonStyle`.
+            style: compactButtonStyle,
             onPressed: (_busy || _end - _start < 0.2) ? null : _trim,
             child: Text(_busy ? 'Trimming…' : 'Trim'),
           ),
