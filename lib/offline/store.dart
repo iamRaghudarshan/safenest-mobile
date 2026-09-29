@@ -210,6 +210,25 @@ const _ledgerDDL = '''
 const _ledgerIndexDDL =
     'CREATE INDEX idx_ledger_sent ON backup_ledger(sent_at)';
 
+/// Assets the person has told the backup to stop trying.
+///
+/// WHY THIS IS NOT backup_ledger WITH A FLAG. That table means "the computer
+/// has this". Putting a skipped item in it would make the cheap skip believe
+/// the file was safely on the computer, and the count on screen would say a
+/// library was backed up when part of it deliberately is not. The distinction
+/// is the whole point: skipped means "I know it is not there and I am content
+/// with that", which is a different sentence and has to be a different table.
+///
+/// The reason is kept so the list can say what it was stuck on, and `at` so
+/// the newest decision is shown first. Nothing here is sent anywhere; it is
+/// one phone's opinion about its own library.
+const _ignoredDDL = '''
+  CREATE TABLE backup_ignored (
+    asset_id TEXT PRIMARY KEY,
+    reason   TEXT NOT NULL DEFAULT '',
+    at       TEXT NOT NULL
+  )''';
+
 /// A file's sha256, remembered so it is computed once and not once per run.
 ///
 /// THE COST THIS REMOVES IS THE REAL ONE. Asking the computer "do you already
@@ -290,7 +309,7 @@ class OfflineStore {
     final file = _pathOverride ?? p.join(await getDatabasesPath(), 'offline.db');
     return openDatabase(
       file,
-      version: 6,
+      version: 7,
       // v2 added `pending.action`. An upgrade rather than a recreate, because
       // by the time this shipped there were phones holding queued work in a v1
       // database — and that queue is the only copy of it anywhere.
@@ -318,6 +337,9 @@ class OfflineStore {
         }
         if (from < 6) {
           await db.execute(_hashesDDL);
+        }
+        if (from < 7) {
+          await db.execute(_ignoredDDL);
         }
       },
       onCreate: (db, _) async {
@@ -357,6 +379,7 @@ class OfflineStore {
         await db.execute(_ledgerDDL);
         await db.execute(_ledgerIndexDDL);
         await db.execute(_hashesDDL);
+        await db.execute(_ignoredDDL);
         await db.execute('''
           CREATE TABLE local_ids (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -693,7 +716,67 @@ class OfflineStore {
     return (r.first['c'] as int?) ?? 0;
   }
 
+  // ------------------------------------------------- what to stop trying
+
+  /// Everything the person has told the backup to leave alone.
+  ///
+  /// Read whole rather than queried per page: a run asks once and then checks
+  /// a set in memory, and this list is the handful of files somebody has
+  /// actually given up on, not the twenty thousand in the ledger.
+  Future<Set<String>> ignoredForBackup() async {
+    final db = await _open;
+    final rows = await db.query('backup_ignored', columns: ['asset_id']);
+    return {for (final r in rows) '${r['asset_id']}'};
+  }
+
+  /// With the reason it was stuck on, newest first — what the list shows.
+  Future<List<({String id, String reason})>> ignoredWithReasons() async {
+    final db = await _open;
+    final rows = await db.query('backup_ignored', orderBy: 'at DESC');
+    return [
+      for (final r in rows)
+        (id: '${r['asset_id']}', reason: '${r['reason'] ?? ''}')
+    ];
+  }
+
+  Future<void> ignoreForBackup(String assetId, {String reason = ''}) async {
+    final db = await _open;
+    await db.insert(
+      'backup_ignored',
+      {
+        'asset_id': assetId,
+        'reason': reason,
+        'at': DateTime.now().toIso8601String(),
+      },
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  /// Start trying again. The asset is NOT put in the ledger — it was never
+  /// sent — so the next run picks it up exactly as it would have before.
+  Future<void> unignoreForBackup(String assetId) async {
+    final db = await _open;
+    await db.delete('backup_ignored',
+        where: 'asset_id = ?', whereArgs: [assetId]);
+  }
+
+  Future<int> ignoredCount() async {
+    final db = await _open;
+    final r = await db.rawQuery('SELECT COUNT(*) c FROM backup_ignored');
+    return (r.first['c'] as int?) ?? 0;
+  }
+
+  Future<void> clearIgnored() async {
+    final db = await _open;
+    await db.delete('backup_ignored');
+  }
+
   /// Forget everything backed up, so the next run offers the whole library.
+  ///
+  /// Deliberately leaves the skipped list alone. "Back up everything again" is
+  /// about what the computer has, not about reopening decisions the person
+  /// made one at a time — and a file skipped because it will never upload
+  /// would simply fail again, which is the state they were getting out of.
   Future<void> clearBackedUp() async {
     final db = await _open;
     await db.delete('backup_ledger');

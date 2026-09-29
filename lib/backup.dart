@@ -721,6 +721,7 @@ class BackupService extends ChangeNotifier {
     // over would report a problem that has just been fixed.
     _problems.clear();
     _failedAssets.clear();
+    await _loadIgnored();
     _failReason.clear();
     _emit(const BackupProgress(
         state: BackupState.scanning, message: 'Looking through your photos…'));
@@ -866,7 +867,9 @@ class BackupService extends ChangeNotifier {
     for (var offset = 0; offset < count; offset += page) {
       if (_stop) break;
       final batch = await all.getAssetListRange(start: offset, end: offset + page);
-      var todo = batch.where((a) => !_sent.contains(a.id)).toList();
+      var todo = batch
+          .where((a) => !_sent.contains(a.id) && !_ignored.contains(a.id))
+          .toList();
       // THE CHEAP SKIP, AND THE WHOLE REASON A REPEAT BACKUP IS NOW FAST.
       //
       // Deciding "have I sent this?" used to mean opening the file and hashing
@@ -1155,6 +1158,67 @@ class BackupService extends ChangeNotifier {
       serverCount: _serverCount,
     ));
   }
+
+  /// What the person has told this backup to stop trying.
+  ///
+  /// Held in memory for the length of a run so the per-page filter is a set
+  /// lookup, and re-read at the start of each run so a decision made on the
+  /// failures card takes effect on the very next press rather than the next
+  /// launch.
+  Set<String> _ignored = const {};
+
+  Future<void> _loadIgnored() async {
+    final led = _ledger;
+    if (led == null) return;
+    try {
+      _ignored = await led.ignoredForBackup();
+    } catch (_) {
+      // A list that cannot be read means nothing is skipped, which is the
+      // safe direction: the worst case is that a file is offered again.
+      _ignored = const {};
+    }
+  }
+
+  /// Stop trying this one.
+  ///
+  /// For the file that will never go — a video the computer refuses, something
+  /// the phone cannot read — where every run spends minutes on it, fails, and
+  /// leaves the same red number on the screen. Nothing is deleted and nothing
+  /// is claimed to be backed up: it is recorded as a decision, and it can be
+  /// undone.
+  Future<void> ignoreAsset(AssetEntity asset) async {
+    final reason = _failReason[asset.id] ?? '';
+    await _ledger?.ignoreForBackup(asset.id, reason: reason);
+    _ignored = {..._ignored, asset.id};
+    // Off the failures card at once. Leaving it there until the next run would
+    // make the button look as though it had not worked.
+    _failedAssets.removeWhere((a) => a.id == asset.id);
+    _failReason.remove(asset.id);
+    _emit(BackupProgress(
+      state: progress.state,
+      total: progress.total,
+      done: progress.done,
+      skipped: progress.skipped,
+      failed: progress.failed > 0 ? progress.failed - 1 : 0,
+      message: progress.message,
+      reasons: progress.reasons,
+      retryable: _failedAssets.length,
+      libraryCount: _libraryCount,
+      serverCount: _serverCount,
+    ));
+  }
+
+  /// Try it again after all. The asset is not in the ledger — it was never
+  /// sent — so the next run picks it up exactly as it would have before.
+  Future<void> unignoreAsset(String assetId) async {
+    await _ledger?.unignoreForBackup(assetId);
+    _ignored = {..._ignored}..remove(assetId);
+    _emit(progress);
+  }
+
+  /// The skipped list, with what each one was stuck on.
+  Future<List<({String id, String reason})>> ignoredItems() async =>
+      await _ledger?.ignoredWithReasons() ?? const [];
 
   final List<AssetEntity> _failedAssets = [];
 

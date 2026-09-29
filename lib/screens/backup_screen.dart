@@ -203,10 +203,26 @@ class _BackupScreenState extends State<BackupScreen> {
   /// backup screen made the backup slower.
   final ThumbCache _thumbs = ThumbCache();
 
+  /// How many files are being skipped. Kept here rather than read in `build`,
+  /// because this screen rebuilds several times a second while a backup runs
+  /// and a database round trip per frame is not a price for a number that
+  /// changes when somebody presses a button.
+  int _ignoredCount = 0;
+
+  Future<void> _refreshIgnoredCount() async {
+    try {
+      final n = await context.read<OfflineStore>().ignoredCount();
+      if (mounted && n != _ignoredCount) setState(() => _ignoredCount = n);
+    } catch (_) {
+      // Not worth a message: the worst outcome is that the line stays hidden.
+    }
+  }
+
   @override
   void initState() {
     super.initState();
     if (widget.debugProgress != null) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) => _refreshIgnoredCount());
     // The ledger is what makes a repeat backup fast -- without it the
     // service falls back to hashing the whole library to ask what is
     // already there. Passing it is not optional in the real app.
@@ -663,6 +679,14 @@ class _BackupScreenState extends State<BackupScreen> {
               const SizedBox(height: 12),
             ],
 
+            // Under the failures, because it is the same subject read one step
+            // later: these are the ones that stopped being failures because
+            // somebody decided so.
+            if (_ignoredCount > 0) ...[
+              _ignoredLine(theme, dark),
+              const SizedBox(height: 12),
+            ],
+
             // As above: the gap belongs between what happened and what to do
             // about it, so the buttons sit on the bottom edge.
             const Spacer(),
@@ -914,7 +938,8 @@ class _BackupScreenState extends State<BackupScreen> {
           for (final a in shown)
             _FailedRow(a,
                 reason: _reasonOr(a.id, fallbackReason),
-                last: identical(a, shown.last)),
+                last: identical(a, shown.last),
+                onIgnore: _service == null ? null : () => _ignore(a)),
           if (assets.length > shown.length)
             Padding(
               padding: const EdgeInsets.only(top: 2, bottom: 6),
@@ -967,6 +992,157 @@ class _BackupScreenState extends State<BackupScreen> {
       ]),
     );
   }
+
+  /// Stop trying one file, with a way straight back.
+  ///
+  /// Undo is not politeness here. The button is inside a sheet about ONE
+  /// photograph and the effect is invisible afterwards — the row simply goes —
+  /// so without an undo a mis-tap silently removes a file from every future
+  /// backup and leaves nothing on screen to say it happened.
+  Future<void> _ignore(AssetEntity asset) async {
+    final service = _service;
+    if (service == null) return;
+    final messenger = ScaffoldMessenger.of(context);
+    await service.ignoreAsset(asset);
+    if (!mounted) return;
+    setState(() {});
+    await _refreshIgnoredCount();
+    messenger.hideCurrentSnackBar();
+    messenger.showSnackBar(SnackBar(
+      content: const Text('Skipped. It stays on your phone.'),
+      action: SnackBarAction(
+        label: 'Undo',
+        onPressed: () async {
+          await service.unignoreAsset(asset.id);
+          if (mounted) setState(() {});
+          await _refreshIgnoredCount();
+        },
+      ),
+    ));
+  }
+
+  /// The skipped list, and the way back out of it.
+  ///
+  /// A decision that cannot be found again is a trap: somebody who skips four
+  /// videos in a bad week has no way to remember which, and a library quietly
+  /// missing four files with nothing on screen about it is exactly what this
+  /// app exists not to do. So the count is always shown once there is one, and
+  /// every entry can be put back.
+  Future<void> _showIgnored() async {
+    final service = _service;
+    if (service == null) return;
+    final items = await service.ignoredItems();
+    if (!mounted) return;
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheet) {
+          final theme = Theme.of(ctx);
+          return SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+              child: Column(mainAxisSize: MainAxisSize.min, children: [
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text('Skipped files',
+                      style: theme.textTheme.titleMedium
+                          ?.copyWith(fontWeight: FontWeight.w800)),
+                ),
+                const SizedBox(height: 6),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                      'These are not backed up and are not being tried. They '
+                      'are still on your phone.',
+                      style: TextStyle(
+                          fontSize: 12.5,
+                          height: 1.45,
+                          color: theme.colorScheme.onSurfaceVariant)),
+                ),
+                const SizedBox(height: 14),
+                if (items.isEmpty)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 18),
+                    child: Text('Nothing is being skipped.',
+                        style: TextStyle(
+                            color: theme.colorScheme.onSurfaceVariant)),
+                  )
+                else
+                  Flexible(
+                    child: ListView.separated(
+                      shrinkWrap: true,
+                      itemCount: items.length,
+                      separatorBuilder: (_, _) => const Divider(height: 14),
+                      itemBuilder: (_, i) {
+                        final it = items[i];
+                        return Row(children: [
+                          Icon(Icons.do_not_disturb_on_outlined,
+                              size: 18,
+                              color: theme.colorScheme.onSurfaceVariant),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                                it.reason.isEmpty
+                                    ? 'It could not be sent.'
+                                    : it.reason,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(fontSize: 12.5)),
+                          ),
+                          TextButton(
+                            style: compactButtonStyle,
+                            onPressed: () async {
+                              await service.unignoreAsset(it.id);
+                              items.removeAt(i);
+                              setSheet(() {});
+                              if (mounted) setState(() {});
+                            },
+                            child: const Text('Try again'),
+                          ),
+                        ]);
+                      },
+                    ),
+                  ),
+              ]),
+            ),
+          );
+        },
+      ),
+    );
+    if (mounted) setState(() {});
+    await _refreshIgnoredCount();
+  }
+
+  /// A line that says what is deliberately not being backed up.
+  ///
+  /// Always present once there is one, and never folded into the "already
+  /// there" total. Those two numbers mean opposite things — one is safe on the
+  /// computer, the other is knowingly not — and a screen that adds them
+  /// together tells somebody their library is backed up when part of it is
+  /// not. That is the single worst sentence this app could say.
+  Widget _ignoredLine(ThemeData theme, bool dark) => _card(
+        theme,
+        dark,
+        padding: const EdgeInsets.fromLTRB(15, 11, 9, 11),
+        child: Row(children: [
+          Icon(Icons.do_not_disturb_on_outlined,
+              size: 18, color: theme.colorScheme.onSurfaceVariant),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+                '${_n(_ignoredCount)} '
+                '${_ignoredCount == 1 ? 'file is' : 'files are'} being skipped',
+                style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
+          ),
+          TextButton(
+            style: compactButtonStyle,
+            onPressed: _showIgnored,
+            child: const Text('Review'),
+          ),
+        ]),
+      );
 
   /// This file's own reason, or the run's dominant one when it has no note.
   ///
@@ -1026,10 +1202,16 @@ class _BackupScreenState extends State<BackupScreen> {
 /// place a thumbnail of them exists. A video carries a small marker so a stuck
 /// clip is not mistaken for a photo.
 class _FailedRow extends StatelessWidget {
-  const _FailedRow(this.asset, {required this.reason, this.last = false});
+  const _FailedRow(this.asset,
+      {required this.reason, this.last = false, this.onIgnore});
 
   final AssetEntity asset;
   final String reason;
+
+  /// Stop trying this one. Offered in the sheet rather than on the row: it is
+  /// a decision, and a decision belongs behind the explanation of what is
+  /// wrong, not beside a thumbnail where a thumb can reach it by accident.
+  final VoidCallback? onIgnore;
 
   /// No divider under the last one — a rule with nothing after it reads as a
   /// row that failed to load.
@@ -1068,6 +1250,42 @@ class _FailedRow extends StatelessWidget {
                   style: TextStyle(
                       height: 1.5, color: theme.colorScheme.onSurfaceVariant)),
             ),
+            if (onIgnore != null) ...[
+              const SizedBox(height: 18),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                    'Some files never go — a clip the computer will not take, '
+                    'or one this phone cannot read. Every backup will try it '
+                    'again, take just as long, and leave the same warning.',
+                    style: TextStyle(
+                        fontSize: 12,
+                        height: 1.45,
+                        color: theme.colorScheme.onSurfaceVariant)),
+              ),
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: () {
+                    Navigator.pop(ctx);
+                    onIgnore!();
+                  },
+                  icon: const Icon(Icons.do_not_disturb_on_outlined, size: 18),
+                  label: const Text('Stop trying this one'),
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                  'It stays on your phone. Nothing is deleted, and it is not '
+                  'counted as backed up — you can start trying again whenever '
+                  'you like.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                      fontSize: 11.5,
+                      height: 1.4,
+                      color: theme.colorScheme.onSurfaceVariant)),
+            ],
           ]),
         ),
       ),
