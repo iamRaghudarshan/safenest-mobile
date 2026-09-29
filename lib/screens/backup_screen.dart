@@ -40,6 +40,7 @@ import '../widgets/backup_blocked_banner.dart';
 import '../widgets/auto_backup_card.dart';
 import '../widgets/backup_flight.dart';
 import '../widgets/brand_button.dart';
+import '../widgets/local_media_preview.dart';
 import '../widgets/pill.dart';
 import '../widgets/uploading_now.dart';
 
@@ -1091,6 +1092,20 @@ class _BackupScreenState extends State<BackupScreen> {
                                 overflow: TextOverflow.ellipsis,
                                 style: const TextStyle(fontSize: 12.5)),
                           ),
+                          // Play it here too: a decision to skip something is
+                          // worth being able to revisit with the file in front
+                          // of you, not from a one-line reason written weeks
+                          // ago.
+                          IconButton(
+                            tooltip: 'Open it',
+                            visualDensity: VisualDensity.compact,
+                            icon: const Icon(Icons.play_circle_outline, size: 20),
+                            onPressed: () async {
+                              final a = await AssetEntity.fromId(it.id);
+                              if (a == null || !ctx.mounted) return;
+                              await showLocalMedia(ctx, a);
+                            },
+                          ),
                           TextButton(
                             style: compactButtonStyle,
                             onPressed: () async {
@@ -1249,6 +1264,27 @@ class _FailedRow extends StatelessWidget {
                   reason.isEmpty ? 'It could not be sent this time.' : reason,
                   style: TextStyle(
                       height: 1.5, color: theme.colorScheme.onSurfaceVariant)),
+            ),
+            const SizedBox(height: 16),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                // WHICH FILE IS THIS? A 34-pixel thumbnail does not say, and
+                // two stuck videos look identical at that size. Deciding
+                // whether to give up on something you cannot watch is not a
+                // decision worth asking anybody to make — so the file opens
+                // from the PHONE, which is the only place it exists.
+                onPressed: () {
+                  Navigator.pop(ctx);
+                  showLocalMedia(context, asset);
+                },
+                icon: Icon(asset.type == AssetType.video
+                    ? Icons.play_arrow_rounded
+                    : Icons.visibility_outlined),
+                label: Text(asset.type == AssetType.video
+                    ? 'Play this video'
+                    : 'Look at this photo'),
+              ),
             ),
             if (onIgnore != null) ...[
               const SizedBox(height: 18),
