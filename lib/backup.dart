@@ -1386,7 +1386,21 @@ class BackupService extends ChangeNotifier {
       onFileStart?.call(label, fileSize);
       String? streamedDigest;
       final ({int status, Map<String, dynamic> body}) r;
-      if (fileSize >= _resumeFrom) {
+      // EVERY VIDEO GOES UP IN PIECES, whatever it weighs.
+      //
+      // The threshold used to be size alone, so a short clip under 16 MB took
+      // the one-shot path — and that path decides photo-or-video from the
+      // magic bytes and the FILENAME, which this phone frequently sends empty.
+      // Guessed wrong, a clip got the 30 MB photo limit. The server's refusal
+      // log is full of exactly that: sixteen ordinary clips, every one refused
+      // at 28 MB, none of which could ever have arrived.
+      //
+      // The chunked path carries `duration_ms` on every request, and a
+      // duration is something no photograph has — so a video is never left to
+      // be inferred from a name that is not there. It also resumes, which a
+      // clip of any size benefits from on a home connection.
+      final isVideo = asset.type == AssetType.video;
+      if (isVideo || fileSize >= _resumeFrom) {
         final got = await _uploadResumableFile(f, fileSize, label, asset.id,
             durationMs: ms);
         r = got.result;
@@ -1636,7 +1650,7 @@ class BackupService extends ChangeNotifier {
     // re-reading them, so the poster is skipped for a resumed clip rather
     // than being sent under a hash that does not match. It is a still frame;
     // the video itself is what matters.
-    final resumed = sent > 0;
+    var resumed = sent > 0;
     final digestSink = _DigestSink();
     final hasher = sha256.startChunkedConversion(digestSink);
 
@@ -1655,26 +1669,75 @@ class BackupService extends ChangeNotifier {
         final want = (sent + _chunkBytes) > total ? total - sent : _chunkBytes;
         final piece = await handle.read(want);
         if (piece.isEmpty) break;
-        if (!resumed) hasher.add(piece);
         final last = sent + piece.length >= total;
-        final r = await _postUploadRaw(
-          '/api/gallery/upload/chunk?$q&offset=$sent&total=${last ? total : 0}',
-          piece,
-          'application/octet-stream',
-        );
-        if (r.status == 409) {
-          // The computer holds a different amount than we believed. Ask it
-          // rather than guessing.
-          final st = await _net.get('/api/gallery/upload/status?upload_id=$id');
-          final have = (st is Map ? (st['received'] as num?)?.toInt() : null) ?? 0;
-          if (have == sent) return (result: r, digest: null);
-          sent = have;
-          await handle.setPosition(sent);
-          _itemProgress(assetId, sent, total);
-          onFileProgress?.call(sent, total);
-          continue;
+
+        // ONE CHUNK, WITH PATIENCE.
+        //
+        // This used to give up on the whole file the moment any request came
+        // back non-200. For a photo that is right — there is one request, and
+        // it either worked or it did not. For a two-gigabyte video over a home
+        // connection it is close to guaranteed failure: that is five hundred
+        // requests, and the chance of all five hundred surviving a domestic
+        // wifi link is not good. One dropped packet threw away everything
+        // already sent for that run.
+        //
+        // Transient causes are retried with a growing pause; a real refusal —
+        // the computer saying no — is not, because repeating it would only
+        // waste the connection and hide the reason.
+        var attempt = 0;
+        ({int status, Map<String, dynamic> body}) r;
+        while (true) {
+          r = await _postUploadRaw(
+            '/api/gallery/upload/chunk?$q&offset=$sent&total=${last ? total : 0}',
+            piece,
+            'application/octet-stream',
+          );
+          if (r.status == 200) break;
+
+          if (r.status == 409) {
+            // The computer holds a different amount than we believed. Ask it
+            // rather than guessing.
+            final st =
+                await _net.get('/api/gallery/upload/status?upload_id=$id');
+            final have =
+                (st is Map ? (st['received'] as num?)?.toInt() : null) ?? 0;
+            if (have == sent) return (result: r, digest: null);
+            sent = have;
+            await handle.setPosition(sent);
+            // THE HASH IS NOW WRONG AND MUST NOT BE SENT. Bytes were skipped
+            // or re-covered, so what this hasher holds no longer describes the
+            // file. It went unnoticed because the poster it keys is a still
+            // frame: the wrong digest simply meant the still was filed against
+            // nothing, and the video looked fine.
+            resumed = true;
+            _itemProgress(assetId, sent, total);
+            onFileProgress?.call(sent, total);
+            break;
+          }
+
+          if (!_worthRetrying(r.status) || attempt >= _chunkAttempts) {
+            return (result: r, digest: null);
+          }
+          attempt++;
+          // 1s, 2s, 4s, 8s. Long enough for a wifi handover or a computer
+          // waking up, short enough that a real outage is reported rather
+          // than sat through.
+          await Future<void>.delayed(Duration(seconds: 1 << (attempt - 1)));
+          if (_stop) {
+            return (
+              result: (status: 0, body: const <String, dynamic>{}),
+              digest: null
+            );
+          }
+          // Resending the SAME chunk is safe: the computer checks the offset
+          // and answers 409 if this one already landed, which the branch above
+          // then reconciles. That is the case where a chunk arrived and only
+          // the reply was lost, which is the commonest way a mobile upload
+          // fails.
         }
-        if (r.status != 200) return (result: r, digest: null);
+        if (r.status != 200) continue;   // a 409 re-sync; read from the new offset
+
+        if (!resumed) hasher.add(piece);
         sent += piece.length;
         _itemProgress(assetId, sent, total);
         onFileProgress?.call(sent, total);
@@ -1691,4 +1754,34 @@ class BackupService extends ChangeNotifier {
     }
     return (result: (status: 0, body: const <String, dynamic>{}), digest: null);
   }
+
+  /// Is this worth sending again, or is it the computer saying no?
+  ///
+  /// 0 is this app's own "the request never completed" — no network, a dropped
+  /// connection, a timeout — and is the single commonest failure on a phone.
+  /// 5xx is the computer having a bad moment. 408 and 429 ask in so many words
+  /// to try again.
+  ///
+  /// Everything else is a decision: 413 too large, 401 signed out, 400 the
+  /// file is not what it claims. Repeating those spends the connection to be
+  /// told the same thing, and buries the reason under a delay.
+  static bool _worthRetrying(int status) {
+    // 507 is "your computer is full". It is a 5xx, and it is the one 5xx that
+    // will certainly still be true in eight seconds — retrying it wastes the
+    // connection and, worse, delays the only message that tells somebody what
+    // to go and do about it.
+    if (status == 507) return false;
+    return status == 0 || status == 408 || status == 429 || status >= 500;
+  }
+
+  /// How many times one chunk is re-sent before the file is reported stuck.
+  static const _chunkAttempts = 4;
+
+  /// The retry rule, exposed so it can be tested as a rule rather than only
+  /// exercised through a two-gigabyte upload.
+  @visibleForTesting
+  static bool worthRetryingStatus(int status) => _worthRetrying(status);
+
+  @visibleForTesting
+  static int get chunkAttempts => _chunkAttempts;
 }
