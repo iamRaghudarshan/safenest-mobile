@@ -536,12 +536,27 @@ class _ColourfulNavBar extends StatelessWidget {
     //
     // Classic keeps the bar it has always had.
     if (skin.isVivid) {
+      // HOW FAR OFF THE BOTTOM THE BAR FLOATS.
+      //
+      // It used to be a SafeArea plus a 12pt margin, which on an iPhone is
+      // 34 + 12 = 46pt of empty page below the bar — enough that it reads as
+      // stranded in the middle of nothing rather than resting near the edge.
+      //
+      // Half the inset instead, and never less than 8. Half rather than none
+      // because the bottom of that inset is where the home indicator and the
+      // gesture strip live, and a bar sitting on top of either is one the
+      // system swipes out from under you. The floor matters for the phones
+      // that report no inset at all, where zero would weld the bar to the
+      // glass and lose the point of floating it.
+      final inset = MediaQuery.of(context).viewPadding.bottom;
+      final lift = inset > 0 ? (inset / 2).clamp(8.0, 20.0) : 8.0;
+
       return GestureDetector(
         onLongPress: onCustomise,
-        child: SafeArea(
-          top: false,
+        child: Padding(
+          padding: EdgeInsets.fromLTRB(0, 0, 0, lift),
           child: Container(
-            margin: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+            margin: const EdgeInsets.fromLTRB(16, 0, 16, 0),
             decoration: BoxDecoration(
               color: theme.colorScheme.surface,
               borderRadius: BorderRadius.circular(24),

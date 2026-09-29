@@ -173,6 +173,62 @@ void main() {
     });
   });
 
+  group('how far off the bottom it floats', () {
+    // A SafeArea plus a 12pt margin put 46pt of empty page under the bar on an
+    // iPhone, which reads as stranded rather than resting near the edge. But
+    // the bottom of that inset is where the home indicator and the gesture
+    // strip live, so the bar cannot simply sit on the glass either.
+    Future<double> gapAt(WidgetTester tester, double inset) async {
+      SharedPreferences.setMockInitialValues({});
+      await Customize.ensureLoaded();
+      await Customize.setNavBar(_six);
+      await Customize.setSkin(Customize.skinVivid);
+
+      tester.view.physicalSize = const Size(390 * 3, 844 * 3);
+      tester.view.devicePixelRatio = 3.0;
+      addTearDown(tester.view.reset);
+
+      await tester.pumpWidget(MediaQuery(
+        data: MediaQueryData(
+          size: const Size(390, 844),
+          devicePixelRatio: 3,
+          padding: EdgeInsets.only(bottom: inset),
+          viewPadding: EdgeInsets.only(bottom: inset),
+        ),
+        child: _shell(AppSkin.vivid),
+      ));
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(tester.takeException(), isNull);
+
+      // The bar is the box that holds the tabs.
+      final bar = find.ancestor(
+          of: navItemAt(tester, 0), matching: find.byType(Container)).last;
+      return 844 - tester.getBottomLeft(bar).dy;
+    }
+
+    testWidgets('an iPhone: close to the edge, clear of the indicator',
+        (tester) async {
+      final gap = await gapAt(tester, 34);
+      expect(gap, lessThan(30),
+          reason: 'still ${gap.toStringAsFixed(0)}pt of empty page below it');
+      expect(gap, greaterThanOrEqualTo(8),
+          reason: 'the home indicator needs room');
+    });
+
+    testWidgets('an Android on gestures', (tester) async {
+      final gap = await gapAt(tester, 24);
+      expect(gap, lessThan(24));
+      expect(gap, greaterThanOrEqualTo(8));
+    });
+
+    testWidgets('and a phone that reports no inset at all', (tester) async {
+      // Zero here would weld the bar to the glass and lose the point of
+      // floating it.
+      final gap = await gapAt(tester, 0);
+      expect(gap, greaterThanOrEqualTo(8));
+    });
+  });
+
   testWidgets('and it is drawn, so it can be judged', (tester) async {
     SharedPreferences.setMockInitialValues({});
     await Customize.ensureLoaded();
@@ -185,7 +241,18 @@ void main() {
     await _useRealFont();
 
     final key = GlobalKey();
-    await tester.pumpWidget(RepaintBoundary(key: key, child: _shell(AppSkin.vivid)));
+    await tester.pumpWidget(RepaintBoundary(
+      key: key,
+      child: MediaQuery(
+        data: const MediaQueryData(
+          size: Size(390, 844),
+          devicePixelRatio: 3,
+          padding: EdgeInsets.only(top: 47, bottom: 34),
+          viewPadding: EdgeInsets.only(top: 47, bottom: 34),
+        ),
+        child: _shell(AppSkin.vivid),
+      ),
+    ));
     await tester.pump(const Duration(milliseconds: 400));
 
     await tester.runAsync(() async {
