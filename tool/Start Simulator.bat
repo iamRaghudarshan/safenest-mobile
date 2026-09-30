@@ -11,6 +11,13 @@ REM
 REM No administrator rights needed. If the emulator refuses to start, run
 REM "Enable Simulator (run once, as admin).bat" first.
 REM
+REM MEMORY. This computer also runs the SafeNest server, and its commit limit —
+REM not its RAM — is what binds: a 2 GB emulator plus a Gradle daemon took it to
+REM 61 GB of 65 and the live API stopped answering, which looked from the phone
+REM like the server was down. The emulator is set to 1.5 GB now, and this script
+REM stops the Gradle daemons once the build is done rather than leaving a
+REM multi-gigabyte JVM resident for the rest of the day.
+REM
 REM   tool\Start Simulator.bat            boot the phone and run the app
 REM   tool\Start Simulator.bat --boot     boot the phone only
 REM
@@ -63,5 +70,10 @@ echo Building and installing SafeNest...
 echo ^(r = hot reload, R = restart, q = quit^)
 echo.
 call "%FLUTTER%" run -d emulator
+
+REM The build is over; the daemons are not needed and the server is.
+echo.
+echo Freeing the build daemons...
+call "%~dp0..ndroid\gradlew.bat" --stop >nul 2>&1
 
 endlocal
