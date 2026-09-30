@@ -301,7 +301,8 @@ class _HomeScreenState extends State<HomeScreen> {
                 onOpenFiles: () => _open('documents'),
                 onOpen: _open,
               )
-            : DashboardScreen(onOpen: _open, refreshTick: _refreshTick);
+            : DashboardScreen(
+                onOpen: _open, allowed: _allowed, refreshTick: _refreshTick);
       case 'modules':
         return ModulesScreen(
             onOpen: _open, allowed: _allowed, refreshTick: _refreshTick);
@@ -327,6 +328,7 @@ class _HomeScreenState extends State<HomeScreen> {
           themeMode: widget.themeMode,
           onThemeChanged: widget.onThemeChanged,
           onCustomiseNav: _customiseNav,
+          allowed: _allowed,
         );
       default:
         return const SizedBox.shrink();

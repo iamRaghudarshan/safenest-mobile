@@ -61,6 +61,7 @@ class ProfileScreen extends StatefulWidget {
     this.themeMode = ThemeMode.system,
     this.onThemeChanged,
     this.onCustomiseNav,
+    this.allowed,
   });
 
   final Brand brand;
@@ -70,6 +71,9 @@ class ProfileScreen extends StatefulWidget {
   /// Opens the "arrange the bottom bar" sheet. Provided by the home shell, which
   /// owns the tab list; null when Profile is shown outside it.
   final VoidCallback? onCustomiseNav;
+
+  /// The modules this account may open — see DashboardScreen.allowed.
+  final Set<String>? allowed;
 
   @override
   State<ProfileScreen> createState() => _ProfileScreenState();
@@ -334,7 +338,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 label: 'Shortcuts on Home',
                 value: '${Customize.homeShortcuts.length}',
                 onTap: () async {
-                  await showHomeShortcutsSheet(context);
+                  await showHomeShortcutsSheet(context,
+                      allowed: widget.allowed);
                   if (mounted) setState(() {});
                 },
               ),

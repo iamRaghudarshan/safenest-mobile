@@ -8,6 +8,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:safenest/customize.dart';
+import 'package:safenest/modules.dart';
+import 'package:safenest/widgets/home_shortcuts_sheet.dart';
 
 void main() {
   setUp(() async {
@@ -68,6 +70,50 @@ void main() {
       expect(Customize.natureBackground, isTrue,
           reason: 'it must land on something that draws');
       expect(Customize.backgroundImagePath, isEmpty);
+    });
+  });
+
+  group('what may be offered as a shortcut', () {
+    test('everything, when permissions are not known', () {
+      // Unreachable is not the same as forbidden. Offering everything means
+      // the server still refuses what it should; offering nothing would leave
+      // somebody staring at a row they cannot change and no reason why.
+      final keys = shortcutChoices().map((c) => c.key).toSet();
+      expect(keys, contains('gallery'));
+      expect(keys, contains('documents'));
+      expect(keys, contains('vault'),
+          reason: 'Vault could never reach Home before this');
+      expect(keys, contains('notes'));
+
+      // EVERY screen that can be opened, not only the seven that share the
+      // generic module list. The first cut offered `kModules` plus Gallery and
+      // Documents, which silently left out Vault, Notes and Habits — the very
+      // ones this feature exists to put on Home.
+      expect(keys, containsAll(kAllModuleKeys),
+          reason: 'something openable is not offerable');
+    });
+
+    test('only what this account can open, when they are', () {
+      // THE CLAIM THIS PINS. The filter existed and nothing passed a set to
+      // it, so every module was offered to everybody — a shortcut to a
+      // withdrawn module is a button that apologises.
+      final keys = shortcutChoices(allowed: {'gallery', 'expenses'})
+          .map((c) => c.key)
+          .toSet();
+      expect(keys, {'gallery', 'expenses'});
+      expect(keys, isNot(contains('vault')));
+    });
+
+    test('a label fits under an icon', () {
+      // "Expenses" is the module; what somebody taps this to do is add an
+      // expense — and one word is all the width there is.
+      final byKey = {for (final c in shortcutChoices()) c.key: c.label};
+      expect(byKey['expenses'], 'Expense');
+      expect(byKey['gallery'], 'Photo');
+      expect(byKey['documents'], 'Files');
+      for (final label in byKey.values) {
+        expect(label.contains(' '), isFalse, reason: '"$label" is two words');
+      }
     });
   });
 

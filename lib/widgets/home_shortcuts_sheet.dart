@@ -18,10 +18,12 @@ import '../theme.dart';
 
 /// Everything that may sit on Home, in the order it is offered.
 ///
-/// Drawn from the module catalogue rather than written out again, so a module
-/// added later is offerable without touching this file — but Gallery and
-/// Documents are named explicitly because they are screens of their own and
-/// are not in `kModules`.
+/// `kModules` is the seven that share the generic list-and-sheet. Gallery,
+/// Documents, Vault, Notes and Habits are screens of their own and are NOT in
+/// it — which is exactly why they could never reach Home, and why leaving them
+/// out here would have shipped this feature without the thing it was for.
+/// `kAllModuleKeys` is the list that holds both halves, and it is what the
+/// count below is checked against.
 List<({String key, String label, IconData icon, Color colour})> shortcutChoices(
     {Set<String>? allowed}) {
   final out = <({String key, String label, IconData icon, Color colour})>[
@@ -36,6 +38,24 @@ List<({String key, String label, IconData icon, Color colour})> shortcutChoices(
       label: 'Files',
       icon: Icons.folder,
       colour: kModuleColours['documents'] ?? Colors.teal
+    ),
+    (
+      key: 'vault',
+      label: 'Vault',
+      icon: Icons.lock_outline,
+      colour: kModuleColours['vault'] ?? Colors.indigo
+    ),
+    (
+      key: 'notes',
+      label: 'Notes',
+      icon: Icons.lightbulb_outline,
+      colour: kModuleColours['notes'] ?? Colors.amber
+    ),
+    (
+      key: 'habits',
+      label: 'Habits',
+      icon: Icons.local_fire_department_outlined,
+      colour: kModuleColours['habits'] ?? Colors.deepOrange
     ),
     for (final m in kModules)
       (

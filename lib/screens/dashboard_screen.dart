@@ -35,6 +35,7 @@ class DashboardScreen extends StatefulWidget {
   const DashboardScreen({
     super.key,
     required this.onOpen,
+    this.allowed,
     this.refreshTick = 0,
     this.initialData,
     this.initialBrief,
@@ -42,6 +43,11 @@ class DashboardScreen extends StatefulWidget {
 
   /// Opens another tab or module by key — 'expenses', 'gallery', 'modules'.
   final void Function(String key) onOpen;
+
+  /// Which modules this account may open, or null while it is still being
+  /// asked. A shortcut to something withdrawn is a button that apologises, so
+  /// it is neither drawn nor offered.
+  final Set<String>? allowed;
 
   /// Home bumps this when a pushed module returns; a change re-reads the
   /// dashboard so a habit (or anything) added on another screen shows here.
@@ -67,7 +73,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
   /// would be the one thing on screen that did not follow.
   List<({String key, String label, IconData icon, Color colour})>
       get _shortcuts {
-    final known = {for (final c in shortcutChoices()) c.key: c};
+    final known = {
+      for (final c in shortcutChoices(allowed: widget.allowed)) c.key: c
+    };
     final out = [
       for (final k in Customize.homeShortcuts)
         if (known[k] != null) known[k]!,
@@ -84,7 +92,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Future<void> _customiseShortcuts() async {
-    await showHomeShortcutsSheet(context);
+    await showHomeShortcutsSheet(context, allowed: widget.allowed);
     if (mounted) setState(() {});
   }
 
