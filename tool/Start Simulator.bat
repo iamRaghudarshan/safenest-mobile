@@ -74,6 +74,6 @@ call "%FLUTTER%" run -d emulator
 REM The build is over; the daemons are not needed and the server is.
 echo.
 echo Freeing the build daemons...
-call "%~dp0..ndroid\gradlew.bat" --stop >nul 2>&1
+call "%~dp0..\android\gradlew.bat" --stop >nul 2>&1
 
 endlocal
