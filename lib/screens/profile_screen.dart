@@ -36,6 +36,8 @@ import 'package:provider/provider.dart';
 
 import '../api.dart';
 import '../customize.dart';
+import 'background_screen.dart';
+import '../widgets/home_shortcuts_sheet.dart';
 import '../dates.dart';
 import '../session.dart';
 import '../theme.dart';
@@ -305,28 +307,34 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   if (mounted) setState(() {});
                 },
               ),
-              // Background: the animated nature scene, or a plain screen.
+              // Background. This was two rows — nature, plain — and picking
+              // between two fixed things is all a row can do. Now that a
+              // photograph and a dim come into it, it is a page: the choices
+              // need to be SEEN, and the dim needs a sample beside it.
               SettingsRow(
                 icon: Icons.landscape_outlined,
                 tint: kModuleColours['todos']!,
-                label: 'Nature background',
-                trailing: Customize.natureBackground
-                    ? const Icon(Icons.check, size: 18, color: kBrand)
-                    : null,
+                label: 'App background',
+                value: Customize.natureBackground
+                    ? 'Nature'
+                    : Customize.photoBackground
+                        ? 'Your photo'
+                        : 'Plain',
                 onTap: () async {
-                  await Customize.setBackground(Customize.backgroundNature);
+                  await Navigator.of(context).push(MaterialPageRoute<void>(
+                      builder: (_) => const BackgroundScreen()));
                   if (mounted) setState(() {});
                 },
               ),
+              // Shortcuts on Home — the same sheet a long press on the row
+              // opens, offered here for anyone who never finds the gesture.
               SettingsRow(
-                icon: Icons.crop_square,
+                icon: Icons.apps_outlined,
                 tint: kModuleColours['documents']!,
-                label: 'Plain background',
-                trailing: !Customize.natureBackground
-                    ? const Icon(Icons.check, size: 18, color: kBrand)
-                    : null,
+                label: 'Shortcuts on Home',
+                value: '${Customize.homeShortcuts.length}',
                 onTap: () async {
-                  await Customize.setBackground(Customize.backgroundPlain);
+                  await showHomeShortcutsSheet(context);
                   if (mounted) setState(() {});
                 },
               ),

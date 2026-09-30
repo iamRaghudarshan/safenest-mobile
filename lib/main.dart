@@ -31,6 +31,7 @@ import 'background.dart';
 import 'screens/home_screen.dart';
 import 'widgets/licence_notice.dart';
 import 'widgets/nature_backdrop.dart';
+import 'widgets/photo_backdrop.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -158,9 +159,15 @@ class _SafeNestAppState extends State<SafeNestApp> {
                 Positioned.fill(
                   child: Customize.natureBackground
                       ? const NatureBackdrop()
-                      // An OPAQUE surface, not the transparent scaffold colour, or
-                      // there would be nothing behind the transparent scaffolds.
-                      : ColoredBox(color: Theme.of(context).colorScheme.surface),
+                      : Customize.photoBackground
+                          // The person's own picture, dimmed enough that the
+                          // app can still be read over it.
+                          ? const PhotoBackdrop()
+                          // An OPAQUE surface, not the transparent scaffold
+                          // colour, or there would be nothing behind the
+                          // transparent scaffolds.
+                          : ColoredBox(
+                              color: Theme.of(context).colorScheme.surface),
                 ),
                 if (child != null) Positioned.fill(child: child),
               ],

@@ -33,6 +33,7 @@ import 'package:safenest/theme.dart';
 import 'package:safenest/api.dart';
 import 'package:safenest/screens/doc_preview.dart';
 import 'package:safenest/screens/doc_versions.dart';
+import 'package:safenest/screens/background_screen.dart';
 import 'package:safenest/screens/documents_screen.dart';
 import 'package:safenest/screens/habits_screen.dart';
 import 'package:safenest/screens/labels_screen.dart';
@@ -81,6 +82,7 @@ final _photos = [
 /// id pointing at a dead port is enough: what is being checked is whether the
 /// screen can lay itself out, and that does not depend on the record existing.
 final _screens = <String, Widget Function()>{
+  'App background': () => const BackgroundScreen(debugRecent: []),
   'Documents': () => const DocumentsScreen(),
   'Habits': () => const HabitsScreen(),
   'Labels': () => const LabelsScreen(),
@@ -212,7 +214,7 @@ void main() {
     // until somebody remembers to add it here, and "somebody remembers" is
     // what put three layout defects on a phone. This fails when the app grows
     // a screen the sweep has not been told about.
-    expect(_screens, hasLength(16),
+    expect(_screens, hasLength(17),
         reason: 'a screen was added or removed — add it to _screens');
   });
 }

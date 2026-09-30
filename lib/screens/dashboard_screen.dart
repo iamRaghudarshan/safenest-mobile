@@ -21,10 +21,12 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
+import '../customize.dart';
 import '../session.dart';
 import '../theme.dart';
 import '../widgets/avatar.dart';
 import '../widgets/brand_button.dart';
+import '../widgets/home_shortcuts_sheet.dart';
 import '../widgets/nature_backdrop.dart';
 import '../widgets/sync_offer.dart';
 import 'notifications_screen.dart';
@@ -58,6 +60,34 @@ class DashboardScreen extends StatefulWidget {
 }
 
 class _DashboardScreenState extends State<DashboardScreen> {
+  /// The shortcuts to draw, resolved from the saved keys.
+  ///
+  /// Read at build time rather than held in state: `Customize.revision`
+  /// rebuilds the whole app when the setting changes, so a cached copy here
+  /// would be the one thing on screen that did not follow.
+  List<({String key, String label, IconData icon, Color colour})>
+      get _shortcuts {
+    final known = {for (final c in shortcutChoices()) c.key: c};
+    final out = [
+      for (final k in Customize.homeShortcuts)
+        if (known[k] != null) known[k]!,
+    ];
+    // A saved list that resolves to nothing — every module in it withdrawn —
+    // would leave Home with an Add tile and no explanation. Fall back.
+    if (out.isEmpty) {
+      return [
+        for (final k in Customize.defaultShortcuts)
+          if (known[k] != null) known[k]!,
+      ];
+    }
+    return out;
+  }
+
+  Future<void> _customiseShortcuts() async {
+    await showHomeShortcutsSheet(context);
+    if (mounted) setState(() {});
+  }
+
   Map<String, dynamic>? _data;
   Map<String, dynamic>? _brief;
   List<Map<String, dynamic>> _photos = [];
@@ -231,29 +261,31 @@ class _DashboardScreenState extends State<DashboardScreen> {
               ),
             const SizedBox(height: 18),
 
-            // The web app's quick-act row.
-            Row(children: [
-              _Quick(
-                  icon: Icons.receipt_long,
-                  label: 'Expense',
-                  colour: kModuleColours['expenses']!,
-                  onTap: () => widget.onOpen('expenses')),
-              _Quick(
-                  icon: Icons.notifications,
-                  label: 'Reminder',
-                  colour: kModuleColours['reminders']!,
-                  onTap: () => widget.onOpen('reminders')),
-              _Quick(
-                  icon: Icons.photo_camera,
-                  label: 'Photo',
-                  colour: kModuleColours['gallery']!,
-                  onTap: () => widget.onOpen('gallery')),
-              _Quick(
-                  icon: Icons.folder,
-                  label: 'Document',
-                  colour: kModuleColours['documents']!,
-                  onTap: () => widget.onOpen('documents')),
-            ]),
+            // THE SHORTCUT ROW, chosen rather than fixed.
+            //
+            // It was four hardcoded tiles, so Vault and Notes could not be
+            // reached from Home at all. A long press opens the same customiser
+            // the bottom bar uses — one gesture for one idea — and the Add
+            // tile is there for anyone who never discovers a long press, which
+            // is most people.
+            GestureDetector(
+              onLongPress: _customiseShortcuts,
+              child: Row(children: [
+                for (final c in _shortcuts)
+                  _Quick(
+                      icon: c.icon,
+                      label: c.label,
+                      colour: c.colour,
+                      onTap: () => widget.onOpen(c.key)),
+                if (_shortcuts.length < Customize.shortcutsMax)
+                  _Quick(
+                      icon: Icons.add,
+                      label: 'Add',
+                      colour: Theme.of(context).colorScheme.outline,
+                      outlined: true,
+                      onTap: _customiseShortcuts),
+              ]),
+            ),
             const SizedBox(height: 20),
 
             // Habits today. The count lives in the same /api/dashboard payload
@@ -444,11 +476,17 @@ class _Quick extends StatelessWidget {
     required this.label,
     required this.colour,
     required this.onTap,
+    this.outlined = false,
   });
   final IconData icon;
   final String label;
   final Color colour;
   final VoidCallback onTap;
+
+  /// The Add tile. Drawn as an outline rather than another glowing chip,
+  /// because it is not one of the shortcuts — it is the way to get one, and a
+  /// row where every tile looks alike hides which of them do something.
+  final bool outlined;
 
   @override
   Widget build(BuildContext context) => Expanded(
@@ -460,22 +498,31 @@ class _Quick extends StatelessWidget {
             Container(
               height: 52,
               width: 52,
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [colour, Color.lerp(colour, Colors.white, 0.28)!],
-                ),
-                borderRadius: BorderRadius.circular(16),
-                boxShadow: [
-                  BoxShadow(
-                    color: colour.withValues(alpha: 0.38),
-                    blurRadius: 14,
-                    offset: const Offset(0, 6),
-                  ),
-                ],
-              ),
-              child: Icon(icon, color: Colors.white, size: 24),
+              decoration: outlined
+                  ? BoxDecoration(
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: colour, width: 1.5),
+                    )
+                  : BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                        colors: [
+                          colour,
+                          Color.lerp(colour, Colors.white, 0.28)!
+                        ],
+                      ),
+                      borderRadius: BorderRadius.circular(16),
+                      boxShadow: [
+                        BoxShadow(
+                          color: colour.withValues(alpha: 0.38),
+                          blurRadius: 14,
+                          offset: const Offset(0, 6),
+                        ),
+                      ],
+                    ),
+              child: Icon(icon,
+                  color: outlined ? colour : Colors.white, size: 24),
             ),
             const SizedBox(height: 7),
             Text(label,

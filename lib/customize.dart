@@ -10,6 +10,8 @@
 library;
 
 import 'package:flutter/foundation.dart';
+import 'dart:io';
+
 import 'package:shared_preferences/shared_preferences.dart';
 
 class Customize {
@@ -19,7 +21,10 @@ class Customize {
   static const _kNavOrder = 'nav_order_v1';
   static const _kNavBar = 'nav_bar_v1';          // explicit tabs shown in the bar
   static const _kNavStyle = 'nav_style_v1';     // 'colour' | 'plain'
-  static const _kBackground = 'background_v1';   // 'nature' | 'plain'
+  static const _kBackground = 'background_v1';   // 'nature' | 'plain' | 'photo'
+  static const _kBackgroundPhoto = 'background_photo_v1';  // a file in our own dir
+  static const _kBackgroundDim = 'background_dim_v1';      // 20..80
+  static const _kHomeShortcuts = 'home_shortcuts_v1';
   static const _kSkin = 'skin_v1';               // 'classic' | 'vivid'
 
   /// How many tabs the bottom bar can hold before it gets cramped, and the fewest
@@ -33,6 +38,28 @@ class Customize {
   static const navStylePlain = 'plain';
   static const backgroundNature = 'nature';
   static const backgroundPlain = 'plain';
+  static const backgroundPhoto = 'photo';
+
+  /// HOW FAR THE PICTURE IS DIMMED, and the floor is the point.
+  ///
+  /// Every Classic scaffold is transparent, so the whole app is drawn straight
+  /// on top of this. An undimmed holiday photograph puts white cards and grey
+  /// captions over a bright sky, and nothing on the page can be read. 20% is
+  /// the least that is ever applied: a background somebody cannot read over is
+  /// not a setting, it is a broken app they chose for themselves.
+  static const dimMin = 20;
+  static const dimMax = 80;
+  static const dimDefault = 45;
+
+  /// How many shortcuts may sit on Home.
+  ///
+  /// Below three it is not a row; above six a 390pt screen has no width left
+  /// for the labels — the same arithmetic that caps the bottom bar at six.
+  static const shortcutsMin = 3;
+  static const shortcutsMax = 6;
+
+  /// What Home has always shown, and what it falls back to.
+  static const defaultShortcuts = ['expenses', 'reminders', 'gallery', 'documents'];
 
   /// THE TWO LOOKS.
   ///
@@ -59,8 +86,22 @@ class Customize {
   static List<String> _navBar = const [];
   static String _navStyle = navStyleColour;
   static String _background = backgroundNature;
+  static String _backgroundPhoto = '';
+  static int _backgroundDim = dimDefault;
+  static List<String> _homeShortcuts = const [];
   static String _skin = skinClassic;
   static bool _loaded = false;
+
+  /// Read the settings again from scratch.
+  ///
+  /// `ensureLoaded` is a no-op after the first call, which is right for an app
+  /// that loads once — but it makes the load path itself untestable, and the
+  /// load path is where a photo background whose file has vanished is caught.
+  @visibleForTesting
+  static Future<void> reloadForTest() async {
+    _loaded = false;
+    await ensureLoaded();
+  }
 
   /// Safe to call repeatedly — the first read wins and the rest are no-ops.
   static Future<void> ensureLoaded() async {
@@ -71,6 +112,19 @@ class Customize {
     _navBar = p.getStringList(_kNavBar) ?? const [];
     _navStyle = p.getString(_kNavStyle) ?? navStyleColour;
     _background = p.getString(_kBackground) ?? backgroundNature;
+    _backgroundPhoto = p.getString(_kBackgroundPhoto) ?? '';
+    _backgroundDim =
+        (p.getInt(_kBackgroundDim) ?? dimDefault).clamp(dimMin, dimMax);
+    _homeShortcuts = p.getStringList(_kHomeShortcuts) ?? const [];
+    // A photo background whose FILE has gone — the phone was restored, the app
+    // data cleared — must not leave the app with nothing behind it. Checked at
+    // load rather than at paint: a missing file discovered while drawing is a
+    // blank screen, and this is the one place it can be answered once.
+    if (_background == backgroundPhoto &&
+        (_backgroundPhoto.isEmpty || !File(_backgroundPhoto).existsSync())) {
+      _background = backgroundNature;
+      _backgroundPhoto = '';
+    }
     // Anything unrecognised falls back to classic rather than to whatever was
     // written: a preference file carried forward from a build that knew a skin
     // this one does not must not leave the app with no theme at all.
@@ -97,6 +151,48 @@ class Customize {
   static String get background => _background;
   static bool get colourfulNav => _navStyle == navStyleColour;
   static bool get natureBackground => _background == backgroundNature;
+  static bool get photoBackground => _background == backgroundPhoto;
+
+  /// The chosen picture, or empty. It is a copy inside the app's own folder,
+  /// never a path into the camera roll: the person is free to delete the
+  /// original, and on iOS a library path is not readable again after a
+  /// restart anyway.
+  static String get backgroundImagePath => _backgroundPhoto;
+  static int get backgroundDim => _backgroundDim;
+
+  /// The shortcuts on Home, in order. Empty means the default four, so a
+  /// phone that has never touched this behaves exactly as it always did.
+  static List<String> get homeShortcuts =>
+      _homeShortcuts.isEmpty ? defaultShortcuts : _homeShortcuts;
+
+  /// True once somebody has chosen for themselves — used only to decide
+  /// whether "Reset" has anything to undo.
+  static bool get homeShortcutsChosen => _homeShortcuts.isNotEmpty;
+
+  static Future<void> setHomeShortcuts(List<String> keys) async {
+    _homeShortcuts = keys;
+    final p = await SharedPreferences.getInstance();
+    await p.setStringList(_kHomeShortcuts, keys);
+    revision.value++;
+  }
+
+  static Future<void> setBackgroundDim(int v) async {
+    _backgroundDim = v.clamp(dimMin, dimMax);
+    final p = await SharedPreferences.getInstance();
+    await p.setInt(_kBackgroundDim, _backgroundDim);
+    revision.value++;
+  }
+
+  /// Use [path] as the background. The caller has already copied the file into
+  /// the app's own folder; this only records it.
+  static Future<void> setBackgroundPhoto(String path) async {
+    _backgroundPhoto = path;
+    _background = backgroundPhoto;
+    final p = await SharedPreferences.getInstance();
+    await p.setString(_kBackgroundPhoto, path);
+    await p.setString(_kBackground, backgroundPhoto);
+    revision.value++;
+  }
 
   static Future<void> setNavStyle(String v) async {
     _navStyle = v;
