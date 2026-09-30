@@ -59,7 +59,7 @@ android {
         // EncryptedSharedPreferences — which is the whole reason the sign-in
         // token is not sitting in a plain XML file readable by anything with
         // root. Android 6 and later, so about every phone still in use.
-        minSdk = flutter.minSdkVersion
+        minSdk = 23
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
