@@ -16,6 +16,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:photo_manager/photo_manager.dart';
 
 import '../customize.dart';
+import '../theme.dart';
 
 class PhotoBackdrop extends StatelessWidget {
   const PhotoBackdrop({super.key, this.path, this.dim});
@@ -27,10 +28,19 @@ class PhotoBackdrop extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final file = path ?? Customize.backgroundImagePath;
-    final shade = ((dim ?? Customize.backgroundDim)
+    final theme = Theme.of(context);
+    final surface = theme.colorScheme.surface;
+    // RAISED TO WHAT IS LEGIBLE, whatever was saved. The floor depends on the
+    // theme — a dark page needs more veil than a light one — so somebody who
+    // set 50% in light mode and then switched to dark must not be left with an
+    // app they cannot read. Enforced here rather than at the slider, because
+    // this is the only place that knows which theme is actually painting.
+    final floor = readableVeil(ink: theme.colorScheme.onSurface,
+        surface: surface);
+    final asked = ((dim ?? Customize.backgroundDim)
             .clamp(Customize.dimMin, Customize.dimMax)) /
         100;
-    final surface = Theme.of(context).colorScheme.surface;
+    final shade = asked < floor ? floor : asked;
 
     if (file.isEmpty) return ColoredBox(color: surface);
 
@@ -51,10 +61,21 @@ class PhotoBackdrop extends StatelessWidget {
           gaplessPlayback: true,
           errorBuilder: (_, _, _) => ColoredBox(color: surface),
         ),
-        // Dark rather than a blur. A blur is a per-frame GPU pass behind every
-        // screen in the app, on a phone that is also decoding a camera roll;
-        // dimming costs one flat rectangle and does the same job for reading.
-        ColoredBox(color: Colors.black.withValues(alpha: shade)),
+        // THE VEIL IS THE PAGE COLOUR, NOT BLACK — and getting this wrong is
+        // what made the first version unreadable.
+        //
+        // Every word in Classic is dark ink chosen to be read on a near-white
+        // page. Darkening the photograph moved the ground the WRONG WAY: dark
+        // text on a darkened picture is worse than dark text on the picture
+        // itself. What the text needs is its own ground back, so the veil is
+        // `surface` — the colour the app was drawn for. In dark mode that is
+        // a dark surface and light text, and the same reasoning holds without
+        // a second branch.
+        //
+        // Flat colour rather than a blur, still: a blur is a per-frame GPU
+        // pass behind every screen in the app, on a phone that is also
+        // decoding a camera roll, and it buys nothing a rectangle does not.
+        ColoredBox(color: surface.withValues(alpha: shade)),
       ],
     );
   }

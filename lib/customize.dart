@@ -47,9 +47,23 @@ class Customize {
   /// captions over a bright sky, and nothing on the page can be read. 20% is
   /// the least that is ever applied: a background somebody cannot read over is
   /// not a setting, it is a broken app they chose for themselves.
-  static const dimMin = 20;
-  static const dimMax = 80;
-  static const dimDefault = 45;
+  /// The floor is NOT a matter of taste. Classic's words are dark ink meant
+  /// for a near-white page, and a photograph can be any colour at all — a
+  /// black-and-white night shot included. Below this the veil no longer
+  /// returns enough of the page colour for body text to reach the 4.5:1 that
+  /// makes it legible, which `backdropContrast` in theme.dart computes rather
+  /// than assumes. Raised from 20 after the first version shipped unreadable.
+  /// The floor is NOT a matter of taste, and it is not fixed either.
+  ///
+  /// Classic's words are dark ink meant for a near-white page, and a
+  /// photograph can be any colour at all. `readableVeil` in theme.dart
+  /// computes the least veil that still reaches 4.5:1 against the worst
+  /// picture somebody could choose — 50% for the light page, 63% for the dark
+  /// one — and the backdrop raises whatever is stored to that. This constant
+  /// is only the absolute bound on what may be SAVED.
+  static const dimMin = 30;
+  static const dimMax = 95;
+  static const dimDefault = 70;
 
   /// How many shortcuts may sit on Home.
   ///

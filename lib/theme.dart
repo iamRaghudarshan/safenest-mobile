@@ -283,6 +283,74 @@ class Brand {
 /// [skin] defaults to classic so every existing caller — and every one of the
 /// three hundred tests that builds a theme — keeps the app it already had.
 /// Only main.dart passes the other one, from the saved preference.
+/// The worst contrast body text can have over a veiled photograph.
+///
+/// WHY THIS IS ARITHMETIC AND NOT A JUDGEMENT. The background setting lets
+/// somebody put ANY picture behind the whole app — a black-and-white night
+/// shot, a white wall — and Classic's words are dark ink drawn for a
+/// near-white page. Whether they can still be read is a number, and picking
+/// the veil's floor by eye is how the first version shipped unreadable.
+///
+/// The veil is [surface] at [alpha], so the ground under the text is
+///   result = alpha * surface + (1 - alpha) * photo
+/// and the worst case is whichever of black or white the photograph could be.
+/// Returns the smaller of the two contrast ratios; 4.5 is the readable
+/// threshold for body text.
+double backdropContrast({
+  required Color ink,
+  required Color surface,
+  required double alpha,
+}) {
+  double ratio(Color photo) {
+    final ground = Color.lerp(photo, surface, alpha)!;
+    final a = ink.computeLuminance();
+    final b = ground.computeLuminance();
+    final hi = a > b ? a : b;
+    final lo = a > b ? b : a;
+    return (hi + 0.05) / (lo + 0.05);
+  }
+
+  final dark = ratio(const Color(0xFF000000));
+  final light = ratio(const Color(0xFFFFFFFF));
+  return dark < light ? dark : light;
+}
+
+/// The least veil that still lets body text be read over ANY photograph.
+///
+/// Computed rather than chosen, and computed PER THEME rather than once: the
+/// light page needs 50% to reach 4.5:1 against a black picture, the dark page
+/// needs 63% against a white one. A single floor covering both would wash the
+/// photograph out in light mode for a reason that only exists in dark mode.
+///
+/// Memoised because it is asked for on every build of the app shell, and the
+/// answer only changes when the theme does.
+final Map<int, double> _veilCache = {};
+
+double readableVeil({required Color ink, required Color surface}) {
+  final key = Object.hash(ink.toARGB32(), surface.toARGB32());
+  final had = _veilCache[key];
+  if (had != null) return had;
+  var a = 0.30;
+  while (a < 0.96) {
+    if (backdropContrast(ink: ink, surface: surface, alpha: a) >= 4.5) break;
+    a += 0.01;
+  }
+  // Rounded up to the nearest whole percent so it lines up with a slider that
+  // moves in percents — a floor of 0.503 that the slider cannot express is a
+  // floor that is silently crossed.
+  final out = (a * 100).ceilToDouble() / 100;
+  _veilCache[key] = out;
+  return out;
+}
+
+/// The same, as the percentage the settings screen shows.
+int readableVeilPercent(ThemeData theme) => (readableVeil(
+              ink: theme.colorScheme.onSurface,
+              surface: theme.colorScheme.surface,
+            ) *
+            100)
+        .round();
+
 /// A button that may sit in a Row: as wide as its label and no wider.
 ///
 /// The button themes above set a minimum width of infinity so that buttons

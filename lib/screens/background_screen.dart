@@ -104,6 +104,12 @@ class _BackgroundScreenState extends State<BackgroundScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    // The floor the backdrop will actually enforce, which depends on the theme
+    // — so the slider has to ask rather than name a number of its own. A
+    // control that lets somebody choose a value that is then quietly raised is
+    // worse than one that does not offer it.
+    final floor = readableVeilPercent(theme);
+    final shown = _dim < floor ? floor : _dim;
 
     return Scaffold(
       appBar: AppBar(title: const Text('App background')),
@@ -222,25 +228,25 @@ class _BackgroundScreenState extends State<BackgroundScreen> {
                   style: theme.textTheme.titleSmall
                       ?.copyWith(fontWeight: FontWeight.w800)),
             ),
-            Text('$_dim%',
+            Text('$shown%',
                 style: const TextStyle(
                     fontWeight: FontWeight.w700, color: kBrand)),
           ]),
           const SizedBox(height: 2),
           Text(
-              'Your pages sit on top of the picture. The more it is dimmed, '
-              'the easier they are to read.',
+              'Your pages sit on top of the picture. This fades it back '
+              'towards the page colour so the words stay readable.',
               style: TextStyle(
                   fontSize: 11.5,
                   height: 1.5,
                   color: theme.colorScheme.onSurfaceVariant)),
 
           Slider(
-            value: _dim.toDouble(),
-            min: Customize.dimMin.toDouble(),
+            value: shown.toDouble(),
+            min: floor.toDouble(),
             max: Customize.dimMax.toDouble(),
-            divisions: (Customize.dimMax - Customize.dimMin) ~/ 5,
-            label: '$_dim%',
+            divisions: (Customize.dimMax - floor) ~/ 2,
+            label: '$shown%',
             // Live while dragging, saved when it stops: writing to disk and
             // rebuilding the whole app on every pixel of a drag is what makes
             // a slider stutter.
@@ -249,7 +255,7 @@ class _BackgroundScreenState extends State<BackgroundScreen> {
           ),
 
           Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            _DimSample(dim: _dim),
+            _DimSample(dim: shown),
             const SizedBox(width: 12),
             Expanded(
               child: Column(
@@ -272,9 +278,9 @@ class _BackgroundScreenState extends State<BackgroundScreen> {
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: Text(
-                          'It will not go below ${Customize.dimMin}%. A '
-                          'background nobody can read over is not worth '
-                          'offering.',
+                          'It will not go below $floor%: that is the least '
+                          'that keeps the words readable over any picture. '
+                          'The dark theme needs a little more.',
                           style: const TextStyle(fontSize: 11, height: 1.45)),
                     ),
                   ]),
