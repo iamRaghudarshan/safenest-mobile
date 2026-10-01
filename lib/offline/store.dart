@@ -229,6 +229,59 @@ const _ignoredDDL = '''
     at       TEXT NOT NULL
   )''';
 
+/// LIFE MEMORY: the things somebody has told the app.
+///
+/// On the PHONE first and always. Every other module in SafeNest is a cache of
+/// what the server holds, refreshed when it can be; this one is the opposite —
+/// the phone is where a memory is created, by speaking, and very often with no
+/// signal at all. It is written here, shown at once, and queued for the
+/// computer; `server_id` stays null until the computer has it, and that is the
+/// only thing the cloud mark on a card reads.
+///
+/// `body` is the words, verbatim. Everything else is derived from them and can
+/// be rebuilt; the words cannot, so they are what is protected.
+const _memoriesDDL = '''
+  CREATE TABLE memories (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    server_id  INTEGER,
+    said_at    TEXT    NOT NULL,
+    body       TEXT    NOT NULL,
+    spoken     INTEGER NOT NULL DEFAULT 0,
+    photo_id   TEXT,
+    photo_path TEXT,
+    created_at TEXT    NOT NULL,
+    updated_at TEXT    NOT NULL
+  )''';
+
+const _memoriesIndexDDL =
+    'CREATE INDEX idx_memories_said ON memories(said_at DESC)';
+
+/// The facts a person CONFIRMED about a memory.
+///
+/// A separate table rather than columns on `memories`, because one memory can
+/// carry several of the same kind — two people, a place and a shop — and
+/// because only what was confirmed is here at all. What the reader merely
+/// guessed is not stored anywhere: it is re-read from the words whenever it is
+/// wanted, so a better reader later improves old memories instead of leaving
+/// yesterday's guesses lying about as though somebody had agreed to them.
+///
+/// `at` is set only for the kinds that point at a moment, and it is what the
+/// reminders are built from.
+const _factsDDL = '''
+  CREATE TABLE memory_facts (
+    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    memory_id INTEGER NOT NULL,
+    kind      TEXT    NOT NULL,
+    value     TEXT    NOT NULL,
+    at        TEXT
+  )''';
+
+const _factsIndexDDL =
+    'CREATE INDEX idx_facts_memory ON memory_facts(memory_id)';
+
+const _factsAtIndexDDL =
+    'CREATE INDEX idx_facts_at ON memory_facts(at)';
+
 /// A file's sha256, remembered so it is computed once and not once per run.
 ///
 /// THE COST THIS REMOVES IS THE REAL ONE. Asking the computer "do you already
@@ -309,7 +362,7 @@ class OfflineStore {
     final file = _pathOverride ?? p.join(await getDatabasesPath(), 'offline.db');
     return openDatabase(
       file,
-      version: 7,
+      version: 8,
       // v2 added `pending.action`. An upgrade rather than a recreate, because
       // by the time this shipped there were phones holding queued work in a v1
       // database — and that queue is the only copy of it anywhere.
@@ -340,6 +393,13 @@ class OfflineStore {
         }
         if (from < 7) {
           await db.execute(_ignoredDDL);
+        }
+        if (from < 8) {
+          await db.execute(_memoriesDDL);
+          await db.execute(_memoriesIndexDDL);
+          await db.execute(_factsDDL);
+          await db.execute(_factsIndexDDL);
+          await db.execute(_factsAtIndexDDL);
         }
       },
       onCreate: (db, _) async {
@@ -380,6 +440,11 @@ class OfflineStore {
         await db.execute(_ledgerIndexDDL);
         await db.execute(_hashesDDL);
         await db.execute(_ignoredDDL);
+        await db.execute(_memoriesDDL);
+        await db.execute(_memoriesIndexDDL);
+        await db.execute(_factsDDL);
+        await db.execute(_factsIndexDDL);
+        await db.execute(_factsAtIndexDDL);
         await db.execute('''
           CREATE TABLE local_ids (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -714,6 +779,145 @@ class OfflineStore {
     final db = await _open;
     final r = await db.rawQuery('SELECT COUNT(*) c FROM backup_ledger');
     return (r.first['c'] as int?) ?? 0;
+  }
+
+  // ------------------------------------------------------- life memory
+
+  /// Write down something that was said. Returns the new local id.
+  ///
+  /// Facts are written in the same transaction as the words. A memory whose
+  /// warranty was confirmed and then lost to a crash between two writes is
+  /// worse than one with no facts at all: the person saw it accepted.
+  Future<int> addMemory({
+    required String body,
+    required DateTime saidAt,
+    bool spoken = false,
+    String? photoId,
+    String? photoPath,
+    List<({String kind, String value, DateTime? at})> facts = const [],
+  }) async {
+    final db = await _open;
+    final now = DateTime.now().toIso8601String();
+    return db.transaction((tx) async {
+      final id = await tx.insert('memories', {
+        'said_at': saidAt.toIso8601String(),
+        'body': body,
+        'spoken': spoken ? 1 : 0,
+        'photo_id': photoId,
+        'photo_path': photoPath,
+        'created_at': now,
+        'updated_at': now,
+      });
+      for (final f in facts) {
+        await tx.insert('memory_facts', {
+          'memory_id': id,
+          'kind': f.kind,
+          'value': f.value,
+          'at': f.at?.toIso8601String(),
+        });
+      }
+      return id;
+    });
+  }
+
+  /// The thread: newest first, with each memory's confirmed facts attached.
+  ///
+  /// Two queries rather than a join, and then stitched. A join returns one row
+  /// per fact, so a memory with four facts arrives four times and has to be
+  /// folded back together anyway — and the folding is where a photo path gets
+  /// dropped. Two plain queries are easier to be right about.
+  Future<List<Map<String, dynamic>>> memories({int limit = 200, int offset = 0}) async {
+    final db = await _open;
+    final rows = await db.query('memories',
+        orderBy: 'said_at DESC, id DESC', limit: limit, offset: offset);
+    return _withFacts(db, rows);
+  }
+
+  /// Everything matching [term], in the WORDS as well as the facts.
+  ///
+  /// The words matter most: somebody looking for "the blue suitcase" is
+  /// remembering how they said it, not what anybody labelled it. Facts are
+  /// searched too so that "Jayanagar" finds a memory that only mentions the
+  /// place in a confirmed tag.
+  Future<List<Map<String, dynamic>>> searchMemories(String term,
+      {int limit = 100}) async {
+    final q = term.trim();
+    if (q.isEmpty) return const [];
+    final db = await _open;
+    final like = '%${q.replaceAll('%', r'\%').replaceAll('_', r'\_')}%';
+    final rows = await db.rawQuery(
+        'SELECT m.* FROM memories m '
+        'WHERE m.body LIKE ? ESCAPE ? '
+        'OR m.id IN (SELECT memory_id FROM memory_facts WHERE value LIKE ? ESCAPE ?) '
+        'ORDER BY m.said_at DESC LIMIT ?',
+        [like, r'\', like, r'\', limit]);
+    return _withFacts(db, rows);
+  }
+
+  /// Confirmed facts that point at a moment still to come — what the reminders
+  /// are built from. Ordered soonest first, which is the order they matter in.
+  Future<List<Map<String, dynamic>>> memoryDates({DateTime? from}) async {
+    final db = await _open;
+    final since = (from ?? DateTime.now()).toIso8601String();
+    return db.rawQuery(
+        'SELECT f.*, m.body, m.photo_path FROM memory_facts f '
+        'JOIN memories m ON m.id = f.memory_id '
+        'WHERE f.at IS NOT NULL AND f.at >= ? '
+        'ORDER BY f.at ASC',
+        [since]);
+  }
+
+  Future<int> memoryCount() async {
+    final db = await _open;
+    final r = await db.rawQuery('SELECT COUNT(*) c FROM memories');
+    return (r.first['c'] as int?) ?? 0;
+  }
+
+  Future<void> deleteMemory(int id) async {
+    final db = await _open;
+    await db.transaction((tx) async {
+      await tx.delete('memory_facts', where: 'memory_id = ?', whereArgs: [id]);
+      await tx.delete('memories', where: 'id = ?', whereArgs: [id]);
+    });
+  }
+
+  /// Replace the confirmed facts of one memory. Used when somebody edits the
+  /// chips afterwards — the words are untouched, which is the point.
+  Future<void> setMemoryFacts(
+      int memoryId, List<({String kind, String value, DateTime? at})> facts) async {
+    final db = await _open;
+    await db.transaction((tx) async {
+      await tx.delete('memory_facts',
+          where: 'memory_id = ?', whereArgs: [memoryId]);
+      for (final f in facts) {
+        await tx.insert('memory_facts', {
+          'memory_id': memoryId,
+          'kind': f.kind,
+          'value': f.value,
+          'at': f.at?.toIso8601String(),
+        });
+      }
+      await tx.update('memories', {'updated_at': DateTime.now().toIso8601String()},
+          where: 'id = ?', whereArgs: [memoryId]);
+    });
+  }
+
+  /// Attach each memory's facts, in one further query rather than one per row.
+  Future<List<Map<String, dynamic>>> _withFacts(
+      dynamic db, List<Map<String, Object?>> rows) async {
+    if (rows.isEmpty) return const [];
+    final ids = [for (final r in rows) r['id'] as int];
+    final marks = List.filled(ids.length, '?').join(',');
+    final facts = await db.rawQuery(
+        'SELECT * FROM memory_facts WHERE memory_id IN ($marks)', ids);
+    final byMemory = <int, List<Map<String, Object?>>>{};
+    for (final f in facts) {
+      (byMemory[f['memory_id'] as int] ??= []).add(f);
+    }
+    return [
+      for (final r in rows)
+        {...r, 'facts': byMemory[r['id'] as int] ?? const []}
+    ];
   }
 
   // ------------------------------------------------- what to stop trying
