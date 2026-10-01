@@ -36,7 +36,7 @@ Future<void> _shoot(WidgetTester tester, Brightness mode, String name) async {
           key: key,
           child: SizedBox(
             width: 360,
-            child: BackupFlight(running: true),
+            child: BackupFlight(running: true, level: 0.55),
           ),
         ),
       ),
@@ -86,7 +86,7 @@ void main() {
     // where photos go, which is worth seeing on an idle screen too.
     await tester.pumpWidget(MaterialApp(
       theme: buildTheme(const Brand(), Brightness.light),
-      home: const Scaffold(body: BackupFlight(running: false)),
+      home: const Scaffold(body: BackupFlight(running: false, filled: false)),
     ));
     await tester.pump();
     expect(tester.takeException(), isNull);

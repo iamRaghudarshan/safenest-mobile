@@ -418,6 +418,11 @@ class _BackupScreenState extends State<BackupScreen> {
                     // truth and is also the only thing on the screen that
                     // says it without words.
                     filled: running || done || p.done > 0,
+                    // HOW FULL THE COMPUTER IS, from the run's own numbers.
+                    // The screen already carries a progress bar; this puts the
+                    // same fact where the eye already is, and it is the only
+                    // part of the picture that is not decoration.
+                    level: p.total > 0 ? p.handled / p.total : (done ? 1 : 0),
                     onDark: true,
                     photos: [
                       for (final it in p.inFlight)
