@@ -28,6 +28,7 @@ import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 
 import '../api.dart';
+import '../memory/push.dart';
 import 'records.dart';
 import 'store.dart';
 
@@ -209,7 +210,7 @@ class SyncService extends ChangeNotifier {
         // this phone lives in a different table, and returning here without
         // sending it would leave it stranded for ever with the button
         // cheerfully reporting nothing to do.
-        final problems = <String>[...await _sendFiles()];
+        final problems = <String>[...await _sendFiles(), ...await _sendMemories()];
         if (_records != null) {
           _step = 'Getting your records';
           notifyListeners();
@@ -319,6 +320,7 @@ class SyncService extends ChangeNotifier {
       // refreshed lists already contain them.
       final fileProblems = await _sendFiles();
       problems.addAll(fileProblems);
+      problems.addAll(await _sendMemories());
 
       // AND NOW THE OTHER DIRECTION. Sync means "make this phone and that
       // computer agree", not "empty my outbox" — so once what was typed here
@@ -360,6 +362,22 @@ class SyncService extends ChangeNotifier {
   /// rather than a record. Same discipline though: one at a time, cleared only
   /// when the computer confirms THAT one, and the pages are deleted only after
   /// it has. Until then they are the only copy.
+  /// Life Memory, which pushes its own table rather than the journal.
+  ///
+  /// Called from BOTH exits of run(), beside _sendFiles, and for the same reason
+  /// that one is: there is an early return for an empty journal, and a module
+  /// whose queue lives outside `pending` would otherwise be stranded there for
+  /// ever with the Sync button reporting nothing to do. See push.dart for why
+  /// this module is the exception.
+  Future<List<String>> _sendMemories() async {
+    if (await _store.unsyncedMemoryCount() == 0) return const [];
+    _step = 'Sending what you have said';
+    notifyListeners();
+    final r = await pushMemories(_store, _api());
+    if (r.moved) debugPrint('[sync] $r');
+    return r.problems;
+  }
+
   Future<List<String>> _sendFiles() async {
     final waiting = await _store.pendingFiles();
     if (waiting.isEmpty) return const [];

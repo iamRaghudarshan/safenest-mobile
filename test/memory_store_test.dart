@@ -322,4 +322,88 @@ void main() {
     expect(id, greaterThan(0));
     expect(await store.memoryCount(), 1);
   });
+
+  group('the v9 column, which is the one that could stop the app starting',
+      () {
+    test('a v8 phone gains client_uuid and keeps its memories', () async {
+      final dir = await Directory.systemTemp.createTemp('safenest-v8');
+      addTearDown(() => dir.delete(recursive: true).catchError((_) => dir));
+      final path = p.join(dir.path, 'offline.db');
+
+      // v8 as it actually was: memories without client_uuid.
+      final old = await databaseFactory.openDatabase(path,
+          options: OpenDatabaseOptions(
+            version: 8,
+            onCreate: (db, _) async {
+              await db.execute('CREATE TABLE memories ('
+                  'id INTEGER PRIMARY KEY AUTOINCREMENT, server_id INTEGER,'
+                  'said_at TEXT NOT NULL, body TEXT NOT NULL,'
+                  'spoken INTEGER NOT NULL DEFAULT 0, photo_id TEXT,'
+                  'photo_path TEXT, created_at TEXT NOT NULL,'
+                  'updated_at TEXT NOT NULL)');
+              await db.execute('CREATE TABLE memory_facts ('
+                  'id INTEGER PRIMARY KEY AUTOINCREMENT,'
+                  'memory_id INTEGER NOT NULL, kind TEXT NOT NULL,'
+                  'value TEXT NOT NULL, at TEXT)');
+            },
+          ));
+      await old.insert('memories', {
+        'said_at': DateTime(2026, 9, 1).toIso8601String(),
+        'body': 'said before the upgrade',
+        'spoken': 1,
+        'created_at': DateTime(2026, 9, 1).toIso8601String(),
+        'updated_at': DateTime(2026, 9, 1).toIso8601String(),
+      });
+      await old.close();
+
+      final store = OfflineStore(secure: memSecure(), path: path);
+      final rows = await store.memories();
+      expect(rows, hasLength(1),
+          reason: 'the words are the only copy there is');
+      expect(rows.single['body'], 'said before the upgrade');
+
+      // The column is there, and a new memory gets a uuid even though the old
+      // one has none — which is right: an old row has nothing to push with and
+      // is left alone rather than being invented one.
+      await store.addMemory(body: 'said after', saidAt: DateTime(2026, 10, 1));
+      final after = await store.memories();
+      final fresh = after.firstWhere((r) => r['body'] == 'said after');
+      expect(fresh['client_uuid'], isNotNull);
+    });
+
+    test('a v7 phone upgrades straight through without a duplicate column',
+        () async {
+      // THE SHAPE THAT ONCE SHIPPED AN APP THAT WOULD NOT START. Going from v7
+      // creates `memories` whole from the CURRENT definition — client_uuid
+      // included — and then the v9 step would add it a second time, throwing
+      // "duplicate column name" inside onUpgrade and failing the open. Nothing
+      // about this is visible without running it.
+      final dir = await Directory.systemTemp.createTemp('safenest-v7to9');
+      addTearDown(() => dir.delete(recursive: true).catchError((_) => dir));
+      final path = p.join(dir.path, 'offline.db');
+
+      final old = await databaseFactory.openDatabase(path,
+          options: OpenDatabaseOptions(
+            version: 7,
+            onCreate: (db, _) async {
+              await db.execute('CREATE TABLE backup_ledger ('
+                  'asset_id TEXT PRIMARY KEY, modified INTEGER NOT NULL DEFAULT 0,'
+                  'signature INTEGER NOT NULL DEFAULT 0, sent_at TEXT NOT NULL)');
+              await db.execute('CREATE TABLE backup_ignored ('
+                  "asset_id TEXT PRIMARY KEY, reason TEXT NOT NULL DEFAULT '',"
+                  'at TEXT NOT NULL)');
+            },
+          ));
+      await old.close();
+
+      final store = OfflineStore(secure: memSecure(), path: path);
+      // Opening at all is the assertion. The rest proves the table is usable
+      // rather than merely present.
+      final id = await store.addMemory(
+          body: 'first after a two-version jump', saidAt: DateTime(2026, 10, 1));
+      expect(id, greaterThan(0));
+      expect(await store.unsyncedMemoryCount(), 1);
+      expect((await store.unsyncedMemories()).single['client_uuid'], isNotNull);
+    });
+  });
 }

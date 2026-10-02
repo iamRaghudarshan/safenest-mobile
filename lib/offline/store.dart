@@ -244,6 +244,7 @@ const _memoriesDDL = '''
   CREATE TABLE memories (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     server_id  INTEGER,
+    client_uuid TEXT,
     said_at    TEXT    NOT NULL,
     body       TEXT    NOT NULL,
     spoken     INTEGER NOT NULL DEFAULT 0,
@@ -362,7 +363,7 @@ class OfflineStore {
     final file = _pathOverride ?? p.join(await getDatabasesPath(), 'offline.db');
     return openDatabase(
       file,
-      version: 8,
+      version: 9,
       // v2 added `pending.action`. An upgrade rather than a recreate, because
       // by the time this shipped there were phones holding queued work in a v1
       // database — and that queue is the only copy of it anywhere.
@@ -400,6 +401,16 @@ class OfflineStore {
           await db.execute(_factsDDL);
           await db.execute(_factsIndexDDL);
           await db.execute(_factsAtIndexDDL);
+        }
+        if (from < 9) {
+          // GUARDED, not a plain ALTER, and this is the exact shape that once
+          // shipped an app which would not start. An upgrade from v7 runs the
+          // block above, which creates `memories` from the CURRENT definition —
+          // client_uuid included — and then this block would add it a second
+          // time and throw "duplicate column name" inside onUpgrade, failing
+          // the open. Any column added to a table an earlier migration may have
+          // created whole has to go on this way.
+          await _addColumnIfMissing(db, 'memories', 'client_uuid', 'TEXT');
         }
       },
       onCreate: (db, _) async {
@@ -452,6 +463,17 @@ class OfflineStore {
           )''');
       },
     );
+  }
+
+  /// Add a column only if the table does not already have it.
+  ///
+  /// See the v9 note above for why this exists rather than a bare ALTER.
+  static Future<void> _addColumnIfMissing(
+      Database db, String table, String column, String type) async {
+    final cols = await db.rawQuery('PRAGMA table_info($table)');
+    final have = {for (final c in cols) '${c['name']}'};
+    if (have.contains(column)) return;
+    await db.execute('ALTER TABLE $table ADD COLUMN $column $type');
   }
 
   // ---------------------------------------------------------------- crypto
@@ -800,6 +822,13 @@ class OfflineStore {
     final now = DateTime.now().toIso8601String();
     return db.transaction((tx) async {
       final id = await tx.insert('memories', {
+        // MINTED HERE, on the phone, and never again. The server remembers the
+        // uuids it has honoured, so a push whose reply never arrived can be
+        // retried without making a second copy — and with this module that
+        // matters more than anywhere else, because the phone's row is the
+        // original and a duplicate on the computer cannot be told from a second
+        // thing somebody said.
+        'client_uuid': _uuid.v4(),
         'said_at': saidAt.toIso8601String(),
         'body': body,
         'spoken': spoken ? 1 : 0,
