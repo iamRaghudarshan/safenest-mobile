@@ -23,6 +23,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 import 'package:safenest/customize.dart';
+import 'package:safenest/memory/dictation.dart';
 import 'package:safenest/offline/mode.dart';
 import 'package:safenest/offline/records.dart';
 import 'package:safenest/offline/store.dart';
@@ -37,6 +38,7 @@ import 'package:safenest/screens/background_screen.dart';
 import 'package:safenest/screens/documents_screen.dart';
 import 'package:safenest/screens/habits_screen.dart';
 import 'package:safenest/screens/labels_screen.dart';
+import 'package:safenest/screens/life_memory_screen.dart';
 import 'package:safenest/screens/modules_screen.dart';
 import 'package:safenest/screens/notes_screen.dart';
 import 'package:safenest/screens/gallery_screen.dart' show Photo;
@@ -86,6 +88,8 @@ final _screens = <String, Widget Function()>{
   'Documents': () => const DocumentsScreen(),
   'Habits': () => const HabitsScreen(),
   'Labels': () => const LabelsScreen(),
+  'Life Memory': () =>
+      LifeMemoryScreen(dictation: FakeDictation(), debugRows: const []),
   'Modules': () => ModulesScreen(onOpen: (_) {}),
   'Notes': () => const NotesScreen(),
   'Places': () => const PlacesScreen(),
@@ -214,7 +218,7 @@ void main() {
     // until somebody remembers to add it here, and "somebody remembers" is
     // what put three layout defects on a phone. This fails when the app grows
     // a screen the sweep has not been told about.
-    expect(_screens, hasLength(17),
+    expect(_screens, hasLength(18),
         reason: 'a screen was added or removed — add it to _screens');
   });
 }

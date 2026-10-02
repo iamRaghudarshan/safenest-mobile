@@ -25,6 +25,7 @@ import '../update.dart';
 import 'dashboard_screen.dart';
 import 'vivid_home.dart';
 import 'documents_screen.dart';
+import 'life_memory_screen.dart';
 import 'notes_screen.dart';
 import 'habits_screen.dart';
 import 'module_list_screen.dart';
@@ -83,6 +84,8 @@ const _allTabs = <_Tab>[
   // Addable extras — off by default, each opens its own screen as a tab.
   _Tab('notes', 'Notes', Icons.lightbulb_outline, Icons.lightbulb,
       Color(0xFFF5B301), 'notes'),
+  _Tab('memory', 'Memory', Icons.auto_stories_outlined, Icons.auto_stories,
+      Color(0xFF6B3C8C), 'memory'),
   _Tab('documents', 'Documents', Icons.folder_outlined, Icons.folder,
       Color(0xFF0D9488), 'documents'),
   _Tab('habits', 'Habits', Icons.local_fire_department_outlined,
@@ -272,6 +275,10 @@ class _HomeScreenState extends State<HomeScreen> {
         await Navigator.of(context)
             .push(MaterialPageRoute(builder: (_) => const NotesScreen()));
         if (mounted) setState(() => _refreshTick++);
+      case 'memory':
+        await Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => const LifeMemoryScreen()));
+        if (mounted) setState(() => _refreshTick++);
       case 'search':
         // The Dashboard has had a search button since it was written and this
         // switch had no case for it — no tab, no ModuleSpec, no branch — so it
@@ -316,6 +323,8 @@ class _HomeScreenState extends State<HomeScreen> {
       // same screen they open from the Modules grid.
       case 'notes':
         return const NotesScreen();
+      case 'memory':
+        return const LifeMemoryScreen(embedded: true);
       case 'documents':
         return const DocumentsScreen();
       case 'habits':

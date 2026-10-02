@@ -99,10 +99,20 @@ List<Fact> readFacts(String text, DateTime now) {
   for (final f in _amounts(text)) {
     add(f);
   }
+  // Places and shops first, and what they claim is remembered: a capitalised
+  // word already offered as "Croma, where it came from" must not be offered a
+  // second time as a bare name. Two suggestions for one word reads as the app
+  // being unsure, and the person has to decide which of two identical chips to
+  // tap.
+  final claimed = <String>{};
   for (final f in _placesAndShops(text)) {
     add(f);
+    for (final word in f.value.split(RegExp(r'\s+'))) {
+      claimed.add(word.toLowerCase());
+    }
   }
   for (final f in _names(text)) {
+    if (claimed.contains(f.value.toLowerCase())) continue;
     add(f);
   }
   return out;

@@ -121,6 +121,13 @@ class _ModulesScreenState extends State<ModulesScreen> {
           colour: kModuleColours['notes']!,
           blurb: 'Quick notes and checklists'
         ),
+        (
+          key: 'memory',
+          label: 'Life Memory',
+          icon: Icons.auto_stories_outlined,
+          colour: kModuleColours['memory']!,
+          blurb: 'Say it once, find it for ever'
+        ),
       ];
 
   /// The tiles to show: the saved order, filtered to what this account may see.

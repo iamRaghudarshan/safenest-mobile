@@ -25,6 +25,11 @@ dependencies:
   # Real photo-library access: the thing a web page is structurally forbidden.
   # No picker, no hundred-photo ceiling, and it can tell what has already been
   # backed up so a second run costs a comparison rather than 20,000 uploads.
+  # Life Memory is spoken into far more than it is typed into, so this is a
+  # capture plugin beside photo_manager rather than a convenience. It is
+  # on-device dictation on both platforms — nothing is sent anywhere — which is
+  # what lets the module keep the promise the sign-in screen makes.
+  speech_to_text: ^7.5.0
   photo_manager: ^3.6.1
   photo_manager_image_provider: ^2.1.4
   # sha256, so the backup can ask the computer "which of these have you got?"

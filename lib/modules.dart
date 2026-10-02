@@ -310,6 +310,7 @@ final kAllModuleKeys = <String>{
   'documents',
   'vault',
   'notes',
+  'memory',
 };
 
 /// The colour and glyph for ONE row, which is not always the module's own.

@@ -112,6 +112,7 @@ const kModuleColoursVivid = <String, Color>{
   'cards': Color(0xFFA81B62),
   'insurance': Color(0xFF0B6CA8),
   'investments': Color(0xFF0A7350),
+  'memory': Color(0xFF7B4397),
 };
 
 const kRadiusVivid = 20.0;
@@ -230,6 +231,8 @@ const kModuleColours = <String, Color>{
   'vault': Color(0xFF64748B),
   'documents': Color(0xFF0D9488),
   'notes': Color(0xFFF5B301),
+  // Plum: unclaimed by any other module, and dark enough to carry white text.
+  'memory': Color(0xFF6B3C8C),
 };
 
 /// --shadow, as a Flutter box shadow.

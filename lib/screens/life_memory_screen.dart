@@ -1,0 +1,878 @@
+/// Life Memory — tell it something, and it keeps it.
+///
+/// The thread reads like a conversation because that is how it was asked for,
+/// but nothing replies: the entries are CARDS rather than chat bubbles,
+/// because a card can carry a photograph and a row of facts and a bubble
+/// cannot.
+///
+/// Three things shape this screen:
+///
+///   * SPEAKING IS THE MAIN ACTION, so the microphone is the largest control
+///     and the keyboard is the smaller sibling beside it — not a toolbar
+///     button somebody has to find.
+///   * THE FACTS ARE OFFERED, NEVER TAKEN. What the reader found appears as
+///     chips you tap to keep. Nothing is filed silently, because a store that
+///     quietly decides what you meant is one you stop trusting the first time
+///     it is wrong, and it will be wrong.
+///   * IT IS WRITTEN TO THIS PHONE AND SHOWN AT ONCE. No spinner, no round
+///     trip. Most of what anybody says to this will be said with no signal.
+library;
+
+import 'dart:async';
+import 'dart:io';
+
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+
+import '../memory/dictation.dart';
+import '../memory/facts.dart';
+import '../offline/store.dart';
+import '../theme.dart';
+
+const kMemoryTint = Color(0xFF6B3C8C);
+
+class LifeMemoryScreen extends StatefulWidget {
+  const LifeMemoryScreen({
+    super.key,
+    this.dictation,
+    this.embedded = false,
+    this.debugRows,
+    this.onKept,
+  });
+
+  /// Supplied by tests. The real one needs a microphone, which no machine this
+  /// is developed on has.
+  final Dictation? dictation;
+
+  /// The thread to draw instead of reading one, and a hook on what would be
+  /// saved. Both exist for the same reason, and it is worth writing down.
+  ///
+  /// `testWidgets` runs in a zone with a fake clock where real file IO
+  /// callbacks are never delivered, so a screen that opens a database in
+  /// `initState` never gets past its spinner and the test hangs rather than
+  /// failing. The database is covered on its own, against real SQLite, in
+  /// memory_store_test.dart; what is left to check here is the FLOW — what is
+  /// offered, what is pre-ticked, what a tap changes — and these two let that
+  /// be checked without a disk.
+  ///
+  /// The same door `VividHome.debugData` and `BackupScreen.debugProgress`
+  /// already use.
+  final List<Map<String, dynamic>>? debugRows;
+  final void Function(String words, bool spoken, List<Fact> kept)? onKept;
+
+  /// True when this IS a tab rather than a screen pushed on top of one — a tab
+  /// with a back arrow is a tab that looks broken.
+  final bool embedded;
+
+  @override
+  State<LifeMemoryScreen> createState() => _LifeMemoryScreenState();
+}
+
+class _LifeMemoryScreenState extends State<LifeMemoryScreen> {
+  late final Dictation _mic = widget.dictation ?? PlatformDictation();
+  final _typed = TextEditingController();
+  final _scroll = ScrollController();
+
+  List<Map<String, dynamic>> _rows = const [];
+  bool _loading = true;
+  bool _canSpeak = false;
+  bool _listening = false;
+  String _heard = '';
+  String? _trouble;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.debugRows != null) {
+      _rows = widget.debugRows!;
+      _loading = false;
+    } else {
+      _load();
+    }
+    _mic.available().then((ok) {
+      if (mounted) setState(() => _canSpeak = ok);
+    });
+  }
+
+  @override
+  void dispose() {
+    _typed.dispose();
+    _scroll.dispose();
+    // Letting a recogniser run on after the screen is gone holds the
+    // microphone open, which on a phone shows as a permanent recording dot.
+    unawaited(_mic.cancel());
+    super.dispose();
+  }
+
+  OfflineStore get _store => context.read<OfflineStore>();
+
+  Future<void> _load() async {
+    try {
+      final rows = await _store.memories();
+      if (mounted) {
+        setState(() {
+          _rows = rows;
+          _loading = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  // ----------------------------------------------------------- speaking
+
+  Future<void> _startListening() async {
+    setState(() {
+      _listening = true;
+      _heard = '';
+      _trouble = null;
+    });
+    await _mic.start(
+      onHeard: (h) {
+        if (mounted) setState(() => _heard = h.words);
+      },
+      onProblem: (p) {
+        if (!mounted) return;
+        setState(() {
+          _listening = false;
+          _trouble = switch (p) {
+            DictationProblem.notAllowed =>
+              'SafeNest has not been allowed to use the microphone. You can '
+                  'still type.',
+            DictationProblem.unavailable =>
+              'This phone cannot turn speech into words. You can still type.',
+            DictationProblem.stopped =>
+              'The microphone stopped. What you had said is kept below.',
+          };
+        });
+      },
+    );
+  }
+
+  Future<void> _stopListening() async {
+    await _mic.stop();
+    if (!mounted) return;
+    final words = _heard.trim();
+    setState(() => _listening = false);
+    if (words.isEmpty) return;
+    await _offerFacts(words, spoken: true);
+  }
+
+  Future<void> _sendTyped() async {
+    final words = _typed.text.trim();
+    if (words.isEmpty) return;
+    _typed.clear();
+    await _offerFacts(words, spoken: false);
+  }
+
+  /// The confirm step. Everything the reader found is shown, nothing is kept
+  /// until it is tapped, and the words are saved whatever happens to the chips.
+  Future<void> _offerFacts(String words, {required bool spoken}) async {
+    final said = DateTime.now();
+    final found = readFacts(words, said);
+
+    final keep = <Fact>{
+      // An expiry is pre-ticked and the rest are not. It is the only kind that
+      // becomes a reminder, so it is the one worth a glance — and the one
+      // somebody is most annoyed to have missed.
+      ...found.where((f) => f.kind == FactKind.expiry),
+    };
+
+    final saved = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (ctx) => _ConfirmSheet(
+        words: words,
+        found: found,
+        keep: keep,
+      ),
+    );
+    if (saved != true || !mounted) return;
+
+    final watcher = widget.onKept;
+    if (watcher != null) {
+      watcher(words, spoken, keep.toList());
+      if (widget.debugRows != null) return;
+    }
+
+    await _store.addMemory(
+      body: words,
+      saidAt: said,
+      spoken: spoken,
+      facts: [
+        for (final f in keep)
+          (kind: f.kind.name, value: f.value, at: f.at),
+      ],
+    );
+    await _load();
+    _toBottom();
+  }
+
+  void _toBottom() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_scroll.hasClients) {
+        _scroll.animateTo(0,
+            duration: const Duration(milliseconds: 260), curve: Curves.easeOut);
+      }
+    });
+  }
+
+  // ------------------------------------------------------------- drawing
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Scaffold(
+      appBar: AppBar(
+        automaticallyImplyLeading: !widget.embedded,
+        backgroundColor: kMemoryTint,
+        foregroundColor: Colors.white,
+        title: const Text('Life Memory'),
+        actions: [
+          IconButton(
+            tooltip: 'Find something',
+            onPressed: _rows.isEmpty ? null : _search,
+            icon: const Icon(Icons.search),
+          ),
+        ],
+      ),
+      body: Column(children: [
+        if (_trouble != null)
+          Container(
+            width: double.infinity,
+            color: kWarn.withValues(alpha: 0.16),
+            padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+            child: Text(_trouble!,
+                style: const TextStyle(fontSize: 12.5, height: 1.4)),
+          ),
+        Expanded(
+          child: _loading
+              ? const Center(child: CircularProgressIndicator())
+              : _rows.isEmpty
+                  ? _Empty(canSpeak: _canSpeak)
+                  : ListView.builder(
+                      controller: _scroll,
+                      reverse: true,
+                      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+                      itemCount: _rows.length,
+                      itemBuilder: (_, i) => _MemoryCard(row: _rows[i]),
+                    ),
+        ),
+        if (_listening) _Listening(heard: _heard),
+        _Composer(
+          typed: _typed,
+          canSpeak: _canSpeak,
+          listening: _listening,
+          onSend: _sendTyped,
+          onSpeak: _startListening,
+          onStop: _stopListening,
+          theme: theme,
+        ),
+      ]),
+    );
+  }
+
+  Future<void> _search() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (ctx) => _SearchSheet(store: _store),
+    );
+  }
+}
+
+// =============================================================== pieces
+
+class _Empty extends StatelessWidget {
+  const _Empty({required this.canSpeak});
+  final bool canSpeak;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(36, 0, 36, 60),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Container(
+            width: 64,
+            height: 64,
+            decoration: BoxDecoration(
+              color: kMemoryTint.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: const Icon(Icons.auto_stories_outlined,
+                size: 30, color: kMemoryTint),
+          ),
+          const SizedBox(height: 16),
+          Text('Nothing yet',
+              style: theme.textTheme.titleMedium
+                  ?.copyWith(fontWeight: FontWeight.w800)),
+          const SizedBox(height: 7),
+          Text(
+              canSpeak
+                  ? 'Hold the microphone and say anything worth keeping — '
+                      'where something was bought, what somebody told you, '
+                      'why a photograph matters.'
+                  : 'Type anything worth keeping — where something was '
+                      'bought, what somebody told you, why a photograph '
+                      'matters.',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                  fontSize: 13,
+                  height: 1.55,
+                  color: theme.colorScheme.onSurfaceVariant)),
+        ]),
+      ),
+    );
+  }
+}
+
+class _Listening extends StatelessWidget {
+  const _Listening({required this.heard});
+  final String heard;
+
+  @override
+  Widget build(BuildContext context) => Container(
+        width: double.infinity,
+        color: kMemoryTint.withValues(alpha: 0.08),
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Container(
+            margin: const EdgeInsets.only(top: 4),
+            width: 8,
+            height: 8,
+            decoration: const BoxDecoration(
+                color: Color(0xFFE05A5A), shape: BoxShape.circle),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+                heard.isEmpty ? 'Listening…' : heard,
+                style: TextStyle(
+                    fontSize: 14,
+                    height: 1.45,
+                    fontStyle: heard.isEmpty ? FontStyle.italic : null,
+                    color: heard.isEmpty ? Colors.black54 : Colors.black87)),
+          ),
+        ]),
+      );
+}
+
+class _Composer extends StatelessWidget {
+  const _Composer({
+    required this.typed,
+    required this.canSpeak,
+    required this.listening,
+    required this.onSend,
+    required this.onSpeak,
+    required this.onStop,
+    required this.theme,
+  });
+
+  final TextEditingController typed;
+  final bool canSpeak;
+  final bool listening;
+  final VoidCallback onSend;
+  final VoidCallback onSpeak;
+  final VoidCallback onStop;
+  final ThemeData theme;
+
+  @override
+  Widget build(BuildContext context) => SafeArea(
+        top: false,
+        child: Container(
+          decoration: BoxDecoration(
+            color: theme.colorScheme.surface,
+            border: Border(
+                top: BorderSide(color: theme.colorScheme.outlineVariant)),
+          ),
+          padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
+          child: Row(children: [
+            Expanded(
+              child: TextField(
+                controller: typed,
+                minLines: 1,
+                maxLines: 4,
+                textCapitalization: TextCapitalization.sentences,
+                decoration: InputDecoration(
+                  hintText: canSpeak ? 'or type it' : 'type something to keep',
+                  isDense: true,
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 15, vertical: 12),
+                  border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(22)),
+                ),
+                onSubmitted: (_) => onSend(),
+              ),
+            ),
+            const SizedBox(width: 10),
+            // LISTENING TO THE CONTROLLER, not reading it once. This is a
+            // StatelessWidget, so without the builder it is drawn when the
+            // screen rebuilds and not when the text changes — type something
+            // and the send button never appears, leaving no way at all to send
+            // what you typed. Caught by a test; it would have shipped.
+            ValueListenableBuilder<TextEditingValue>(
+              valueListenable: typed,
+              builder: (_, value, _) {
+                final hasWords = value.text.trim().isNotEmpty;
+                if (hasWords || !canSpeak) {
+                  return _Round(
+                    tooltip: 'Keep this',
+                    icon: Icons.arrow_upward,
+                    onTap: onSend,
+                  );
+                }
+                // ONE BUTTON, two states. A separate stop button appearing
+                // beside the microphone is a second thing to aim at while
+                // talking, and the thumb is already where it started.
+                return _Round(
+                  tooltip: listening ? 'Done speaking' : 'Speak',
+                  icon: listening ? Icons.stop : Icons.mic,
+                  big: true,
+                  onTap: listening ? onStop : onSpeak,
+                );
+              },
+            ),
+          ]),
+        ),
+      );
+}
+
+class _Round extends StatelessWidget {
+  const _Round({
+    required this.tooltip,
+    required this.icon,
+    required this.onTap,
+    this.big = false,
+  });
+
+  final String tooltip;
+  final IconData icon;
+  final VoidCallback onTap;
+  final bool big;
+
+  @override
+  Widget build(BuildContext context) {
+    final d = big ? 54.0 : 44.0;
+    return Tooltip(
+      message: tooltip,
+      child: Semantics(
+        button: true,
+        label: tooltip,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(d / 2),
+          child: Container(
+            width: d,
+            height: d,
+            decoration: BoxDecoration(
+              color: kMemoryTint,
+              borderRadius: BorderRadius.circular(d / 2),
+              boxShadow: big
+                  ? [
+                      BoxShadow(
+                          color: kMemoryTint.withValues(alpha: 0.38),
+                          blurRadius: 14,
+                          offset: const Offset(0, 5)),
+                    ]
+                  : null,
+            ),
+            child: Icon(icon, color: Colors.white, size: big ? 25 : 20),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// One memory in the thread.
+class _MemoryCard extends StatelessWidget {
+  const _MemoryCard({required this.row});
+  final Map<String, dynamic> row;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final facts = (row['facts'] as List?) ?? const [];
+    final photo = row['photo_path'] as String?;
+    final onComputer = row['server_id'] != null;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 11),
+      padding: const EdgeInsets.fromLTRB(13, 12, 13, 11),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surface,
+        borderRadius: BorderRadius.circular(15),
+        boxShadow: [
+          BoxShadow(
+              color: Colors.black.withValues(alpha: 0.07),
+              blurRadius: 4,
+              offset: const Offset(0, 1)),
+        ],
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          if (photo != null && photo.isNotEmpty) ...[
+            ClipRRect(
+              borderRadius: BorderRadius.circular(11),
+              child: Image.file(File(photo),
+                  width: 58,
+                  height: 58,
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, _, _) => const SizedBox.shrink()),
+            ),
+            const SizedBox(width: 11),
+          ],
+          Expanded(
+            child: Text('${row['body']}',
+                style: const TextStyle(fontSize: 13.5, height: 1.5)),
+          ),
+        ]),
+        if (facts.isNotEmpty) ...[
+          const SizedBox(height: 10),
+          Wrap(spacing: 6, runSpacing: 6, children: [
+            for (final f in facts) _Chip(kind: '${f['kind']}', value: '${f['value']}'),
+          ]),
+        ],
+        const SizedBox(height: 8),
+        Row(children: [
+          Text(_when(row['said_at'] as String?),
+              style: TextStyle(
+                  fontSize: 10.5, color: theme.colorScheme.onSurfaceVariant)),
+          if (row['spoken'] == 1) ...[
+            const SizedBox(width: 7),
+            Icon(Icons.mic, size: 12, color: theme.colorScheme.onSurfaceVariant),
+          ],
+          const Spacer(),
+          // THE ONLY THING SYNC CHANGES on this card. Everything else is
+          // already true the moment it is said.
+          Icon(onComputer ? Icons.cloud_done_outlined : Icons.schedule,
+              size: 13, color: theme.colorScheme.onSurfaceVariant),
+          const SizedBox(width: 4),
+          Text(onComputer ? 'on your computer' : 'on this phone',
+              style: TextStyle(
+                  fontSize: 10.5, color: theme.colorScheme.onSurfaceVariant)),
+        ]),
+      ]),
+    );
+  }
+}
+
+/// The tint per kind. Different kinds do different things — only an expiry
+/// becomes a reminder — so they are told apart by colour AND by the words in
+/// them, never by colour alone.
+({Color ink, Color back}) chipColours(String kind) => switch (kind) {
+      'expiry' || 'date' => (ink: const Color(0xFF7A3D12), back: const Color(0xFFFBEBD9)),
+      'place' || 'shop' => (ink: const Color(0xFF1F4D6B), back: const Color(0xFFDEEAF2)),
+      'amount' => (ink: const Color(0xFF14543A), back: const Color(0xFFDCF0E5)),
+      _ => (ink: const Color(0xFF4A3268), back: const Color(0xFFEBE3F4)),
+    };
+
+class _Chip extends StatelessWidget {
+  const _Chip({required this.kind, required this.value});
+  final String kind;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = chipColours(kind);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+      decoration: BoxDecoration(
+          color: c.back, borderRadius: BorderRadius.circular(13)),
+      child: Text(value,
+          style: TextStyle(
+              fontSize: 11, fontWeight: FontWeight.w700, color: c.ink)),
+    );
+  }
+}
+
+String _when(String? iso) {
+  if (iso == null) return '';
+  final d = DateTime.tryParse(iso);
+  if (d == null) return '';
+  final now = DateTime.now();
+  final days = DateTime(now.year, now.month, now.day)
+      .difference(DateTime(d.year, d.month, d.day))
+      .inDays;
+  if (days == 0) return 'today';
+  if (days == 1) return 'yesterday';
+  if (days < 7) return '$days days ago';
+  const months = [
+    'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+  ];
+  return '${d.day} ${months[d.month - 1]}'
+      '${d.year == now.year ? '' : ' ${d.year}'}';
+}
+
+// ======================================================== confirm sheet
+
+class _ConfirmSheet extends StatefulWidget {
+  const _ConfirmSheet({
+    required this.words,
+    required this.found,
+    required this.keep,
+  });
+
+  final String words;
+  final List<Fact> found;
+  final Set<Fact> keep;
+
+  @override
+  State<_ConfirmSheet> createState() => _ConfirmSheetState();
+}
+
+class _ConfirmSheetState extends State<_ConfirmSheet> {
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(18, 0, 18, 18),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Align(
+            alignment: Alignment.centerLeft,
+            child: Text('Before it saves',
+                style: theme.textTheme.titleMedium
+                    ?.copyWith(fontWeight: FontWeight.w800)),
+          ),
+          const SizedBox(height: 12),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(13),
+            decoration: BoxDecoration(
+              color: theme.colorScheme.surfaceContainerHighest
+                  .withValues(alpha: 0.5),
+              borderRadius: BorderRadius.circular(13),
+            ),
+            child: Text(widget.words,
+                style: const TextStyle(fontSize: 14, height: 1.55)),
+          ),
+          if (widget.found.isNotEmpty) ...[
+            const SizedBox(height: 16),
+            Row(children: [
+              Expanded(
+                child: Text('WHAT IT THINKS IT HEARD',
+                    style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 0.7,
+                        color: theme.colorScheme.onSurfaceVariant)),
+              ),
+              Text('tap to keep',
+                  style: TextStyle(
+                      fontSize: 11, color: theme.colorScheme.onSurfaceVariant)),
+            ]),
+            const SizedBox(height: 9),
+            Flexible(
+              child: ListView(
+                shrinkWrap: true,
+                children: [
+                  for (final f in widget.found)
+                    _Offered(
+                      fact: f,
+                      chosen: widget.keep.contains(f),
+                      onTap: () => setState(() {
+                        widget.keep.contains(f)
+                            ? widget.keep.remove(f)
+                            : widget.keep.add(f);
+                      }),
+                    ),
+                ],
+              ),
+            ),
+          ] else ...[
+            const SizedBox(height: 14),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                  'Nothing to tag in this one — it is kept as you said it, and '
+                  'it will still be found by searching.',
+                  style: TextStyle(
+                      fontSize: 12.5,
+                      height: 1.5,
+                      color: theme.colorScheme.onSurfaceVariant)),
+            ),
+          ],
+          const SizedBox(height: 18),
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Keep this'),
+            ),
+          ),
+          const SizedBox(height: 7),
+          Text('Saved on this phone straight away.',
+              style: TextStyle(
+                  fontSize: 11, color: theme.colorScheme.onSurfaceVariant)),
+        ]),
+      ),
+    );
+  }
+}
+
+class _Offered extends StatelessWidget {
+  const _Offered({
+    required this.fact,
+    required this.chosen,
+    required this.onTap,
+  });
+
+  final Fact fact;
+  final bool chosen;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final c = chipColours(fact.kind.name);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(11, 10, 11, 10),
+          decoration: BoxDecoration(
+            color: theme.colorScheme.surface,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+                color: chosen ? c.ink : theme.colorScheme.outlineVariant,
+                width: chosen ? 1.5 : 1),
+          ),
+          child: Row(children: [
+            Container(
+              width: 30,
+              height: 30,
+              decoration: BoxDecoration(
+                  color: c.back, borderRadius: BorderRadius.circular(9)),
+              child: Icon(_glyph(fact.kind), size: 16, color: c.ink),
+            ),
+            const SizedBox(width: 11),
+            Expanded(
+              child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(fact.value,
+                        style: const TextStyle(
+                            fontSize: 13, fontWeight: FontWeight.w700)),
+                    const SizedBox(height: 1),
+                    // THE WORDS IT CAME FROM. A suggestion somebody cannot
+                    // judge is one they have to trust, and trusting it is
+                    // exactly what this screen exists to avoid.
+                    Text('from “${fact.because}”',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                            fontSize: 11,
+                            color: theme.colorScheme.onSurfaceVariant)),
+                  ]),
+            ),
+            const SizedBox(width: 8),
+            Icon(chosen ? Icons.check_circle : Icons.circle_outlined,
+                size: 21,
+                color: chosen ? c.ink : theme.colorScheme.outlineVariant),
+          ]),
+        ),
+      ),
+    );
+  }
+
+  IconData _glyph(FactKind k) => switch (k) {
+        FactKind.expiry || FactKind.date => Icons.schedule,
+        FactKind.place => Icons.place_outlined,
+        FactKind.shop => Icons.storefront_outlined,
+        FactKind.amount => Icons.currency_rupee,
+        _ => Icons.sell_outlined,
+      };
+}
+
+// ========================================================= search sheet
+
+class _SearchSheet extends StatefulWidget {
+  const _SearchSheet({required this.store});
+  final OfflineStore store;
+
+  @override
+  State<_SearchSheet> createState() => _SearchSheetState();
+}
+
+class _SearchSheetState extends State<_SearchSheet> {
+  final _q = TextEditingController();
+  List<Map<String, dynamic>> _hits = const [];
+  bool _searched = false;
+
+  @override
+  void dispose() {
+    _q.dispose();
+    super.dispose();
+  }
+
+  Future<void> _run(String term) async {
+    final hits = await widget.store.searchMemories(term);
+    if (mounted) {
+      setState(() {
+        _hits = hits;
+        _searched = term.trim().isNotEmpty;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return SafeArea(
+      child: Padding(
+        padding: EdgeInsets.fromLTRB(
+            18, 0, 18, MediaQuery.of(context).viewInsets.bottom + 18),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          TextField(
+            controller: _q,
+            autofocus: true,
+            decoration: InputDecoration(
+              hintText: 'Anything you have told it',
+              prefixIcon: const Icon(Icons.search),
+              border:
+                  OutlineInputBorder(borderRadius: BorderRadius.circular(22)),
+            ),
+            onChanged: _run,
+          ),
+          const SizedBox(height: 12),
+          if (_searched && _hits.isEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 22),
+              child: Text('Nothing matches that.',
+                  style: TextStyle(color: theme.colorScheme.onSurfaceVariant)),
+            )
+          else if (_hits.isNotEmpty)
+            Flexible(
+              child: ListView.builder(
+                shrinkWrap: true,
+                itemCount: _hits.length,
+                itemBuilder: (_, i) => _MemoryCard(row: _hits[i]),
+              ),
+            )
+          else
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 18),
+              child: Text(
+                  'It looks in your own words as well as the tags, so a '
+                  'phrase you remember saying will find it.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                      fontSize: 12.5,
+                      height: 1.5,
+                      color: theme.colorScheme.onSurfaceVariant)),
+            ),
+        ]),
+      ),
+    );
+  }
+}
