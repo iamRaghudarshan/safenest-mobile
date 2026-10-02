@@ -867,6 +867,90 @@ class OfflineStore {
         [since]);
   }
 
+  /// Candidates for a question: anything mentioning ANY of [terms].
+  ///
+  /// OR, not AND, and that is the whole reason this is separate from
+  /// [searchMemories]. Search is a person looking for one thing and an
+  /// unmatched word should narrow it; a QUESTION is scored afterwards by
+  /// `ask.dart`, which needs to see the near misses in order to rank them and
+  /// to say "the closest I can find". Requiring every word here would hand the
+  /// scorer only the rows it would have picked anyway, and the honest
+  /// "I cannot answer that, but this mentions it" answer would never appear.
+  ///
+  /// Matching is on a five-character prefix of each term so "machine" finds
+  /// "machines" — the same stem `ask.askTerms` scores with, because the two
+  /// disagreeing is how a search quietly starts missing things.
+  Future<List<Map<String, dynamic>>> memoriesMatchingAny(List<String> terms,
+      {int limit = 200}) async {
+    final db = await _open;
+    final stems = <String>{
+      for (final t in terms)
+        if (t.trim().isNotEmpty)
+          (t.length <= 5 ? t : t.substring(0, 5))
+              .toLowerCase()
+              .replaceAll('%', r'\%')
+              .replaceAll('_', r'\_')
+    }.toList();
+
+    // No usable words — "how much have I spent in all" — so the candidates are
+    // simply everything recent, and the scorer decides. Bounded, because a
+    // question must not read a lifetime off the disk to answer.
+    if (stems.isEmpty) {
+      final rows = await db.query('memories',
+          orderBy: 'said_at DESC, id DESC', limit: limit);
+      return _withFacts(db, rows);
+    }
+
+    final args = <Object?>[];
+    final clauses = <String>[];
+    for (final stem in stems) {
+      clauses.add('m.body LIKE ? ESCAPE ?');
+      args.addAll(['%$stem%', r'\']);
+      clauses.add(
+          'm.id IN (SELECT memory_id FROM memory_facts WHERE value LIKE ? ESCAPE ?)');
+      args.addAll(['%$stem%', r'\']);
+    }
+    args.add(limit);
+    final rows = await db.rawQuery(
+        'SELECT m.* FROM memories m WHERE ${clauses.join(' OR ')} '
+        'ORDER BY m.said_at DESC LIMIT ?',
+        args);
+    return _withFacts(db, rows);
+  }
+
+  /// Memories the computer does not have yet, oldest first.
+  ///
+  /// Oldest first on purpose: a thread that syncs newest-first fills the
+  /// computer's copy backwards, and a half-finished sync then looks like a
+  /// person who said nothing for a year and then four things at once.
+  Future<List<Map<String, dynamic>>> unsyncedMemories({int limit = 50}) async {
+    final db = await _open;
+    final rows = await db.query('memories',
+        where: 'server_id IS NULL',
+        orderBy: 'said_at ASC, id ASC',
+        limit: limit);
+    return _withFacts(db, rows);
+  }
+
+  /// The computer has it. This is the ONLY thing syncing changes about a
+  /// memory — the words, the facts and the photograph were already true the
+  /// moment they were said, which is why nothing else here is touched.
+  Future<void> markMemorySynced(int localId, int serverId) async {
+    final db = await _open;
+    await db.update(
+        'memories',
+        {'server_id': serverId, 'updated_at': DateTime.now().toIso8601String()},
+        where: 'id = ?',
+        whereArgs: [localId]);
+  }
+
+  Future<int> unsyncedMemoryCount() async {
+    final db = await _open;
+    final r = await db.rawQuery(
+        'SELECT COUNT(*) c FROM memories WHERE server_id IS NULL');
+    return (r.first['c'] as int?) ?? 0;
+  }
+
   Future<int> memoryCount() async {
     final db = await _open;
     final r = await db.rawQuery('SELECT COUNT(*) c FROM memories');

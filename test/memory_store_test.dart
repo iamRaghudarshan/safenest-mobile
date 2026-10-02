@@ -187,6 +187,103 @@ void main() {
     expect(await s.memoryDates(from: DateTime(2020)), isEmpty);
   });
 
+  group('candidates for a question', () {
+    Future<OfflineStore> filled() async {
+      final s = await _store();
+      await s.addMemory(
+          body: 'Bought the washing machine from Vijay Sales',
+          saidAt: DateTime(2026, 9, 26),
+          facts: [(kind: 'shop', value: 'Vijay Sales', at: null)]);
+      await s.addMemory(
+          body: 'Amma says tamarind first', saidAt: DateTime(2026, 9, 20));
+      await s.addMemory(
+          body: 'Mixer, four thousand', saidAt: DateTime(2026, 9, 10));
+      return s;
+    }
+
+    test('ANY of the words, not all of them', () async {
+      // The opposite of searchMemories, deliberately: the scorer in ask.dart
+      // needs the near misses so it can rank them and so it can honestly say
+      // "I cannot answer that, but this mentions it".
+      final s = await filled();
+      final hits = await s.memoriesMatchingAny(['fridge', 'washing']);
+      expect(hits, hasLength(1));
+      expect('${hits.single['body']}', contains('washing machine'));
+    });
+
+    test('a confirmed fact is searched as well as the words', () async {
+      final s = await filled();
+      final hits = await s.memoriesMatchingAny(['vijay']);
+      expect(hits, hasLength(1));
+    });
+
+    test('plurals find singulars, on the same stem ask.dart scores with',
+        () async {
+      final s = await filled();
+      expect(await s.memoriesMatchingAny(['machines']), hasLength(1));
+    });
+
+    test('no usable words means everything recent, newest first', () async {
+      // "how much have I spent in all" has no subject. The scorer decides;
+      // this only has to hand it a bounded, ordered pool.
+      final s = await filled();
+      final all = await s.memoriesMatchingAny(const []);
+      expect(all, hasLength(3));
+      expect('${all.first['body']}', contains('washing machine'));
+    });
+
+    test('a wildcard typed into a question is a character, not a pattern',
+        () async {
+      // LIKE treats % as "anything". Unescaped, asking about "100%" would
+      // return every memory there is and the answer would be built from a
+      // random one.
+      final s = await filled();
+      expect(await s.memoriesMatchingAny(['%']), isEmpty);
+    });
+
+    test('facts come attached, because the scorer ranks on them', () async {
+      final s = await filled();
+      final hits = await s.memoriesMatchingAny(['washing']);
+      expect((hits.single['facts'] as List), hasLength(1));
+    });
+  });
+
+  group('what the computer does not have yet', () {
+    test('everything is unsynced until it is told otherwise', () async {
+      final s = await _store();
+      final id = await s.addMemory(body: 'said offline', saidAt: DateTime(2026, 9, 1));
+      expect(await s.unsyncedMemoryCount(), 1);
+
+      await s.markMemorySynced(id, 4242);
+      expect(await s.unsyncedMemoryCount(), 0);
+      final row = (await s.memories()).single;
+      expect(row['server_id'], 4242);
+      expect(row['body'], 'said offline',
+          reason: 'syncing changes where it is, never what it says');
+    });
+
+    test('oldest first, so a half-finished sync is not back to front',
+        () async {
+      final s = await _store();
+      await s.addMemory(body: 'newer', saidAt: DateTime(2026, 9, 20));
+      await s.addMemory(body: 'older', saidAt: DateTime(2026, 9, 1));
+      final queue = await s.unsyncedMemories();
+      expect([for (final r in queue) r['body']], ['older', 'newer']);
+    });
+
+    test('a photograph and its facts ride along', () async {
+      final s = await _store();
+      await s.addMemory(
+          body: 'with a picture',
+          saidAt: DateTime(2026, 9, 1),
+          photoPath: '/x/memories/m_1.jpg',
+          facts: [(kind: 'place', value: 'Lalbagh', at: null)]);
+      final q = (await s.unsyncedMemories()).single;
+      expect(q['photo_path'], '/x/memories/m_1.jpg');
+      expect((q['facts'] as List), hasLength(1));
+    });
+  });
+
   test('a real v7 database upgrades, keeping what it held', () async {
     // Not the in-memory shortcut, which runs onCreate and proves nothing about
     // an upgrade. A phone coming into this build has a ledger and a skipped

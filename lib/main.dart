@@ -14,12 +14,16 @@
 /// company.
 library;
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'alarms.dart';
 import 'api.dart';
 import 'customize.dart';
+import 'memory/reminders.dart';
 import 'offline/mode.dart';
 import 'offline/records.dart';
 import 'offline/store.dart';
@@ -97,6 +101,21 @@ class _SafeNestAppState extends State<SafeNestApp> {
     _mode.load();
     _sync.refreshPending();
     _session.restore().then((_) => _loadBrand());
+
+    // LIFE MEMORY'S WARRANTY WARNINGS, put back every launch.
+    //
+    // Two reasons it has to happen here and not where a memory is saved. An
+    // alarm set two years out does not survive the phone being replaced, a
+    // system update or a force-stop, so something has to re-assert it; and
+    // `Alarms.syncFrom` — which the Reminders screen calls — cancels every
+    // alarm in the app before re-scheduling the server's, which would silently
+    // take these with it. The hook is how it puts them back in the same breath.
+    // Ids are stable, so re-scheduling moves a warning and never duplicates it.
+    Alarms.instance.alsoSchedule = () => scheduleMemoryReminders(_store);
+    unawaited(scheduleMemoryReminders(_store).catchError((e) {
+      debugPrint('[memory] launch scheduling failed: $e');
+      return 0;
+    }));
   }
 
   /// The name and colour come from the customer's own server, because SafeNest

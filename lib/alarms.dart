@@ -30,6 +30,21 @@ class Alarms {
   final _plugin = FlutterLocalNotificationsPlugin();
   bool _ready = false;
 
+  /// Anything ELSE in the app that owns alarms, re-scheduled by [syncFrom].
+  ///
+  /// THIS EXISTS BECAUSE [syncFrom] CANCELS EVERYTHING. That is right for the
+  /// reminders module — the server is the authority there — but it means
+  /// whoever cancels has to know about every other alarm in the app, and Life
+  /// Memory's warranty warnings are set from the phone's own database and have
+  /// no server rows to be re-scheduled from. Without this hook, opening the
+  /// Reminders screen silently cancelled every warranty warning, and the
+  /// symptom would have been a notification that never arrived two years later
+  /// with nothing at all to point at.
+  ///
+  /// Set once, in `main.dart`. A hook rather than a call at each site, because
+  /// the call sites are where this gets forgotten.
+  Future<void> Function()? alsoSchedule;
+
   /// The channel an alarm-style reminder uses.
   ///
   /// Separate from anything quieter on purpose: a channel's importance and
@@ -222,6 +237,18 @@ class Alarms {
         when: when,
       );
       set++;
+    }
+    // Everything else that owns an alarm, put back in the same breath that
+    // cancelled it. Failures are swallowed deliberately: the reminders the
+    // caller asked about are already set, and losing those too because a
+    // warranty warning could not be scheduled would be the worse outcome.
+    final also = alsoSchedule;
+    if (also != null) {
+      try {
+        await also();
+      } catch (e) {
+        debugPrint('[alarms] could not re-schedule the rest: $e');
+      }
     }
     return set;
   }

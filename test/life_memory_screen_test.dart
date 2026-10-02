@@ -17,6 +17,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:safenest/memory/attach.dart';
 import 'package:safenest/memory/dictation.dart';
 import 'package:safenest/memory/facts.dart';
 import 'package:safenest/screens/life_memory_screen.dart';
@@ -27,24 +28,28 @@ class Kept {
   String? words;
   bool? spoken;
   List<Fact> facts = const [];
+  String? photo;
 }
 
 Widget _app(
   Dictation mic, {
   List<Map<String, dynamic>> rows = const [],
   Kept? kept,
+  PhotoSource? photos,
 }) =>
     MaterialApp(
       theme: buildTheme(const Brand(), Brightness.light),
       home: LifeMemoryScreen(
         dictation: mic,
+        photos: photos ?? FakePhotos(),
         debugRows: rows,
         onKept: kept == null
             ? null
-            : (w, s, f) {
+            : (w, s, f, p) {
                 kept.words = w;
                 kept.spoken = s;
                 kept.facts = f;
+                kept.photo = p;
               },
       ),
     );
@@ -269,5 +274,131 @@ void main() {
 
     expect(find.text('on your computer'), findsOneWidget);
     expect(find.text('on this phone'), findsNothing);
+  });
+
+  group('attaching a photograph', () {
+    testWidgets('picked before the words, and it says it is waiting for them',
+        (tester) async {
+      // The order people do it in: find the picture, then say why it matters.
+      final kept = Kept();
+      await tester.pumpWidget(_app(FakeDictation(), kept: kept));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byIcon(Icons.add_photo_alternate_outlined));
+      await tester.pumpAndSettle();
+      expect(find.text('Recent photographs'), findsOneWidget);
+
+      await tester.tap(find.byType(InkWell).last);
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('Going on this one'), findsOneWidget);
+    });
+
+    testWidgets('it is kept with the words it was waiting for', (tester) async {
+      final kept = Kept();
+      await tester.pumpWidget(_app(FakeDictation(), kept: kept));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byIcon(Icons.add_photo_alternate_outlined));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byType(InkWell).last);
+      await tester.pumpAndSettle();
+
+      await tester.enterText(find.byType(TextField), 'Lalbagh, flower show');
+      await tester.pumpAndSettle();
+      await tester.tap(find.byIcon(Icons.arrow_upward));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Keep this'));
+      await tester.pumpAndSettle();
+
+      expect(kept.words, 'Lalbagh, flower show');
+      expect(kept.photo, isNotNull,
+          reason: 'the picture has to reach the memory, not just the screen');
+    });
+
+    testWidgets('changing your mind about it costs one tap', (tester) async {
+      final kept = Kept();
+      await tester.pumpWidget(_app(FakeDictation(), kept: kept));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byIcon(Icons.add_photo_alternate_outlined));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byType(InkWell).last);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Not this one'));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('Going on this one'), findsNothing);
+
+      await tester.enterText(find.byType(TextField), 'no picture on this one');
+      await tester.pumpAndSettle();
+      await tester.tap(find.byIcon(Icons.arrow_upward));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Keep this'));
+      await tester.pumpAndSettle();
+
+      expect(kept.photo, isNull);
+    });
+
+    testWidgets('a refused camera roll is explained, and typing still works',
+        (tester) async {
+      await tester.pumpWidget(
+          _app(FakeDictation(), photos: FakePhotos(canSee: false)));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byIcon(Icons.add_photo_alternate_outlined));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('not been allowed to see your photographs'),
+          findsOneWidget);
+      expect(find.byType(TextField), findsOneWidget);
+    });
+
+    testWidgets('a picture the phone cannot produce says so rather than '
+        'saving a dead path', (tester) async {
+      // A photo still in iCloud. Attaching a path that resolves to nothing
+      // would show a grey box on the memory for ever, with nothing to explain
+      // it.
+      await tester.pumpWidget(
+          _app(FakeDictation(), photos: FakePhotos(copies: false)));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byIcon(Icons.add_photo_alternate_outlined));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byType(InkWell).last);
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('could not be read'), findsOneWidget);
+      expect(find.textContaining('Going on this one'), findsNothing);
+    });
+
+    testWidgets('an empty camera roll says so instead of an empty sheet',
+        (tester) async {
+      await tester.pumpWidget(
+          _app(FakeDictation(), photos: FakePhotos(count: 0)));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byIcon(Icons.add_photo_alternate_outlined));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('No photographs found'), findsOneWidget);
+    });
+  });
+
+  testWidgets('asking is offered once there is something to ask about',
+      (tester) async {
+    // Disabled on an empty thread on purpose: a question screen with nothing
+    // behind it can only ever answer "you have not told me anything".
+    await tester.pumpWidget(_app(FakeDictation()));
+    await tester.pumpAndSettle();
+    expect(
+        tester
+            // The tooltip is built BY the IconButton, so it is a descendant of
+            // it and not the other way round.
+            .widget<IconButton>(find.ancestor(
+                of: find.byTooltip('Ask a question'),
+                matching: find.byType(IconButton)))
+            .onPressed,
+        isNull);
   });
 }

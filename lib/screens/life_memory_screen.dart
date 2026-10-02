@@ -20,14 +20,18 @@ library;
 
 import 'dart:async';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../memory/attach.dart';
 import '../memory/dictation.dart';
 import '../memory/facts.dart';
+import '../memory/reminders.dart';
 import '../offline/store.dart';
 import '../theme.dart';
+import 'memory_ask_screen.dart';
 
 const kMemoryTint = Color(0xFF6B3C8C);
 
@@ -35,14 +39,16 @@ class LifeMemoryScreen extends StatefulWidget {
   const LifeMemoryScreen({
     super.key,
     this.dictation,
+    this.photos,
     this.embedded = false,
     this.debugRows,
     this.onKept,
   });
 
-  /// Supplied by tests. The real one needs a microphone, which no machine this
-  /// is developed on has.
+  /// Supplied by tests. The real ones need a microphone and a camera roll, and
+  /// no machine this is developed on has either.
   final Dictation? dictation;
+  final PhotoSource? photos;
 
   /// The thread to draw instead of reading one, and a hook on what would be
   /// saved. Both exist for the same reason, and it is worth writing down.
@@ -58,7 +64,9 @@ class LifeMemoryScreen extends StatefulWidget {
   /// The same door `VividHome.debugData` and `BackupScreen.debugProgress`
   /// already use.
   final List<Map<String, dynamic>>? debugRows;
-  final void Function(String words, bool spoken, List<Fact> kept)? onKept;
+  final void Function(
+          String words, bool spoken, List<Fact> kept, String? photoPath)?
+      onKept;
 
   /// True when this IS a tab rather than a screen pushed on top of one — a tab
   /// with a back arrow is a tab that looks broken.
@@ -70,8 +78,15 @@ class LifeMemoryScreen extends StatefulWidget {
 
 class _LifeMemoryScreenState extends State<LifeMemoryScreen> {
   late final Dictation _mic = widget.dictation ?? PlatformDictation();
+  late final PhotoSource _photos = widget.photos ?? PlatformPhotos();
   final _typed = TextEditingController();
   final _scroll = ScrollController();
+
+  /// A photograph chosen BEFORE the words, which is the order people do it in:
+  /// you find the picture, and then you say why it matters. It is already
+  /// copied into the app's folder by the time it lands here — see
+  /// adoptMemoryPhoto — so nothing depends on the camera roll afterwards.
+  String? _pendingPhoto;
 
   List<Map<String, dynamic>> _rows = const [];
   bool _loading = true;
@@ -187,27 +202,89 @@ class _LifeMemoryScreenState extends State<LifeMemoryScreen> {
         words: words,
         found: found,
         keep: keep,
+        photo: _pendingPhoto,
       ),
     );
     if (saved != true || !mounted) return;
 
+    final photo = _pendingPhoto;
     final watcher = widget.onKept;
     if (watcher != null) {
-      watcher(words, spoken, keep.toList());
-      if (widget.debugRows != null) return;
+      watcher(words, spoken, keep.toList(), photo);
+      if (widget.debugRows != null) {
+        setState(() => _pendingPhoto = null);
+        return;
+      }
     }
 
     await _store.addMemory(
       body: words,
       saidAt: said,
       spoken: spoken,
+      photoPath: photo,
       facts: [
         for (final f in keep)
           (kind: f.kind.name, value: f.value, at: f.at),
       ],
     );
+    if (mounted) setState(() => _pendingPhoto = null);
     await _load();
     _toBottom();
+
+    // THE DATE BECOMES A NOTIFICATION, and this is the only moment it can. A
+    // warranty confirmed and never scheduled is the whole feature missing, and
+    // it would not be noticed for two years. Re-scheduling the lot rather than
+    // just this one keeps the alarm queue a function of the database — ids are
+    // stable, so a warning already set is moved, never duplicated.
+    if (keep.any((f) => f.at != null)) {
+      unawaited(scheduleMemoryReminders(_store).catchError((e) {
+        debugPrint('[memory] could not schedule warnings: $e');
+        return 0;
+      }));
+    }
+  }
+
+  // ------------------------------------------------------------ the photo
+
+  Future<void> _attach() async {
+    final allowed = await _photos.allowed();
+    if (!mounted) return;
+    if (!allowed) {
+      setState(() => _trouble =
+          'SafeNest has not been allowed to see your photographs. You can '
+          'still keep this without one.');
+      return;
+    }
+    final snaps = await _photos.recent();
+    if (!mounted) return;
+    if (snaps.isEmpty) {
+      setState(() => _trouble = 'No photographs found on this phone.');
+      return;
+    }
+
+    final chosen = await showModalBottomSheet<Snap>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (_) => _PhotoSheet(snaps: snaps),
+    );
+    if (chosen == null || !mounted) return;
+
+    // COPIED NOW, not at save time. A picture still in iCloud cannot be
+    // produced at all, and finding that out while saving would lose the words
+    // somebody had just finished speaking.
+    final path = await chosen.copy();
+    if (!mounted) return;
+    if (path == null) {
+      setState(() => _trouble =
+          'That photograph could not be read — it may not be downloaded to '
+          'this phone yet.');
+      return;
+    }
+    setState(() {
+      _pendingPhoto = path;
+      _trouble = null;
+    });
   }
 
   void _toBottom() {
@@ -232,6 +309,17 @@ class _LifeMemoryScreenState extends State<LifeMemoryScreen> {
         foregroundColor: Colors.white,
         title: const Text('Life Memory'),
         actions: [
+          // ASK AND FIND ARE BOTH HERE, and they are not the same thing.
+          // Finding returns the memories that contain a word, which is what you
+          // want when you remember saying something. Asking returns a sentence
+          // worked out from them, which is what you want when you have
+          // forgotten. Collapsing the two would lose whichever was collapsed
+          // into the other.
+          IconButton(
+            tooltip: 'Ask a question',
+            onPressed: _rows.isEmpty ? null : _ask,
+            icon: const Icon(Icons.auto_awesome_outlined),
+          ),
           IconButton(
             tooltip: 'Find something',
             onPressed: _rows.isEmpty ? null : _search,
@@ -266,13 +354,25 @@ class _LifeMemoryScreenState extends State<LifeMemoryScreen> {
           typed: _typed,
           canSpeak: _canSpeak,
           listening: _listening,
+          photo: _pendingPhoto,
           onSend: _sendTyped,
           onSpeak: _startListening,
           onStop: _stopListening,
+          onAttach: _attach,
+          onDropPhoto: () => setState(() => _pendingPhoto = null),
           theme: theme,
         ),
       ]),
     );
+  }
+
+  Future<void> _ask() async {
+    final store = _store;
+    await Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => MemoryAskScreen(
+        look: (terms) => store.memoriesMatchingAny(terms),
+      ),
+    ));
   }
 
   Future<void> _search() async {
@@ -368,18 +468,24 @@ class _Composer extends StatelessWidget {
     required this.typed,
     required this.canSpeak,
     required this.listening,
+    required this.photo,
     required this.onSend,
     required this.onSpeak,
     required this.onStop,
+    required this.onAttach,
+    required this.onDropPhoto,
     required this.theme,
   });
 
   final TextEditingController typed;
   final bool canSpeak;
   final bool listening;
+  final String? photo;
   final VoidCallback onSend;
   final VoidCallback onSpeak;
   final VoidCallback onStop;
+  final VoidCallback onAttach;
+  final VoidCallback onDropPhoto;
   final ThemeData theme;
 
   @override
@@ -392,8 +498,17 @@ class _Composer extends StatelessWidget {
                 top: BorderSide(color: theme.colorScheme.outlineVariant)),
           ),
           padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
-          child: Row(children: [
-            Expanded(
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            // THE PICTURE WAITING FOR ITS WORDS. Shown above the box rather
+            // than as an icon that has merely gone darker, because somebody
+            // who attaches a photograph and then speaks for a minute needs to
+            // be able to see, the whole time, that it is still going on this
+            // one.
+            if (photo != null) _Pending(path: photo!, onDrop: onDropPhoto),
+            Row(children: [
+              _Attach(onTap: onAttach, theme: theme),
+              const SizedBox(width: 8),
+              Expanded(
               child: TextField(
                 controller: typed,
                 minLines: 1,
@@ -438,9 +553,169 @@ class _Composer extends StatelessWidget {
                 );
               },
             ),
+            ]),
           ]),
         ),
       );
+}
+
+/// The photograph chosen but not yet kept.
+class _Pending extends StatelessWidget {
+  const _Pending({required this.path, required this.onDrop});
+  final String path;
+  final VoidCallback onDrop;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 9),
+      child: Row(children: [
+        ClipRRect(
+          borderRadius: BorderRadius.circular(10),
+          child: Image.file(File(path),
+              width: 44,
+              height: 44,
+              fit: BoxFit.cover,
+              // A thumbnail that cannot be drawn must not take the composer
+              // down with it — the words are the thing being kept.
+              errorBuilder: (_, _, _) => Container(
+                    width: 44,
+                    height: 44,
+                    color: theme.colorScheme.surfaceContainerHighest,
+                    child: const Icon(Icons.image_not_supported_outlined,
+                        size: 18),
+                  )),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text('Going on this one — now say where it was taken, or why '
+              'it matters.',
+              style: TextStyle(
+                  fontSize: 11.5,
+                  height: 1.4,
+                  color: theme.colorScheme.onSurfaceVariant)),
+        ),
+        IconButton(
+          tooltip: 'Not this one',
+          visualDensity: VisualDensity.compact,
+          onPressed: onDrop,
+          icon: const Icon(Icons.close, size: 18),
+        ),
+      ]),
+    );
+  }
+}
+
+class _Attach extends StatelessWidget {
+  const _Attach({required this.onTap, required this.theme});
+  final VoidCallback onTap;
+  final ThemeData theme;
+
+  @override
+  Widget build(BuildContext context) => Tooltip(
+        message: 'Attach a photograph',
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(22),
+          child: Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              color: kMemoryTint.withValues(alpha: 0.10),
+              borderRadius: BorderRadius.circular(22),
+            ),
+            child: const Icon(Icons.add_photo_alternate_outlined,
+                size: 21, color: kMemoryTint),
+          ),
+        ),
+      );
+}
+
+/// Recent photographs, to pick one from.
+///
+/// Recent and nothing else — no albums, no search. A photograph somebody is
+/// attaching to something they are saying NOW is nearly always one they just
+/// took, and a full picker in front of that is three taps nobody needed.
+class _PhotoSheet extends StatelessWidget {
+  const _PhotoSheet({required this.snaps});
+  final List<Snap> snaps;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Align(
+            alignment: Alignment.centerLeft,
+            child: Text('Recent photographs',
+                style: theme.textTheme.titleMedium
+                    ?.copyWith(fontWeight: FontWeight.w800)),
+          ),
+          const SizedBox(height: 12),
+          Flexible(
+            child: GridView.builder(
+              shrinkWrap: true,
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 3,
+                mainAxisSpacing: 7,
+                crossAxisSpacing: 7,
+              ),
+              itemCount: snaps.length,
+              itemBuilder: (_, i) => _SnapTile(
+                snap: snaps[i],
+                onTap: () => Navigator.pop(context, snaps[i]),
+              ),
+            ),
+          ),
+          const SizedBox(height: 10),
+          Text('A copy is kept with the memory, so deleting it from your '
+              'photographs later will not empty this.',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                  fontSize: 11,
+                  height: 1.45,
+                  color: theme.colorScheme.onSurfaceVariant)),
+        ]),
+      ),
+    );
+  }
+}
+
+class _SnapTile extends StatelessWidget {
+  const _SnapTile({required this.snap, required this.onTap});
+  final Snap snap;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(10),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(10),
+        child: FutureBuilder<List<int>?>(
+          future: snap.thumb(),
+          builder: (_, snapshot) {
+            final bytes = snapshot.data;
+            if (bytes == null) {
+              return Container(
+                color: theme.colorScheme.surfaceContainerHighest,
+                child: const Icon(Icons.image_outlined, size: 20),
+              );
+            }
+            return Image.memory(Uint8List.fromList(bytes),
+                fit: BoxFit.cover,
+                errorBuilder: (_, _, _) => Container(
+                    color: theme.colorScheme.surfaceContainerHighest));
+          },
+        ),
+      ),
+    );
+  }
 }
 
 class _Round extends StatelessWidget {
@@ -618,11 +893,13 @@ class _ConfirmSheet extends StatefulWidget {
     required this.words,
     required this.found,
     required this.keep,
+    this.photo,
   });
 
   final String words;
   final List<Fact> found;
   final Set<Fact> keep;
+  final String? photo;
 
   @override
   State<_ConfirmSheet> createState() => _ConfirmSheetState();
@@ -651,8 +928,27 @@ class _ConfirmSheetState extends State<_ConfirmSheet> {
                   .withValues(alpha: 0.5),
               borderRadius: BorderRadius.circular(13),
             ),
-            child: Text(widget.words,
-                style: const TextStyle(fontSize: 14, height: 1.55)),
+            child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              // The photograph is shown HERE as well as above the composer,
+              // because this sheet is the last chance to notice it went on the
+              // wrong memory — and a mis-attached picture is the one mistake
+              // here that cannot be fixed by editing the words afterwards.
+              if (widget.photo != null) ...[
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(9),
+                  child: Image.file(File(widget.photo!),
+                      width: 52,
+                      height: 52,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, _, _) => const SizedBox.shrink()),
+                ),
+                const SizedBox(width: 11),
+              ],
+              Expanded(
+                child: Text(widget.words,
+                    style: const TextStyle(fontSize: 14, height: 1.55)),
+              ),
+            ]),
           ),
           if (widget.found.isNotEmpty) ...[
             const SizedBox(height: 16),

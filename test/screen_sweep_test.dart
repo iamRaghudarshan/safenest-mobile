@@ -15,6 +15,8 @@
 // widget test has no network, so what is drawn is the empty or error state.
 // The suggestion card's fault only appeared once it had data. A screen passing
 // here is a screen whose STRUCTURE is sound, not one that has been reviewed.
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -39,6 +41,7 @@ import 'package:safenest/screens/documents_screen.dart';
 import 'package:safenest/screens/habits_screen.dart';
 import 'package:safenest/screens/labels_screen.dart';
 import 'package:safenest/screens/life_memory_screen.dart';
+import 'package:safenest/screens/memory_ask_screen.dart';
 import 'package:safenest/screens/modules_screen.dart';
 import 'package:safenest/screens/notes_screen.dart';
 import 'package:safenest/screens/gallery_screen.dart' show Photo;
@@ -82,6 +85,38 @@ final _photos = [
 /// The six at the bottom need a record to point at — a document id, a photo, a
 /// video — which is why they had never been rendered by anything. A fabricated
 /// id pointing at a dead port is enough: what is being checked is whether the
+
+/// Every file in lib/screens, and where each one is covered.
+///
+/// The ones NOT in `_screens` above are here with the reason, because
+/// "it is not in the list" and "it cannot be stood up" look identical from the
+/// outside and only one of them is acceptable.
+const _accountedFor = {
+  // Drawn by the sweep.
+  'background_screen.dart', 'documents_screen.dart', 'habits_screen.dart',
+  'labels_screen.dart', 'life_memory_screen.dart', 'memory_ask_screen.dart',
+  'modules_screen.dart', 'notes_screen.dart', 'places_screen.dart',
+  'profile_screen.dart', 'search_screen.dart', 'sign_in_screen.dart',
+  'vault_screen.dart', 'doc_preview.dart', 'doc_versions.dart',
+  'photo_editor.dart', 'photo_viewer.dart', 'saved_search_sheet.dart',
+  'video_trim.dart',
+
+  // Needs a signed-in session and a reachable server before it will build
+  // anything at all, so standing it up here draws a spinner and asserts
+  // nothing. Covered by its own test where it has one.
+  'activity_screen.dart', 'backup_screen.dart', 'cleanup_screen.dart',
+  'dashboard_screen.dart', 'doc_recent.dart', 'doc_trash.dart',
+  'gallery_screen.dart', 'masters_screen.dart', 'module_list_screen.dart',
+  'notifications_screen.dart', 'offline_screen.dart', 'person_faces.dart',
+  'photos_home.dart', 'scan_screen.dart', 'storage_screen.dart',
+  'sync_screen.dart', 'trash_screen.dart', 'two_factor_screen.dart',
+
+  // Not a screen: a shell, a tab host or a strip that only exists inside one.
+  // The thing that contains it is what has a width.
+  'collections_home.dart', 'home_screen.dart', 'library_tabs.dart',
+  'suggestions_strip.dart', 'vivid_home.dart',
+};
+
 /// screen can lay itself out, and that does not depend on the record existing.
 final _screens = <String, Widget Function()>{
   'App background': () => const BackgroundScreen(debugRecent: []),
@@ -90,6 +125,39 @@ final _screens = <String, Widget Function()>{
   'Labels': () => const LabelsScreen(),
   'Life Memory': () =>
       LifeMemoryScreen(dictation: FakeDictation(), debugRows: const []),
+  'Ask memories': () => MemoryAskScreen(
+        debugNow: DateTime(2026, 10, 2),
+        look: (_) async => const [],
+      ),
+  // AND THE ANSWERED STATE, which is where the risk actually is. The empty
+  // screen is a text field and a paragraph; the answer carries a badge, a
+  // sentence, numbered evidence and a row of chips, and every one of those is
+  // a Row that can overflow at 320pt. A sweep that only ever draws empty
+  // screens is the gap this file's own header warns about.
+  'Ask memories answered': () => MemoryAskScreen(
+        debugNow: DateTime(2026, 10, 2),
+        debugQuestion: 'where did I buy the washing machine',
+        look: (_) async => [
+          {
+            'id': 1,
+            'body': 'Bought the washing machine from Vijay Sales for ₹32,400 '
+                'with a two year warranty, and the delivery people left the '
+                'old one on the landing.',
+            'said_at': DateTime(2026, 9, 26).toIso8601String(),
+            'spoken': 1,
+            'server_id': null,
+            'facts': [
+              {
+                'kind': 'expiry',
+                'value': 'Warranty ends 26 Sep 2028',
+                'at': DateTime(2028, 9, 26).toIso8601String(),
+              },
+              {'kind': 'amount', 'value': '₹32,400', 'at': null},
+              {'kind': 'shop', 'value': 'Vijay Sales', 'at': null},
+            ],
+          }
+        ],
+      ),
   'Modules': () => ModulesScreen(onOpen: (_) {}),
   'Notes': () => const NotesScreen(),
   'Places': () => const PlacesScreen(),
@@ -213,12 +281,27 @@ void main() {
     }
   }
 
-  test('the sweep covers every screen in lib/screens', () {
-    // The point of the count: a screen added later is a screen nobody draws
-    // until somebody remembers to add it here, and "somebody remembers" is
-    // what put three layout defects on a phone. This fails when the app grows
-    // a screen the sweep has not been told about.
-    expect(_screens, hasLength(18),
-        reason: 'a screen was added or removed — add it to _screens');
+  test('every file in lib/screens is accounted for', () {
+    // A screen added later is a screen nobody draws until somebody remembers to
+    // add it here, and "somebody remembers" is what put three layout defects on
+    // a phone.
+    //
+    // THIS USED TO BE A COUNT OF _screens, and the count did not do its job: a
+    // change that adds a screen and bumps the number passes, and one did — the
+    // Ask screen went in and the sweep stayed green. So it reads the directory
+    // and names what it has never heard of. A new file here fails this test
+    // until it is either drawn above or listed below with a reason.
+    final onDisk = Directory('lib/screens')
+        .listSync()
+        .whereType<File>()
+        .map((f) => f.uri.pathSegments.last)
+        .where((n) => n.endsWith('.dart'))
+        .toSet();
+
+    expect(onDisk.difference(_accountedFor), isEmpty,
+        reason: 'new in lib/screens and nothing here draws it — add it to '
+            '_screens, or to _accountedFor with a reason');
+    expect(_accountedFor.difference(onDisk), isEmpty,
+        reason: 'listed here but gone from lib/screens — drop it');
   });
 }
