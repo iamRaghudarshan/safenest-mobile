@@ -167,9 +167,17 @@ Map<String, dynamic> _wire(Map<String, dynamic> row) => {
           if (f is Map)
             {'kind': f['kind'], 'value': f['value'], 'at': f['at']},
       ],
-      // The photograph is NOT sent here. It goes up through the ordinary photo
-      // backup, which already does chunked resumable uploads and knows what the
-      // computer has — duplicating that for one picture at a time would be a
-      // second, worse uploader. The words arriving without the picture is a
-      // normal state and the server says so.
+      // WHICH picture, not the picture. The file itself goes up through the
+      // ordinary photo backup, which already does chunked resumable uploads and
+      // knows what the computer has; duplicating that for one image at a time
+      // would be a second, worse uploader. What travels here is the camera-roll
+      // asset id, so the computer's copy of this memory can be joined to the
+      // photograph once the backup has sent it.
+      //
+      // SAID PLAINLY: nothing on the server resolves that join yet. The id is
+      // stored so the link exists in the data rather than having to be
+      // reconstructed later from nothing, and a memory whose words are on the
+      // laptop while its picture is still only on the phone is a normal state,
+      // not an error.
+      'photo_asset_id': row['photo_id'],
     };

@@ -88,6 +88,16 @@ class _LifeMemoryScreenState extends State<LifeMemoryScreen> {
   /// adoptMemoryPhoto — so nothing depends on the camera roll afterwards.
   String? _pendingPhoto;
 
+  /// And WHICH picture in the camera roll it was a copy of.
+  ///
+  /// Kept as well as the path, not instead of it. The path is what this phone
+  /// draws and it is the only reliable one — a library reference is not a
+  /// promise. The asset id is what lets the COMPUTER'S copy of this memory find
+  /// the same photograph once the ordinary photo backup has sent it, since the
+  /// memory itself travels as words and tags. Dropping it, as the first cut did,
+  /// means the laptop can never show the picture at all.
+  String? _pendingAsset;
+
   List<Map<String, dynamic>> _rows = const [];
   bool _loading = true;
   bool _canSpeak = false;
@@ -208,11 +218,15 @@ class _LifeMemoryScreenState extends State<LifeMemoryScreen> {
     if (saved != true || !mounted) return;
 
     final photo = _pendingPhoto;
+    final asset = _pendingAsset;
     final watcher = widget.onKept;
     if (watcher != null) {
       watcher(words, spoken, keep.toList(), photo);
       if (widget.debugRows != null) {
-        setState(() => _pendingPhoto = null);
+        setState(() {
+          _pendingPhoto = null;
+          _pendingAsset = null;
+        });
         return;
       }
     }
@@ -221,13 +235,19 @@ class _LifeMemoryScreenState extends State<LifeMemoryScreen> {
       body: words,
       saidAt: said,
       spoken: spoken,
+      photoId: asset,
       photoPath: photo,
       facts: [
         for (final f in keep)
           (kind: f.kind.name, value: f.value, at: f.at),
       ],
     );
-    if (mounted) setState(() => _pendingPhoto = null);
+    if (mounted) {
+      setState(() {
+        _pendingPhoto = null;
+        _pendingAsset = null;
+      });
+    }
     await _load();
     _toBottom();
 
@@ -283,6 +303,7 @@ class _LifeMemoryScreenState extends State<LifeMemoryScreen> {
     }
     setState(() {
       _pendingPhoto = path;
+      _pendingAsset = chosen.id;
       _trouble = null;
     });
   }
@@ -359,7 +380,10 @@ class _LifeMemoryScreenState extends State<LifeMemoryScreen> {
           onSpeak: _startListening,
           onStop: _stopListening,
           onAttach: _attach,
-          onDropPhoto: () => setState(() => _pendingPhoto = null),
+          onDropPhoto: () => setState(() {
+            _pendingPhoto = null;
+            _pendingAsset = null;
+          }),
           theme: theme,
         ),
       ]),
