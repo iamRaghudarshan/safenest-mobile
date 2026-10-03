@@ -484,6 +484,7 @@ class _InfoSheetState extends State<_InfoSheet> {
     try {
       final r = await widget.api.post('/api/gallery/${photo.id}/tag', choice);
       final m = r is Map ? r : const {};
+      if (!mounted) return;
       setState(() => people.add({
             'id': (m['person_id'] as num?)?.toInt(),
             'name': '${m['name'] ?? choice['name'] ?? 'Someone'}',
@@ -526,6 +527,7 @@ class _InfoSheetState extends State<_InfoSheet> {
     try {
       await widget.api
           .post('/api/gallery/${photo.id}/untag', {'person_id': id});
+      if (!mounted) return;
       setState(() =>
           people.removeWhere((p) => (p['id'] as num?)?.toInt() == id));
     } on ApiError catch (e) {

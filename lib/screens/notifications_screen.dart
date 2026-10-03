@@ -56,6 +56,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     try {
       final d = await context.read<Session>().api.get('/api/notifications/inbox');
       final list = d is List ? d : (d is Map ? (d['items'] ?? const []) : const []);
+      if (!mounted) return;
       setState(() {
         _rows = [for (final e in (list as List)) Map<String, dynamic>.from(e as Map)];
         _loading = false;

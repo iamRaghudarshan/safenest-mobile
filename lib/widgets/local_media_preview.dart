@@ -93,6 +93,7 @@ class _LocalMediaPreviewState extends State<LocalMediaPreview> {
         await c.dispose();
         return;
       }
+      if (!mounted) return;
       setState(() {
         _video = c;
         _loading = false;

@@ -76,6 +76,7 @@ class _VaultScreenState extends State<VaultScreen> {
       final loaded = await context
           .read<OfflineRecords>()
           .list(context.read<Session>().api, 'vault');
+      if (!mounted) return;
       setState(() {
         _items = loaded.rows;
         _fromCache = loaded.fromCache;

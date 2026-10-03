@@ -126,6 +126,7 @@ class _EditProfileSheetState extends State<EditProfileSheet> {
       await session.refreshUser();
       navigator.pop(true);
     } on ApiError catch (e) {
+      if (!mounted) return;
       setState(() {
         _error = e.message;
         _busy = false;

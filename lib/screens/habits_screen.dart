@@ -65,6 +65,7 @@ class _HabitsScreenState extends State<HabitsScreen> {
           .read<OfflineRecords>()
           .list(context.read<Session>().api, 'habits');
       final d = {'items': loaded.rows};
+      if (!mounted) return;
       setState(() {
         _items = [
           for (final e in ((d as Map)['items'] as List? ?? const []))

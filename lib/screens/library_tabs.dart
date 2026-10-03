@@ -254,6 +254,7 @@ class _AlbumsTabState extends State<AlbumsTab> {
     if (!_suggesting && _suggested.isEmpty) unawaited(_loadSuggestions());
     try {
       final d = await context.read<Session>().api.get('/api/gallery/albums');
+      if (!mounted) return;
       setState(() {
         _albums = [
           for (final a in ((d as Map)['albums'] as List? ?? const []))
@@ -806,6 +807,7 @@ class _PeopleTabState extends State<PeopleTab> {
         'min_photos': _onlyRepeat ? '2' : '1',
         'quality': _onlyRepeat ? '1' : '0',
       });
+      if (!mounted) return;
       setState(() {
         _people = [
           for (final p in ((d as Map)['people'] as List? ?? const []))
@@ -1091,6 +1093,7 @@ class _MemoriesTabState extends State<MemoriesTab> {
     try {
       final d = await context.read<Session>().api.get('/api/gallery/memories');
       final m = d as Map;
+      if (!mounted) return;
       setState(() {
         _groups = [
           for (final g in (m['groups'] as List? ?? const []))
@@ -1276,6 +1279,7 @@ class _CollectionScreenState extends State<CollectionScreen> {
         '/api/gallery/albums/${widget.albumId}',
         {'name': name},
       );
+      if (!mounted) return;
       setState(() => _title = name);
     } on ApiError catch (e) {
       // 409 is the useful one: the server refuses a duplicate name, and saying

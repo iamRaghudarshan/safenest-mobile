@@ -124,13 +124,27 @@ class _ModuleListScreenState extends State<ModuleListScreen> {
       final loaded = await context
           .read<OfflineRecords>()
           .list(context.read<Session>().api, widget.spec.key);
-      setState(() {
-        _rows = loaded.rows;
-        _fromCache = loaded.fromCache;
-        _asOf = loaded.asOf;
-        _loading = false;
-        _err = null;
-      });
+      // GONE BY THE TIME IT ANSWERED. The fetch is slow by design — it waits on
+      // the computer being reachable before falling back to the cache — so
+      // leaving the list before it lands is ordinary, not an edge case. Without
+      // the guard the state object is dead and setState throws into the zone,
+      // which surfaced as one run in nine of the whole test suite failing
+      // somewhere else entirely.
+      //
+      // IT GUARDS THE setState, NOT THE WHOLE METHOD. Returning here instead
+      // would also skip the alarm sync below, and that has to happen whether
+      // or not the list is still on screen: its job is to stop a reminder
+      // deleted on the computer from still going off on the phone, and
+      // "the user navigated away while it loaded" is no reason to keep ringing.
+      _rows = loaded.rows;
+      if (mounted) {
+        setState(() {
+          _fromCache = loaded.fromCache;
+          _asOf = loaded.asOf;
+          _loading = false;
+          _err = null;
+        });
+      }
       // ALARMS FOLLOW THE SERVER. Re-scheduled from the rows just fetched, so
       // a reminder deleted or re-timed on the computer stops ringing here —
       // otherwise the phone keeps a schedule set days ago and goes off for
@@ -154,6 +168,9 @@ class _ModuleListScreenState extends State<ModuleListScreen> {
         }());
       }
     } on ApiError catch (e) {
+      // Same reasoning as above: a failure can arrive after the screen has
+      // gone just as easily as a success can.
+      if (!mounted) return;
       setState(() {
         _err = e;
         _loading = false;
