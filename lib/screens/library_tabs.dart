@@ -155,6 +155,10 @@ class _AlbumsTabState extends State<AlbumsTab> {
                                     .surfaceContainerHighest)
                             : Image.network(_abs(ctx, '${s['cover_url']}'),
                                 fit: BoxFit.cover,
+                                // A cover in a horizontal strip, never more
+                                // than half a phone wide.
+                                cacheWidth: 300,
+                                gaplessPlayback: true,
                                 errorBuilder: (_, _, _) => const SizedBox()),
                       ),
                       Padding(

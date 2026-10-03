@@ -335,6 +335,7 @@ class _TrackScreenState extends State<TrackScreen> {
               builder: (_, _) => _Switch(
                 on: rec.recording,
                 problem: rec.problem,
+                pausedForBattery: rec.pausedForBattery,
                 kept: _kept,
                 onChanged: _toggle,
               ),
@@ -403,12 +404,17 @@ class _Switch extends StatelessWidget {
   const _Switch({
     required this.on,
     required this.problem,
+    required this.pausedForBattery,
     required this.kept,
     required this.onChanged,
   });
 
   final bool on;
   final NoLocation? problem;
+
+  /// The phone stopped it, not the person. Said differently, because a switch
+  /// that has flipped itself off looks like a switch that failed.
+  final bool pausedForBattery;
   final int kept;
   final void Function(bool) onChanged;
 
@@ -434,7 +440,11 @@ class _Switch extends StatelessWidget {
             child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(on ? 'Recording' : 'Not recording',
+                  Text(on
+                          ? 'Recording'
+                          : pausedForBattery
+                              ? 'Paused — battery was low'
+                              : 'Not recording',
                       style: const TextStyle(
                           fontSize: 14, fontWeight: FontWeight.w800)),
                   const SizedBox(height: 2),
@@ -442,10 +452,12 @@ class _Switch extends StatelessWidget {
                   // somebody has to take on faith; a count of what is actually
                   // stored is the same claim with evidence behind it.
                   Text(
-                      kept == 0
-                          ? 'Nothing recorded yet'
-                          : '$kept position${kept == 1 ? '' : 's'} kept on this '
-                              'phone',
+                      pausedForBattery && !on
+                          ? 'It will carry on once the phone is charged'
+                          : kept == 0
+                              ? 'Nothing recorded yet'
+                              : '$kept position${kept == 1 ? '' : 's'} kept on '
+                                  'this phone',
                       style: TextStyle(
                           fontSize: 11.5,
                           color: theme.colorScheme.onSurfaceVariant)),

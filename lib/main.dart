@@ -116,8 +116,13 @@ class _SafeNestAppState extends State<SafeNestApp> {
     // screen so the offline banner is right on the first frame rather than
     // appearing a second later.
     _mode.load();
-    _sync.refreshPending();
+    // The session decides whether the first screen is sign-in or the app, so it
+    // stays on the launch path. The pending count only feeds a banner, and
+    // reading it opens the database — which is the single most expensive thing
+    // a cold start can do before it has drawn anything.
     _session.restore().then((_) => _loadBrand());
+    WidgetsBinding.instance
+        .addPostFrameCallback((_) => _sync.refreshPending());
 
     // LIFE MEMORY'S WARRANTY WARNINGS, put back every launch.
     //
@@ -129,12 +134,43 @@ class _SafeNestAppState extends State<SafeNestApp> {
     // take these with it. The hook is how it puts them back in the same breath.
     // Ids are stable, so re-scheduling moves a warning and never duplicates it.
     _autoSync.start();
-    unawaited(_recorder.restore());
     Alarms.instance.alsoSchedule = () => scheduleMemoryReminders(_store);
-    unawaited(scheduleMemoryReminders(_store).catchError((e) {
-      debugPrint('[memory] launch scheduling failed: $e');
-      return 0;
-    }));
+    _afterTheAppIsUp();
+  }
+
+  /// Everything that does not have to happen before the first frame.
+  ///
+  /// IT ALL USED TO RUN IN initState, and between them these cost most of a
+  /// cold start. Scheduling the warranty warnings alone parses the whole
+  /// timezone database, initialises the notification plugin, opens the SQLite
+  /// file and then crosses the platform channel once per alarm — none of which
+  /// anybody is waiting for, and all of which was happening while the person
+  /// stared at a blank screen.
+  ///
+  /// A post-frame callback AND a short delay, not just the callback. The first
+  /// frame is the splash; the frame that matters is the one with the home
+  /// screen's own content on it, and that is still being built when the
+  /// post-frame callback fires. Two seconds is past it on a slow phone and
+  /// unnoticeable on a fast one — nothing here is time-critical, and an alarm
+  /// set two seconds later than it might have been is set two years early
+  /// either way.
+  Timer? _settling;
+
+  void _afterTheAppIsUp() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      // HELD AND CANCELLED, not a bare Future.delayed. A timer that outlives
+      // the widget fires into a disposed state — the same fault NetworkService
+      // and BatteryService carry a note about — and a test tears the tree down
+      // long before two seconds have passed, which is how this was caught.
+      _settling = Timer(const Duration(seconds: 2), () {
+        if (!mounted) return;
+        unawaited(_recorder.restore());
+        unawaited(scheduleMemoryReminders(_store).catchError((e) {
+          debugPrint('[memory] launch scheduling failed: $e');
+          return 0;
+        }));
+      });
+    });
   }
 
   /// The name and colour come from the customer's own server, because SafeNest
@@ -159,6 +195,7 @@ class _SafeNestAppState extends State<SafeNestApp> {
   void dispose() {
     // The timer and the lifecycle observer both outlive this object otherwise,
     // and the observer would keep firing into a disposed state.
+    _settling?.cancel();
     _autoSync.dispose();
     _recorder.dispose();
     super.dispose();

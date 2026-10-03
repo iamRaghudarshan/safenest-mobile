@@ -20,6 +20,7 @@ library;
 
 import 'dart:async';
 
+import 'package:battery_plus/battery_plus.dart';
 import 'package:flutter/foundation.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -190,6 +191,8 @@ class Recorder extends ChangeNotifier {
   final OfflineStore _store;
   final Positions _positions;
 
+  final _battery = Battery();
+
   StreamSubscription<Spot>? _sub;
   bool _on = false;
   NoLocation? _problem;
@@ -236,6 +239,7 @@ class Recorder extends ChangeNotifier {
     _problem = why;
     _on = true;
     _kept = 0;
+    pausedForBattery = false;
     notifyListeners();
 
     await _sub?.cancel();
@@ -248,6 +252,32 @@ class Recorder extends ChangeNotifier {
       await prefs.setBool(_onKey, true);
     } catch (_) {/* it records either way this run */}
     return true;
+  }
+
+  /// Below this, recording stops until the phone is charged and reopened.
+  ///
+  /// Fifteen rather than five: at five the phone is about to die and whatever
+  /// it was going to record is lost anyway, and the last fifteen per cent is
+  /// what somebody needs to get home and make a call.
+  static const _tooLow = 15;
+
+  /// True when the module stopped itself rather than being switched off.
+  ///
+  /// The screen says which: "not recording" when somebody chose it, and a
+  /// different line when the phone did — otherwise it looks like the switch
+  /// failed.
+  bool pausedForBattery = false;
+
+  Future<void> _pauseForBattery() async {
+    await _sub?.cancel();
+    _sub = null;
+    _on = false;
+    pausedForBattery = true;
+    notifyListeners();
+    // The SAVED switch is deliberately left ON. This is a pause, not a
+    // decision — the next launch on a charged phone picks it up again, and
+    // somebody who turned it on should not have to remember to turn it back on
+    // because their battery ran down once.
   }
 
   Future<void> stop() async {
@@ -263,12 +293,40 @@ class Recorder extends ChangeNotifier {
 
   Future<void> _keep(Spot s) async {
     try {
+      // THE CHARGE AT THE TIME, which the column has always had room for and
+      // nothing ever filled. It is what answers "why is the afternoon
+      // missing?" — a gap at 4% is a phone that died, a gap at 80% is
+      // something else, and without the number both look identical a month
+      // later.
+      //
+      // Best effort: a battery that will not answer must not lose the fix.
+      int? charge;
+      try {
+        charge = await _battery.batteryLevel;
+      } catch (_) {
+        charge = null;
+      }
+
+      // AND IT STOPS ITSELF ON A DYING PHONE. A location stream is among the
+      // most expensive things an app can hold open, and holding one at 5% to
+      // record that somebody was at home is the worst trade in the app. It
+      // resumes on its own: `restore()` runs at every launch and the switch is
+      // still on, so plugging the phone in and opening SafeNest is all it takes.
+      if (charge != null && charge <= _tooLow) {
+        if (_on) {
+          debugPrint('[track] paused at $charge% — the phone needs the power');
+          await _pauseForBattery();
+        }
+        return;
+      }
+
       final id = await _store.addFix(
         at: s.at,
         lat: s.lat,
         lon: s.lon,
         accuracy: s.accuracy,
         speed: s.speed,
+        battery: charge,
       );
       if (id != null) {
         _kept++;

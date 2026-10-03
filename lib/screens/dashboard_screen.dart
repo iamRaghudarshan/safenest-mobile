@@ -874,6 +874,11 @@ class _PhotoSliderState extends State<_PhotoSlider> {
                   if (url.isNotEmpty)
                     Image.network(url,
                         fit: BoxFit.cover,
+                        // Full width, so generous — but still a cap. An
+                        // uncapped decode of a 12MP photo is 48MB of RAM for a
+                        // card four hundred points across, and this one is in a
+                        // carousel that holds several at once.
+                        cacheWidth: 900,
                         gaplessPlayback: true,
                         errorBuilder: (_, _, _) => const SizedBox.shrink()),
                   // A soft bottom scrim so the dots read over a bright photo.

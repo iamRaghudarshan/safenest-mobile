@@ -643,6 +643,12 @@ class _GalleryScreenState extends State<GalleryScreen>
                   child: Stack(alignment: Alignment.bottomRight, children: [
                     Image.network(url,
                         width: 56, height: 56, fit: BoxFit.cover,
+                        // 56 POINTS ON SCREEN, and without this Flutter decodes
+                        // the whole photograph into memory to draw it — in a
+                        // scrolling list, once per row. cacheWidth caps the
+                        // DECODED size; the file fetched is the same either way.
+                        cacheWidth: 160,
+                        gaplessPlayback: true,
                         errorBuilder: (_, _, _) => Container(
                             width: 56,
                             height: 56,
