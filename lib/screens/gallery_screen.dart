@@ -1657,6 +1657,40 @@ class _GalleryScreenState extends State<GalleryScreen>
                             g.photos.every((p) => _selected.contains(p.id)),
                         onToggle: () => _toggleGroup(g)),
                   ),
+                  // UNRESOLVED, 3 October 2026 — READ THIS BEFORE SHORTENING
+                  // ANYTHING ABOVE THE GRID.
+                  //
+                  // On the x86_64 emulator here, this SliverGrid lays out and
+                  // then paints NOTHING. What was established, each by
+                  // measurement rather than reasoning:
+                  //
+                  //   * the data is right — groups=1, sizes=[24], childCount 24
+                  //   * the tile is innocent — replacing PhotoTile with a plain
+                  //     magenta Container painted nothing either
+                  //   * the viewport is innocent — a SliverToBoxAdapter holding
+                  //     a green box, inserted immediately before this grid,
+                  //     paints perfectly in the very region the grid occupies
+                  //   * it is not the renderer — identical under Impeller and
+                  //     Skia, and on a cold-booted emulator with software GPU
+                  //   * it is not SliverMainAxisGroup — removing it changed
+                  //     nothing but where the date header pinned
+                  //   * no exception is thrown, under any of the above
+                  //
+                  // The second symptom is the dangerous one: when the content
+                  // ABOVE the grid is short enough that the grid would fill
+                  // most of the viewport, the WHOLE Gallery body stops
+                  // painting — header, search field and all — while still
+                  // hit-testing correctly. That is why the storage panel and
+                  // the backed-up tiles above are deliberately NOT tightened:
+                  // shortening them is what exposes it, and two separate
+                  // attempts to do so had to be reverted.
+                  //
+                  // So the generous header height is load-bearing by accident,
+                  // which is a bad thing to depend on and is written down here
+                  // rather than left as a mystery for whoever next tries to
+                  // reclaim that space. It has not been reproduced on real
+                  // hardware; check a physical phone before concluding either
+                  // way.
                   SliverPadding(
                   padding: const EdgeInsets.symmetric(horizontal: 2),
                   sliver: _listView
