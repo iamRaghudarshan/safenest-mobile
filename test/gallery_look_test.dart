@@ -14,6 +14,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:safenest/screens/modules_screen.dart';
 import 'package:safenest/theme.dart';
 import 'package:safenest/widgets/backed_up_grid.dart';
 import 'package:safenest/widgets/module_tile.dart';
@@ -174,6 +175,26 @@ void main() {
       expect(find.text('Free 68%'), findsOneWidget);
     });
 
+    testWidgets('a library too small to move the bar gets a sentence instead',
+        (tester) async {
+      // 954 KB on a 287 GB disk. The bar renders as an empty track and the
+      // legend reads "Used 0% · Free 100%" — about a hundred and ten points to
+      // say "there is plenty of room", on the one screen whose job is to show
+      // photographs.
+      await tester.pumpWidget(_app(const StorageHero(
+        usedBytes: 954 * 1024,
+        freeBytes: 287 * 1024 * 1024 * 1024,
+        caption: '24 photos · 8 documents',
+      )));
+      await tester.pumpAndSettle();
+
+      expect(find.text('954 KB'), findsOneWidget);
+      expect(find.byType(LinearProgressIndicator), findsNothing);
+      expect(find.text('Used 0%'), findsNothing);
+      expect(find.textContaining('Plenty of room'), findsOneWidget);
+      expect(find.textContaining('287 GB free'), findsOneWidget);
+    });
+
     testWidgets('with no free figure there is no bar and no invented total',
         (tester) async {
       // Only an admin is told what is left on the drive. Everybody else must
@@ -257,6 +278,76 @@ void main() {
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
       expect(find.text('158 GB'), findsOneWidget);
+    });
+  });
+
+  group('the modules grid', () {
+    testWidgets('a module with no count still lines up with one that has one',
+        (tester) async {
+      // "Notes" sat visibly lower than "Documents" and "Vault" beside it in the
+      // same row, because its tile is one line shorter and the column was
+      // CENTRED in its cell. On screen that reads as a misplaced tile, not as a
+      // missing number — and the number is the part nobody was looking at.
+      //
+      // The counts have to be supplied for this to mean anything: with every
+      // tile equally blank, as a test without the seam leaves them, all three
+      // are the same height and the bug cannot appear.
+      tester.view.physicalSize = const Size(1080, 2400);
+      tester.view.devicePixelRatio = 3.0;
+      addTearDown(tester.view.reset);
+
+      await tester.pumpWidget(MaterialApp(
+        theme: buildTheme(const Brand(), Brightness.light),
+        home: ModulesScreen(
+          onOpen: (_) {},
+          // Documents and Vault have a number; Notes does not.
+          debugTotals: const {'documents': 8, 'vault': 0},
+        ),
+      ));
+      await tester.pump();
+
+      final tops = <String, double>{};
+      for (final label in ['Documents', 'Vault', 'Notes']) {
+        final f = find.text(label);
+        expect(f, findsOneWidget, reason: '$label should be on the grid');
+        tops[label] = tester.getTopLeft(f).dy;
+      }
+      expect(tops['Notes'], closeTo(tops['Documents']!, 0.5),
+          reason: 'a tile with no count must not sit lower than its row');
+      expect(tops['Vault'], closeTo(tops['Documents']!, 0.5));
+    });
+
+    testWidgets('the rows are packed, not spread', (tester) async {
+      // Measured rather than eyeballed, because "looks tighter" is exactly the
+      // kind of change that drifts back. The old grid put 143.7 between rows
+      // for about 94 of content, so fifteen modules cost four and a half
+      // screens and the grid read as sparse rather than calm.
+      tester.view.physicalSize = const Size(1080, 2400);
+      tester.view.devicePixelRatio = 3.0;
+      addTearDown(tester.view.reset);
+
+      await tester.pumpWidget(MaterialApp(
+        theme: buildTheme(const Brand(), Brightness.light),
+        home: ModulesScreen(onOpen: (_) {}),
+      ));
+      await tester.pump();
+
+      final ys = <double>[];
+      for (final e in find
+          .byWidgetPredicate((w) => w is Icon && w.size == 28)
+          .evaluate()) {
+        final y = tester.getTopLeft(find.byWidget(e.widget)).dy;
+        if (!ys.any((o) => (o - y).abs() < 0.5)) ys.add(y);
+      }
+      ys.sort();
+      expect(ys.length, greaterThan(2),
+          reason: 'this test is worthless if it found fewer than three rows');
+
+      final pitch = ys[1] - ys[0];
+      expect(pitch, lessThan(130),
+          reason: 'the old grid was 143.7 between rows; it must stay packed');
+      expect(pitch, greaterThan(100),
+          reason: 'packed, not overlapping — the tiles still need their labels');
     });
   });
 }

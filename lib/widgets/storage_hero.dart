@@ -26,6 +26,16 @@ import '../theme.dart';
 /// Above this share of the disk, the bar stops being decorative.
 const _tight = 0.90;
 
+/// Below this share, the bar is not drawn at all.
+///
+/// A library of 954 KB on a 287 GB disk fills nothing: the bar renders as an
+/// empty track, the legend reads "Used 0% · Free 100%", and the three of them
+/// take about a hundred and ten points to say "there is plenty of room". One
+/// sentence says it better and leaves that space to the photographs, which are
+/// what this screen is for. The bar earns its place once the number can
+/// actually move.
+const _worthABar = 0.01;
+
 @immutable
 class StorageHero extends StatelessWidget {
   const StorageHero({
@@ -58,6 +68,12 @@ class StorageHero extends StatelessWidget {
     if (freeBytes <= 0) return null;
     final total = usedBytes + freeBytes;
     return total <= 0 ? null : usedBytes / total;
+  }
+
+  /// Whether the bar is worth the space it costs. See [_worthABar].
+  bool get _drawBar {
+    final s = _share;
+    return s != null && s >= _worthABar;
   }
 
   @override
@@ -174,12 +190,21 @@ class StorageHero extends StatelessWidget {
                           style: const TextStyle(
                               fontSize: 11, height: 1.35, color: Colors.white70)),
                     ],
-                    if (share != null) ...[
+                    if (share != null && !_drawBar) ...[
+                      const SizedBox(height: 7),
+                      // What the bar would have said, in the space of a line.
+                      Text('Plenty of room — ${_short(freeBytes)} free',
+                          style: const TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.white70)),
+                    ],
+                    if (_drawBar) ...[
                       const SizedBox(height: 13),
                       ClipRRect(
                         borderRadius: BorderRadius.circular(99),
                         child: LinearProgressIndicator(
-                          value: share.clamp(0.0, 1.0),
+                          value: share!.clamp(0.0, 1.0),
                           minHeight: 6,
                           backgroundColor: Colors.white24,
                           valueColor:

@@ -23,9 +23,21 @@ typedef _Mod = ({String key, String label, IconData icon, Color colour, String b
 
 class ModulesScreen extends StatefulWidget {
   const ModulesScreen(
-      {super.key, required this.onOpen, this.allowed, this.refreshTick = 0});
+      {super.key,
+      required this.onOpen,
+      this.allowed,
+      this.refreshTick = 0,
+      this.debugTotals});
   final void Function(String key) onOpen;
   final Set<String>? allowed;
+
+  /// Counts, supplied instead of fetched. Tests only.
+  ///
+  /// The screen's layout depends on WHICH modules have a count, because a tile
+  /// with no number is one line shorter than its neighbours — and that is a
+  /// difference no test could ever see while every tile in a test was equally
+  /// blank. The seam exists because the bug did.
+  final Map<String, dynamic>? debugTotals;
 
   /// Home bumps this when a pushed module returns, so a newly added habit's
   /// count is re-read instead of the tile keeping the number it loaded once.
@@ -68,6 +80,13 @@ class _ModulesScreenState extends State<ModulesScreen> {
   }
 
   Future<void> _load() async {
+    if (widget.debugTotals != null) {
+      setState(() {
+        _totals = Map<String, dynamic>.from(widget.debugTotals!);
+        _loading = false;
+      });
+      return;
+    }
     try {
       final d = await context.read<Session>().api.get('/api/dashboard');
       if (d is Map && mounted) {
@@ -211,12 +230,19 @@ class _ModulesScreenState extends State<ModulesScreen> {
             child: RefreshIndicator(
               onRefresh: _load,
               child: GridView.builder(
-                padding: const EdgeInsets.fromLTRB(14, 10, 14, 24),
+                // PACKED LIKE A PHONE'S OWN APP GRID, which is what the owner
+                // asked for and what this screen is competing with. At 0.80
+                // with 12 of spacing a row was 140 tall for 94 of content, so
+                // fifteen modules needed four and a half screens of scrolling
+                // to see and the grid read as sparse rather than calm. Five
+                // rows fit now, and the icons are what fills the screen
+                // instead of the gaps between them.
+                padding: const EdgeInsets.fromLTRB(10, 8, 10, 24),
                 gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                   crossAxisCount: 3,
-                  crossAxisSpacing: 12,
-                  mainAxisSpacing: 12,
-                  childAspectRatio: 0.80,
+                  crossAxisSpacing: 6,
+                  mainAxisSpacing: 6,
+                  childAspectRatio: 0.97,
                 ),
                 itemCount: tiles.length,
                 itemBuilder: (ctx, i) {
@@ -314,8 +340,14 @@ class _ModTile extends StatelessWidget {
             borderRadius: BorderRadius.circular(20),
           ),
           child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 6),
-            child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+            padding: const EdgeInsets.symmetric(vertical: 5, horizontal: 4),
+            // TOP-ALIGNED, NOT CENTRED, and that is a bug fix rather than a
+            // tidy-up. A module with no count is one line shorter, so centring
+            // it in the cell pushed its icon DOWN — "Notes" sat visibly below
+            // "Documents" and "Vault" in the same row, which reads as a
+            // misplaced tile rather than as a missing number. Aligning to the
+            // top puts every icon on the same line whatever is under it.
+            child: Column(mainAxisAlignment: MainAxisAlignment.start, children: [
               Stack(clipBehavior: Clip.none, children: [
                 Container(
                   width: 56,
@@ -384,7 +416,7 @@ class _ModTile extends StatelessWidget {
                     ),
                   ),
               ]),
-              const SizedBox(height: 10),
+              const SizedBox(height: 7),
               Text(label,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
