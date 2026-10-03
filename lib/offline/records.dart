@@ -81,20 +81,28 @@ class OfflineRecords {
 
     // In offline mode do not even reach for the network. The owner asked for
     // this; a screen that stalls for a timeout first has not honoured it.
-    if (!_mode.on) {
+    //
+    // AND NOT IF IT JUST FAILED, either. Without that second condition, saving
+    // with the computer away cost two timeouts back to back — one for the POST
+    // and one for the reload that follows it — and the list sat there without
+    // the new row for the whole of both. See OfflineMode.computerAway.
+    if (!_mode.on && !_mode.computerAway) {
       try {
         final d = await api.get(_listPath(module));
         final rows = _rows(d);
+        _mode.markReachable();
         if (_mayCache(module)) {
           await _store.putList(module, rows);
         }
         return Loaded(_mayCache(module) ? await _merged(module) : rows,
             fromCache: false);
-      } on ApiError {
+      } on ApiError catch (e) {
+        if (e.status == 0) _mode.markAway();
         // Fall through to whatever is held here. An unreachable computer is the
         // normal case for this product, not an error worth a red screen.
       } catch (_) {
         // Same again for anything the http layer throws that is not an ApiError.
+        _mode.markAway();
       }
     }
 
@@ -157,13 +165,14 @@ class OfflineRecords {
       return Saved.server;
     }
 
-    if (!_mode.on) {
+    if (!_mode.on && !_mode.computerAway) {
       try {
         if (id != null) {
           await api.put('/api/$module/$id', body);
         } else {
           await api.post('/api/$module', body);
         }
+        _mode.markReachable();
         return Saved.server;
       } on ApiError catch (e) {
         // A REFUSAL IS NOT AN OUTAGE. The computer answered and said no — an
@@ -171,8 +180,10 @@ class OfflineRecords {
         // hide a mistake the owner can fix now behind a sync that will fail
         // later for the same reason. Only a failure to REACH it is queued.
         if (e.status > 0) rethrow;
+        _mode.markAway();
       } catch (_) {
         // Could not reach it. Queue below.
+        _mode.markAway();
       }
     }
 

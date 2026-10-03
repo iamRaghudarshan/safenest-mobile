@@ -54,18 +54,44 @@ class Alarms {
   /// notification, whatever the code later asks for.
   static const _channelId = 'safenest.reminders.alarm';
 
-  // An alarm keeps going; a notification chimes once. So each reminder is not a
-  // single notification but a short BURST — the first at the due time, then
-  // repeats every _burstGap until it is dismissed or the app is next opened
-  // (syncFrom cancels everything and reschedules, clearing whatever has not yet
-  // fired). Combined with the ~24s custom alarm tone, that is close to two minutes
-  // of intermittent alarm rather than one lost chime. The extra rings live in an
-  // id space far above any server reminder id so they never collide with a real
-  // one.
-  static const _burstCount = 5;
+  // ONE RING BY DEFAULT, and this was five.
+  //
+  // The idea was that an alarm keeps going where a notification chimes once, so
+  // each reminder became a burst: the first at the due time, then repeats every
+  // _burstGap. On the owner's phone that is not what it looked like. Android
+  // does not replace a notification with the next ring, it STACKS them, so one
+  // reminder left five separate entries in the shade — and the server sends its
+  // own push for the same reminder, which made six. Reported, correctly, as
+  // "reminders are coming multiple times".
+  //
+  // So the burst is opt-in now and off unless somebody asks for it. The
+  // capability is kept because the case for it was real — a single chime is
+  // easy to miss — but it is the kind of thing a person decides for themselves,
+  // and the default has to be the one that does not look broken.
+  //
+  // The extra rings live in an id space far above any server reminder id so
+  // they never collide with a real one.
   static const _burstGap = Duration(seconds: 30);
+  static const _burstMax = 5;
+
+  /// How many times one reminder rings. 1 is the default; up to [_burstMax].
+  /// Set from Settings; see `notification_settings.dart`.
+  int burstCount = 1;
+
+  /// Whether this phone may set EXACT alarms, which Android 13+ gates behind
+  /// its own permission.
+  ///
+  /// NOT A COSMETIC DIFFERENCE. Asking for an exact alarm without the
+  /// permission does not degrade — it THROWS, and every ring is lost. That is
+  /// what was happening on a test device: fourteen `exact_alarms_not_permitted`
+  /// in the log and not one local reminder, with the only clue a debugPrint
+  /// nobody reads. An inexact alarm arrives within a maintenance window rather
+  /// than on the minute, which for a bill reminder is the difference between
+  /// late and never.
   static const _extraBase = 1 << 28; // 268,435,456 — above any reminder row id
-  int _extraId(int id, int k) => _extraBase + id * _burstCount + k;
+  bool? _canBeExact;
+
+  int _extraId(int id, int k) => _extraBase + id * _burstMax + k;
 
   Future<void> init() async {
     if (_ready) return;
@@ -90,6 +116,33 @@ class Alarms {
   }
 
   /// Ask for permission, at the moment it makes sense to.
+  /// Whether an exact alarm can be set on this phone.
+  ///
+  /// Cached for the run: it is a platform call per reminder otherwise, and a
+  /// sync of forty reminders would make forty of them. Cleared by
+  /// [requestPermission], which is the only thing that can change the answer
+  /// from inside the app.
+  Future<bool> canScheduleExact() async {
+    if (_canBeExact != null) return _canBeExact!;
+    await init();
+    final android = _plugin.resolvePlatformSpecificImplementation<
+        AndroidFlutterLocalNotificationsPlugin>();
+    if (android == null) {
+      // iOS has no such gate, and neither does a test harness.
+      _canBeExact = true;
+      return true;
+    }
+    try {
+      _canBeExact = await android.canScheduleExactNotifications() ?? false;
+    } catch (_) {
+      // An older Android, where the permission does not exist and everything is
+      // exact. Treating a failed check as "no" would quietly make every
+      // reminder inexact on the phones that never needed the check.
+      _canBeExact = true;
+    }
+    return _canBeExact!;
+  }
+
   Future<bool> requestPermission() async {
     await init();
     final ios = _plugin.resolvePlatformSpecificImplementation<
@@ -103,6 +156,7 @@ class Alarms {
         AndroidFlutterLocalNotificationsPlugin>();
     if (android != null) {
       final granted = await android.requestNotificationsPermission() ?? false;
+      _canBeExact = null; // the answer may have just changed
       // Exact alarms are their own permission on Android 13+. Without it a
       // reminder set for 18:30 is delivered "around" 18:30, which for a
       // medication reminder is not the same thing.
@@ -171,7 +225,9 @@ class Alarms {
     // every reminder from the last month at once. The extras are all later than
     // `when`, so this one guard covers the whole burst.
     if (!when.isAfter(DateTime.now())) return;
-    for (var k = 0; k < _burstCount; k++) {
+    final exact = await canScheduleExact();
+    final rings = burstCount.clamp(1, _burstMax);
+    for (var k = 0; k < rings; k++) {
       final at = when.add(_burstGap * k);
       try {
         await _plugin.zonedSchedule(
@@ -180,7 +236,11 @@ class Alarms {
           body,
           tz.TZDateTime.from(at, tz.local),
           _alarmStyle(id),
-          androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+          // EXACT ONLY IF ALLOWED. Asking for exact without the permission
+          // throws and the reminder is simply never set — see canScheduleExact.
+          androidScheduleMode: exact
+              ? AndroidScheduleMode.exactAllowWhileIdle
+              : AndroidScheduleMode.inexactAllowWhileIdle,
           // absoluteTime: 18:30 means 18:30 in the app's clock (IST), not
           // whatever wall time the phone happens to be showing in another
           // country. The alternative interprets it against the device's zone and
@@ -200,7 +260,11 @@ class Alarms {
     await _plugin.cancel(id);
     // ...and every extra ring of its burst, or a cancelled reminder would keep
     // going off from the repeats already in the queue.
-    for (var k = 1; k < _burstCount; k++) {
+    // Every id the burst could ever have used, not just the ones this run set.
+    // Turning the burst down from five to one must still clear the four rings a
+    // previous run left in the queue, or they go off tomorrow with nothing left
+    // that knows about them.
+    for (var k = 1; k < _burstMax; k++) {
       await _plugin.cancel(_extraId(id, k));
     }
   }

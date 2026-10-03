@@ -21,6 +21,7 @@
 library;
 
 import 'package:firebase_core/firebase_core.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 
@@ -145,9 +146,32 @@ class Push {
 
   Future<void> _register(Api api, String token) async {
     try {
+      // WHETHER THIS PHONE RINGS ITS OWN REMINDERS.
+      //
+      // It schedules a local alarm for every reminder it knows about — exact,
+      // offline, nothing to do with the computer — and the server pushes for
+      // the same reminder at the same minute. Two notifications, one event, and
+      // nothing on screen to say they are the same thing. That was reported as
+      // "reminders are coming multiple times".
+      //
+      // The device is the only side that knows, so the device says. Sent on
+      // every registration rather than once, because the person can turn the
+      // local alarms off and the server has to find out.
+      var local = false;
+      try {
+        local = (await SharedPreferences.getInstance())
+                .getBool('reminders.alarm.enabled') ??
+            false;
+      } catch (_) {
+        // Unreadable preferences mean we do NOT claim to handle them: a push
+        // that arrives twice is a nuisance, one that never arrives is a missed
+        // bill.
+      }
+
       await api.post('/api/notifications/device', {
         'token': token,
         'platform': defaultTargetPlatform.name,
+        'handles_reminders': local,
       });
     } on ApiError catch (e) {
       debugPrint('[push] could not register this device: ${e.message}');
@@ -160,6 +184,23 @@ class Push {
   /// unregistered keeps receiving the previous account's reminders, which on a
   /// shared family phone means one person's records announcing themselves to
   /// another.
+  /// Tell the server again what this phone handles for itself.
+  ///
+  /// Called when the local-alarm switch changes. Without it the server keeps
+  /// the answer it was given at sign-in: turn local alarms ON and reminders
+  /// arrive twice for ever, turn them OFF and they stop arriving at all. A
+  /// setting that only takes effect on the next sign-in is a setting that
+  /// looks broken.
+  Future<void> refreshCapabilities(Api api) async {
+    final t = _token;
+    if (t == null) return;
+    try {
+      await _register(api, t);
+    } catch (e) {
+      debugPrint('[push] could not update what this device handles: $e');
+    }
+  }
+
   Future<void> forget(Api api) async {
     final t = _token;
     if (t == null) return;

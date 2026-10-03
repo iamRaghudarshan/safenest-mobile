@@ -92,6 +92,38 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
+        <!-- THE TWO RECEIVERS A SCHEDULED NOTIFICATION NEEDS.
+             flutter_local_notifications does NOT declare these in its own
+             manifest — it asks the host app to, and nothing here had. Confirmed
+             by unzipping the built APK and reading the merged manifest: neither
+             name appeared in it.
+
+             ScheduledNotificationReceiver is what AlarmManager hands the alarm
+             to when it fires. Without it the alarm is set against a component
+             that does not exist and nothing is ever shown.
+
+             ScheduledNotificationBootReceiver puts the whole queue back after a
+             restart, and Android drops every scheduled alarm on reboot. That
+             matters most for the things furthest out: a warranty warning set two
+             years ahead would be gone the first time the phone was restarted,
+             and would simply never arrive, with nothing to point at. -->
+        <receiver
+            android:exported="false"
+            android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationReceiver" />
+        <receiver
+            android:exported="false"
+            android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationBootReceiver">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <!-- An app UPDATE clears the queue too, not just a reboot. Every
+                     release would otherwise silently drop every pending
+                     reminder on every phone. -->
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+                <action android:name="com.htc.intent.action.QUICKBOOT_POWERON" />
+            </intent-filter>
+        </receiver>
+
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data

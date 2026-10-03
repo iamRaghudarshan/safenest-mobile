@@ -23,6 +23,7 @@ import '../alarms.dart';
 import '../api.dart';
 import '../modules.dart';
 import '../dates.dart';
+import '../offline/autosync.dart';
 import '../offline/records.dart';
 import '../offline/sync.dart';
 import '../session.dart';
@@ -234,6 +235,11 @@ class _ModuleListScreenState extends State<ModuleListScreen> {
       // The badge and the Home banner both read this, so refresh it now rather
       // than leaving them a count behind until something else happens to look.
       unawaited(context.read<SyncService>().refreshPending());
+      // AND IT GOES UP BY ITSELF. Before this, anything saved with the computer
+      // away sat in the queue until somebody opened the Sync screen and pressed
+      // the button — the snackbar above said as much, and it should not have
+      // had to.
+      context.read<AutoSync>().somethingQueued();
     }
   }
 

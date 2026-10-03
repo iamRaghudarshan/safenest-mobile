@@ -125,4 +125,61 @@ class OfflineMode extends ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_key, value);
   }
+
+  // ------------------------------------------------- is it there right now
+
+  /// How long a failure to reach the computer is believed for.
+  ///
+  /// WHAT THIS FIXES. Saving a reminder with the computer away waited for the
+  /// POST to time out, queued it, and then the list reloaded — which waited for
+  /// a GET to time out as well before falling back to what the phone holds. Two
+  /// timeouts back to back, during which the screen shows the list without the
+  /// thing just saved on it. Reported, exactly, as "when I create it is not
+  /// showing instantly".
+  ///
+  /// So one failure is remembered. For the next [_believeFor] every read and
+  /// write goes straight to the phone's own copy and comes back at once. Short
+  /// enough that walking back into range costs one slow call, long enough that
+  /// a burst of screens does not each pay for the same timeout.
+  static const _believeFor = Duration(seconds: 45);
+
+  DateTime? _unreachableAt;
+
+  /// True when the computer failed to answer recently.
+  ///
+  /// NOT the same as [on], and the two must never be conflated: [on] is a
+  /// choice the owner made and a network hiccup must never flip it. This is a
+  /// fact about the last few seconds, and it is forgotten on its own.
+  bool get computerAway {
+    final at = _unreachableAt;
+    if (at == null) return false;
+    if (DateTime.now().difference(at) > _believeFor) {
+      _unreachableAt = null;
+      return false;
+    }
+    return true;
+  }
+
+  /// Seconds until the next attempt will be made, for a screen that wants to
+  /// say so rather than look stuck.
+  Duration get retryIn {
+    final at = _unreachableAt;
+    if (at == null) return Duration.zero;
+    final left = _believeFor - DateTime.now().difference(at);
+    return left.isNegative ? Duration.zero : left;
+  }
+
+  void markAway() {
+    final was = computerAway;
+    _unreachableAt = DateTime.now();
+    if (!was) notifyListeners();
+  }
+
+  /// Something reached it. Forget the failure at once rather than waiting the
+  /// rest of the window out — coming back into range should feel immediate.
+  void markReachable() {
+    if (_unreachableAt == null) return;
+    _unreachableAt = null;
+    notifyListeners();
+  }
 }

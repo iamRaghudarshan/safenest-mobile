@@ -17,12 +17,15 @@
 /// the person finds out it did not by being interrupted.
 library;
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../alarms.dart';
 import '../api.dart';
+import '../push.dart';
 import '../session.dart';
 import '../theme.dart';
 import '../screens/profile_screen.dart' show SettingsGroup, SettingsRow;
@@ -113,9 +116,61 @@ class _NotificationSettingsSectionState
   Future<void> _loadAlarmPref() async {
     final prefs = await SharedPreferences.getInstance();
     if (mounted) setState(() => _alarms = prefs.getBool(_alarmKey) ?? false);
+    await _loadRings();
   }
 
   static const _alarmKey = 'reminders.alarm.enabled';
+
+  /// How many times one reminder rings. See the note in alarms.dart: this was
+  /// fixed at five, which Android STACKS rather than replaces, so one reminder
+  /// left five entries in the shade and was reported as "reminders are coming
+  /// multiple times".
+  static const _burstKey = 'reminders.alarm.rings';
+
+  int _rings = 1;
+
+  /// False when Android 13+ is refusing exact alarms. Not cosmetic: without the
+  /// permission every ring THROWS and the reminder is simply never set, which
+  /// on a test phone meant fourteen failures in the log and not one reminder.
+  bool _exact = true;
+
+  Future<void> _loadRings() async {
+    final prefs = await SharedPreferences.getInstance();
+    final n = prefs.getInt(_burstKey) ?? 1;
+    Alarms.instance.burstCount = n;
+    final exact = await Alarms.instance.canScheduleExact();
+    if (mounted) {
+      setState(() {
+        _rings = n;
+        _exact = exact;
+      });
+    }
+  }
+
+  Future<void> _setRings(int n) async {
+    // Read BEFORE the first await. A BuildContext used after one may belong to
+    // a widget that has gone.
+    final api = context.read<Session>().api;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_burstKey, n);
+    Alarms.instance.burstCount = n;
+    if (mounted) setState(() => _rings = n);
+    // RE-SCHEDULED AT ONCE, or the change does nothing until something else
+    // happens to re-sync — which is the shape of bug this file already carries
+    // a comment about further up.
+    try {
+      final d = await api.get('/api/reminders');
+      final list = d is List
+          ? d
+          : (d is Map ? (d['items'] ?? d['rows'] ?? const []) : const []);
+      await Alarms.instance.syncFrom([
+        for (final e in (list as List)) Map<String, dynamic>.from(e as Map)
+      ]);
+    } catch (_) {
+      // Offline. The next sync picks up the new count, and the alarms already
+      // set still ring — just the old number of times.
+    }
+  }
 
   Future<void> _toggleAlarms(bool v) async {
     final messenger = ScaffoldMessenger.of(context);
@@ -157,6 +212,12 @@ class _NotificationSettingsSectionState
       final prefs = await SharedPreferences.getInstance();
       await prefs.setBool(_alarmKey, v);
       if (mounted) setState(() => _alarms = v);
+
+      // AND TELL THE COMPUTER, so it stops pushing for reminders this phone is
+      // now ringing itself — or starts again when they are switched off. Best
+      // effort: the switch has already done its local job, and a phone with no
+      // signal must not be told its setting failed.
+      unawaited(Push.instance.refreshCapabilities(api));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -180,9 +241,12 @@ class _NotificationSettingsSectionState
       SettingsGroup(
         title: 'Reminders on this phone',
         footer: _alarms
-            ? 'Reminders ring at the time you set, and keep going until you '
-                'stop them. They work with no signal, and nothing about them '
-                'leaves this phone.'
+            ? (_exact
+                ? 'Reminders ring at the time you set. They work with no '
+                    'signal, and nothing about them leaves this phone.'
+                : 'This phone is not allowing exact alarms, so a reminder '
+                    'arrives within a few minutes of its time rather than on '
+                    'it. Allow them below to fix that.')
             : 'Turn this on and reminders will ring on this phone at the time '
                 'you set — like an alarm, not a quiet notification.',
         children: [
@@ -195,6 +259,33 @@ class _NotificationSettingsSectionState
               onChanged: _busy ? null : _toggleAlarms,
             ),
           ),
+          if (_alarms)
+            SettingsRow(
+              icon: Icons.repeat,
+              tint: kModuleColours['reminders']!,
+              label: 'Keep ringing until I stop it',
+              value: _rings > 1 ? 'Up to $_rings times' : 'Rings once',
+              trailing: Switch(
+                value: _rings > 1,
+                onChanged: _busy ? null : (v) => _setRings(v ? 5 : 1),
+              ),
+            ),
+          // SAID OUT LOUD rather than left in a log. A phone refusing exact
+          // alarms sets none at all, and the person has no way to know: the
+          // switch above says reminders will ring and then nothing does.
+          if (_alarms && !_exact)
+            SettingsRow(
+              icon: Icons.warning_amber_rounded,
+              tint: kWarn,
+              label: 'Not allowed to set exact alarms',
+              value: 'Tap to allow',
+              onTap: _busy
+                  ? null
+                  : () async {
+                      await Alarms.instance.requestPermission();
+                      await _loadRings();
+                    },
+            ),
         ],
       ),
       SettingsGroup(

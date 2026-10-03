@@ -24,6 +24,7 @@ import 'alarms.dart';
 import 'api.dart';
 import 'customize.dart';
 import 'memory/reminders.dart';
+import 'offline/autosync.dart';
 import 'offline/mode.dart';
 import 'offline/records.dart';
 import 'offline/store.dart';
@@ -68,6 +69,14 @@ class _SafeNestAppState extends State<SafeNestApp> {
   late final _records = OfflineRecords(store: _store, mode: _mode);
   late final _sync = SyncService(
       store: _store, api: () => _session.api, records: _records);
+
+  /// Sends what the phone is holding without being asked — on resume, shortly
+  /// after something is queued, and on a backed-off retry. Before this there
+  /// was no automatic sync at all: anything typed with the computer away sat in
+  /// the queue until somebody opened the Sync screen and pressed the button.
+  late final _autoSync = AutoSync(
+      sync: _sync, store: _store, mode: _mode,
+      signedIn: () => _session.signedIn);
   Brand _brand = const Brand();
 
   /// Light, dark, or follow the phone. Remembered — a theme that resets on every
@@ -111,6 +120,7 @@ class _SafeNestAppState extends State<SafeNestApp> {
     // alarm in the app before re-scheduling the server's, which would silently
     // take these with it. The hook is how it puts them back in the same breath.
     // Ids are stable, so re-scheduling moves a warning and never duplicates it.
+    _autoSync.start();
     Alarms.instance.alsoSchedule = () => scheduleMemoryReminders(_store);
     unawaited(scheduleMemoryReminders(_store).catchError((e) {
       debugPrint('[memory] launch scheduling failed: $e');
@@ -137,6 +147,14 @@ class _SafeNestAppState extends State<SafeNestApp> {
   }
 
   @override
+  void dispose() {
+    // The timer and the lifecycle observer both outlive this object otherwise,
+    // and the observer would keep firing into a disposed state.
+    _autoSync.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     return MultiProvider(
       providers: [
@@ -144,6 +162,11 @@ class _SafeNestAppState extends State<SafeNestApp> {
         Provider<OfflineStore>.value(value: _store),
         ChangeNotifierProvider<SyncService>.value(value: _sync),
         ChangeNotifierProvider<OfflineMode>.value(value: _mode),
+        // So a screen that has just queued something can say so, and the retry
+        // starts from twenty seconds rather than wherever the backoff had got
+        // to. A queue that waits five minutes because the phone was idle
+        // beforehand is the shape of "it did not sync".
+        Provider<AutoSync>.value(value: _autoSync),
         Provider<OfflineRecords>.value(value: _records),
       ],
       child: Consumer<Session>(

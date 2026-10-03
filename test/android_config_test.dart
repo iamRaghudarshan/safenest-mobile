@@ -47,4 +47,41 @@ void main() {
     expect(File('android/app/build.gradle.kts').readAsStringSync(),
         contains('isCoreLibraryDesugaringEnabled = true'));
   });
+
+  group('the manifest, which is the other file nobody re-reads', () {
+    final manifest = File('android/app/src/main/AndroidManifest.xml');
+
+    test('it is where it is expected', () {
+      expect(manifest.existsSync(), isTrue);
+    });
+
+    test('a scheduled notification has a receiver to be delivered to', () {
+      // flutter_local_notifications does NOT declare this in its own manifest —
+      // it asks the host app to, and nothing here had. AlarmManager was setting
+      // alarms against a component that did not exist.
+      //
+      // Confirmed by unzipping the built APK and reading the merged manifest,
+      // which is the only way to be sure: a plugin can contribute a receiver
+      // and this one does not.
+      expect(manifest.readAsStringSync(),
+          contains('ScheduledNotificationReceiver'),
+          reason: 'without it, every scheduled reminder is set and never shown');
+    });
+
+    test('the queue is put back after a reboot or an update', () {
+      final src = manifest.readAsStringSync();
+      expect(src, contains('ScheduledNotificationBootReceiver'));
+      expect(src, contains('android.intent.action.BOOT_COMPLETED'));
+      // AN UPDATE CLEARS THE QUEUE TOO. Without this action every release
+      // silently drops every pending reminder on every phone, which is the
+      // worst possible time for it to happen — nobody connects a missing
+      // reminder to the update they installed last week.
+      expect(src, contains('android.intent.action.MY_PACKAGE_REPLACED'));
+    });
+
+    test('the permission the boot receiver needs is declared', () {
+      expect(File('android/app/src/main/AndroidManifest.xml').readAsStringSync(),
+          contains('android.permission.RECEIVE_BOOT_COMPLETED'));
+    });
+  });
 }
