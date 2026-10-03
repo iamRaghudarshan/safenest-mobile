@@ -58,6 +58,12 @@ List<({String key, String label, IconData icon, Color colour})> shortcutChoices(
       colour: kModuleColours['memory'] ?? Colors.purple
     ),
     (
+      key: 'track',
+      label: 'Track',
+      icon: Icons.timeline_outlined,
+      colour: kModuleColours['track'] ?? Colors.teal
+    ),
+    (
       key: 'habits',
       label: 'Habits',
       icon: Icons.local_fire_department_outlined,

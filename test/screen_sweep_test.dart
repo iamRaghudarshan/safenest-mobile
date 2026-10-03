@@ -44,6 +44,9 @@ import 'package:safenest/screens/life_memory_screen.dart';
 import 'package:safenest/screens/memory_ask_screen.dart';
 import 'package:safenest/screens/memory_search_screen.dart';
 import 'package:safenest/screens/people_photos_screen.dart';
+import 'package:safenest/screens/track_screen.dart';
+import 'package:safenest/track/day.dart';
+import 'package:safenest/track/story.dart';
 import 'package:safenest/screens/modules_screen.dart';
 import 'package:safenest/screens/notes_screen.dart';
 import 'package:safenest/screens/gallery_screen.dart' show Photo;
@@ -98,6 +101,7 @@ const _accountedFor = {
   'background_screen.dart', 'documents_screen.dart', 'habits_screen.dart',
   'labels_screen.dart', 'life_memory_screen.dart', 'memory_ask_screen.dart',
   'memory_search_screen.dart', 'people_photos_screen.dart',
+  'track_screen.dart',
   'modules_screen.dart', 'notes_screen.dart', 'places_screen.dart',
   'profile_screen.dart', 'search_screen.dart', 'sign_in_screen.dart',
   'vault_screen.dart', 'doc_preview.dart', 'doc_versions.dart',
@@ -187,6 +191,39 @@ final _screens = <String, Widget Function()>{
           {'id': 2, 'name': 'Appa', 'cover_url': null, 'box': null},
         ],
         debugPhotos: const [],
+      ),
+  'Track Me': () => TrackScreen(
+        debugFixes: const [],
+        debugNow: DateTime(2026, 10, 3, 20),
+      ),
+  // AND A DAY WITH SOMETHING IN IT. The entry above draws the empty state; the
+  // timeline, with its map, its sentences and its "name this place" buttons, is
+  // where a narrow phone actually runs out of room.
+  'Track Me, a day': () => TrackScreen(
+        debugNow: DateTime(2026, 10, 3, 20),
+        debugPlaces: [
+          const Named(name: 'Home', lat: 12.9279, lon: 77.6271),
+        ],
+        debugFixes: [
+          for (var m = 0; m <= 150; m += 10)
+            Fix(
+                at: DateTime(2026, 10, 3, 6).add(Duration(minutes: m)),
+                lat: 12.9279,
+                lon: 77.6271,
+                accuracy: 10),
+          for (var i = 0; i <= 8; i++)
+            Fix(
+                at: DateTime(2026, 10, 3, 8, 30).add(Duration(minutes: i * 5)),
+                lat: 12.9279 + (12.9716 - 12.9279) * (i / 8),
+                lon: 77.6271 + (77.5946 - 77.6271) * (i / 8),
+                accuracy: 12),
+          for (var m = 0; m <= 420; m += 15)
+            Fix(
+                at: DateTime(2026, 10, 3, 9, 20).add(Duration(minutes: m)),
+                lat: 12.9716,
+                lon: 77.5946,
+                accuracy: 10),
+        ],
       ),
   'Modules': () => ModulesScreen(onOpen: (_) {}),
   'Notes': () => const NotesScreen(),

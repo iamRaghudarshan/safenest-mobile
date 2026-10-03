@@ -25,6 +25,7 @@ import 'api.dart';
 import 'customize.dart';
 import 'memory/reminders.dart';
 import 'offline/autosync.dart';
+import 'track/recorder.dart';
 import 'offline/mode.dart';
 import 'offline/records.dart';
 import 'offline/store.dart';
@@ -74,6 +75,13 @@ class _SafeNestAppState extends State<SafeNestApp> {
   /// after something is queued, and on a backed-off retry. Before this there
   /// was no automatic sync at all: anything typed with the computer away sat in
   /// the queue until somebody opened the Sync screen and pressed the button.
+  /// Track Me. Constructed always, recording never — the switch is off in a
+  /// fresh install and `restore()` only resumes what the person had already
+  /// turned on. Nothing here asks for a permission: a location prompt at launch,
+  /// before anybody has seen what the app does, is the one most often refused,
+  /// and this app says so in three other places already.
+  late final _recorder = Recorder(store: _store);
+
   late final _autoSync = AutoSync(
       sync: _sync, store: _store, mode: _mode,
       signedIn: () => _session.signedIn);
@@ -121,6 +129,7 @@ class _SafeNestAppState extends State<SafeNestApp> {
     // take these with it. The hook is how it puts them back in the same breath.
     // Ids are stable, so re-scheduling moves a warning and never duplicates it.
     _autoSync.start();
+    unawaited(_recorder.restore());
     Alarms.instance.alsoSchedule = () => scheduleMemoryReminders(_store);
     unawaited(scheduleMemoryReminders(_store).catchError((e) {
       debugPrint('[memory] launch scheduling failed: $e');
@@ -151,6 +160,7 @@ class _SafeNestAppState extends State<SafeNestApp> {
     // The timer and the lifecycle observer both outlive this object otherwise,
     // and the observer would keep firing into a disposed state.
     _autoSync.dispose();
+    _recorder.dispose();
     super.dispose();
   }
 
@@ -167,6 +177,7 @@ class _SafeNestAppState extends State<SafeNestApp> {
         // to. A queue that waits five minutes because the phone was idle
         // beforehand is the shape of "it did not sync".
         Provider<AutoSync>.value(value: _autoSync),
+        ChangeNotifierProvider<Recorder>.value(value: _recorder),
         Provider<OfflineRecords>.value(value: _records),
       ],
       child: Consumer<Session>(

@@ -26,6 +26,7 @@ import 'dashboard_screen.dart';
 import 'vivid_home.dart';
 import 'documents_screen.dart';
 import 'life_memory_screen.dart';
+import 'track_screen.dart';
 import 'notes_screen.dart';
 import 'habits_screen.dart';
 import 'module_list_screen.dart';
@@ -86,6 +87,8 @@ const _allTabs = <_Tab>[
       Color(0xFFF5B301), 'notes'),
   _Tab('memory', 'Memory', Icons.auto_stories_outlined, Icons.auto_stories,
       Color(0xFF6B3C8C), 'memory'),
+  _Tab('track', 'Track', Icons.timeline_outlined, Icons.timeline,
+      Color(0xFF1B6B50), 'track'),
   _Tab('documents', 'Documents', Icons.folder_outlined, Icons.folder,
       Color(0xFF0D9488), 'documents'),
   _Tab('habits', 'Habits', Icons.local_fire_department_outlined,
@@ -279,6 +282,10 @@ class _HomeScreenState extends State<HomeScreen> {
         await Navigator.of(context).push(
             MaterialPageRoute(builder: (_) => const LifeMemoryScreen()));
         if (mounted) setState(() => _refreshTick++);
+      case 'track':
+        await Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => const TrackScreen()));
+        if (mounted) setState(() => _refreshTick++);
       case 'search':
         // The Dashboard has had a search button since it was written and this
         // switch had no case for it — no tab, no ModuleSpec, no branch — so it
@@ -325,6 +332,8 @@ class _HomeScreenState extends State<HomeScreen> {
         return const NotesScreen();
       case 'memory':
         return const LifeMemoryScreen(embedded: true);
+      case 'track':
+        return const TrackScreen(embedded: true);
       case 'documents':
         return const DocumentsScreen();
       case 'habits':

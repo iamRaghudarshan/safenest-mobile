@@ -29,6 +29,7 @@ import 'package:path/path.dart' as p;
 
 import '../api.dart';
 import '../memory/push.dart';
+import '../track/push.dart';
 import 'records.dart';
 import 'store.dart';
 
@@ -210,7 +211,11 @@ class SyncService extends ChangeNotifier {
         // this phone lives in a different table, and returning here without
         // sending it would leave it stranded for ever with the button
         // cheerfully reporting nothing to do.
-        final problems = <String>[...await _sendFiles(), ...await _sendMemories()];
+        final problems = <String>[
+          ...await _sendFiles(),
+          ...await _sendMemories(),
+          ...await _sendTrack(),
+        ];
         if (_records != null) {
           _step = 'Getting your records';
           notifyListeners();
@@ -321,6 +326,7 @@ class SyncService extends ChangeNotifier {
       final fileProblems = await _sendFiles();
       problems.addAll(fileProblems);
       problems.addAll(await _sendMemories());
+      problems.addAll(await _sendTrack());
 
       // AND NOW THE OTHER DIRECTION. Sync means "make this phone and that
       // computer agree", not "empty my outbox" — so once what was typed here
@@ -374,6 +380,21 @@ class SyncService extends ChangeNotifier {
     _step = 'Sending what you have said';
     notifyListeners();
     final r = await pushMemories(_store, _api());
+    if (r.moved) debugPrint('[sync] $r');
+    return r.problems;
+  }
+
+  /// Track Me, which pushes its own table for the same reason Life Memory does.
+  ///
+  /// Called from BOTH exits of run(), beside the other two. There is an early
+  /// return for an empty journal, and a module whose queue lives outside
+  /// `pending` is stranded there for ever with the Sync button cheerfully
+  /// reporting nothing to do.
+  Future<List<String>> _sendTrack() async {
+    if (await _store.unsyncedFixCount() == 0) return const [];
+    _step = 'Sending where you have been';
+    notifyListeners();
+    final r = await pushFixes(_store, _api());
     if (r.moved) debugPrint('[sync] $r');
     return r.problems;
   }

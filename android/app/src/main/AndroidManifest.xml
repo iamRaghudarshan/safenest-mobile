@@ -54,6 +54,37 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
+    <!-- TRACK ME. The comment above says location is deliberately not asked
+         for, and that was true until this module: SafeNest read photos and
+         sent them to one address, and nothing else.
+
+         It is still not asked for at launch, and nothing is recorded until
+         somebody turns the module on. Declaring a permission is not using it —
+         what matters is that the request happens the first time the switch is
+         touched, and that the switch is off in a fresh install.
+
+         FINE and COARSE together: Android requires COARSE alongside FINE from
+         API 31, and a phone that grants only the approximate one still gives a
+         usable timeline — a few hundred metres is plenty to tell home from the
+         office, and it is better than refusing to record at all.
+
+         BACKGROUND is the one that decides whether the module works. Without
+         it the timeline fills in while you are looking at the phone and records
+         nothing the moment it goes in a pocket — which is every part of the day
+         worth recording. It is asked for separately and after the first, as
+         Android 11+ insists.
+
+         FOREGROUND_SERVICE_LOCATION is API 34's requirement for a service that
+         reads position, and it goes with the notification that says recording
+         is happening. The notification is not a formality here: a location
+         recorder with no visible sign of running is the thing nobody should
+         ship. -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+
     <!-- Installing a downloaded update APK from inside the app. Android 8+ gates
          this per-source: the user is sent to Settings once to allow "install
          unknown apps" for SafeNest, then the package installer takes over. The

@@ -174,8 +174,13 @@ class AutoSync with WidgetsBindingObserver {
 
   Future<int> _pending() async {
     try {
+      // EVERY QUEUE, not just the journal. Two modules now push their own
+      // tables, and a count that looked only at `pending` would leave a spoken
+      // memory or a day of positions sitting on the phone for ever with nothing
+      // to send it.
       return (await _store.allPending()).length +
-          await _store.unsyncedMemoryCount();
+          await _store.unsyncedMemoryCount() +
+          await _store.unsyncedFixCount();
     } catch (_) {
       return 0;
     }

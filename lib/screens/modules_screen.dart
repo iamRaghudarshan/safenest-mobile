@@ -128,6 +128,13 @@ class _ModulesScreenState extends State<ModulesScreen> {
           colour: kModuleColours['memory']!,
           blurb: 'Say it once, find it for ever'
         ),
+        (
+          key: 'track',
+          label: 'Track Me',
+          icon: Icons.timeline,
+          colour: kModuleColours['track']!,
+          blurb: 'Where you were, on any day'
+        ),
       ];
 
   /// The tiles to show: the saved order, filtered to what this account may see.

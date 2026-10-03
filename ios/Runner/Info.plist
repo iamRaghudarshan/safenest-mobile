@@ -48,8 +48,20 @@
 	<!-- Required by Apple (ITMS-90683) because the photo library plugin references
 	     location APIs to read where a photo was taken — SafeNest never asks for the
 	     device's live location, but Apple requires the string regardless. -->
+	<!-- THIS STRING USED TO PROMISE THE OPPOSITE. It read "It never tracks
+	     where you are", which was true of every version before Track Me and is
+	     not true of one where that switch exists. A privacy promise that has
+	     stopped being true is worse than never having made it, so it is
+	     rewritten rather than softened. -->
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>SafeNest reads the place a photo was taken from the photo itself, so you can browse your library by location. It never tracks where you are, and nothing leaves your own computer.</string>
+	<string>Only if you turn Track Me on. SafeNest then keeps a record of where you have been so you can look back at any day. It is off until you switch it on, it is kept on this phone and sent only to your own computer, and you can delete all of it whenever you like.</string>
+	<!-- ALWAYS, because Track Me is useless without it. "While in use" fills
+	     the timeline in while you are looking at the phone and records nothing
+	     the moment it goes in a pocket — which is every part of a day worth
+	     recording — and it LOOKS like it is working, which is worse than
+	     failing outright. -->
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>Track Me records where you have been while SafeNest is in your pocket, so a day you look back at is the whole day and not only the minutes you had the phone open. It is off until you switch it on, nothing is sent anywhere but your own computer, and you can delete all of it whenever you like.</string>
 
 	<!-- App Transport Security refuses plain http, which is right for the
 	     internet and wrong for a home network: a computer at 192.168.1.5 has no
@@ -148,6 +160,10 @@
 		     settings row in the app says so rather than implying a schedule. -->
 		<string>fetch</string>
 		<string>processing</string>
+		<!-- Track Me. Without it iOS suspends the location updates the moment
+		     the app leaves the screen, and a timeline of the hours you happened
+		     to be holding your phone is not a timeline. -->
+		<string>location</string>
 	</array>
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>

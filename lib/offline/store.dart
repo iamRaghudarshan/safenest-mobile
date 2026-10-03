@@ -306,6 +306,7 @@ const _trackDDL = '''
   CREATE TABLE track_points (
     id        INTEGER PRIMARY KEY AUTOINCREMENT,
     server_id INTEGER,
+    client_uuid TEXT,
     at        TEXT    NOT NULL,
     lat       REAL    NOT NULL,
     lon       REAL    NOT NULL,
@@ -1132,6 +1133,14 @@ class OfflineStore {
       }
     }
     return db.insert('track_points', {
+      // MINTED AT INSERT, not derived at push time. Deriving it from the row id
+      // and the timestamp looked cheaper — 36 bytes a row across a quarter of a
+      // million rows is real — but two phones in one household both start at
+      // row id 1, and two fixes a second apart at the same spot look like a
+      // stop. A collision here re-cuts somebody's day into places that were
+      // never places, which is exactly the failure the server's idempotency is
+      // there to prevent.
+      'client_uuid': _uuid.v4(),
       // UTC. The day boundary is applied on read, against the LOCAL calendar —
       // storing a local timestamp instead makes a day abroad unreadable.
       'at': at.toUtc().toIso8601String(),
