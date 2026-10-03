@@ -73,6 +73,15 @@ class _TrackScreenState extends State<TrackScreen> {
   bool _loading = true;
   int _kept = 0;
 
+  /// A moment somebody asked about. Null most of the time.
+  ///
+  /// THE QUESTION THE MODULE EXISTS FOR — "where was I on the 14th at three?"
+  /// — and it is not the same thing as browsing a day. Browsing is scrolling a
+  /// list; asking is naming a minute and wanting one answer. So it gets its own
+  /// control, its own sentence, and the map re-centres on the answer rather
+  /// than leaving somebody to find it among the day's other pins.
+  DateTime? _asked;
+
   DateTime get _today {
     final n = widget.debugNow ?? DateTime.now();
     return DateTime(n.year, n.month, n.day);
@@ -146,6 +155,38 @@ class _TrackScreenState extends State<TrackScreen> {
     );
     if (picked == null || !mounted) return;
     setState(() => _day = DateTime(picked.year, picked.month, picked.day));
+    await _load();
+  }
+
+  /// "Where was I on the 14th at three?"
+  ///
+  /// A date and then a time, in that order, because that is the order people
+  /// remember them in — and the date picker is the one already on this screen,
+  /// so asking also moves the day you are looking at. Answering about a day you
+  /// are not looking at would leave the map and the list disagreeing with the
+  /// sentence.
+  Future<void> _askWhere() async {
+    final day = await showDatePicker(
+      context: context,
+      initialDate: _day,
+      firstDate: DateTime(2020),
+      lastDate: _today,
+      helpText: 'Which day?',
+    );
+    if (day == null || !mounted) return;
+    final at = await showTimePicker(
+      context: context,
+      initialTime: const TimeOfDay(hour: 15, minute: 0),
+      helpText: 'At what time?',
+    );
+    if (at == null || !mounted) return;
+
+    final moment =
+        DateTime(day.year, day.month, day.day, at.hour, at.minute);
+    setState(() {
+      _day = DateTime(day.year, day.month, day.day);
+      _asked = moment;
+    });
     await _load();
   }
 
@@ -270,6 +311,11 @@ class _TrackScreenState extends State<TrackScreen> {
         title: const Text('Track Me'),
         actions: [
           IconButton(
+            tooltip: 'Where was I at…',
+            onPressed: _loading ? null : _askWhere,
+            icon: const Icon(Icons.search),
+          ),
+          IconButton(
             tooltip: 'Another day',
             onPressed: _pickDay,
             icon: const Icon(Icons.calendar_month_outlined),
@@ -292,6 +338,16 @@ class _TrackScreenState extends State<TrackScreen> {
                 kept: _kept,
                 onChanged: _toggle,
               ),
+            ),
+          // THE ANSWER, above the day it came from. A sentence first, and the
+          // map below it already centred on the place — "you were at Office,
+          // and had been since 09:31" is the whole answer, and the map is there
+          // to confirm it rather than to be searched.
+          if (_asked != null && !_loading)
+            _Answer(
+              said: answerFor(_read, _asked!, _places),
+              at: _asked!,
+              onClear: () => setState(() => _asked = null),
             ),
           _DayBar(
             day: _day,
@@ -316,7 +372,14 @@ class _TrackScreenState extends State<TrackScreen> {
           else if (_read.isEmpty)
             _Nothing(recording: rec?.recording ?? false, theme: theme)
           else ...[
-            _Map(day: _read, base: base, token: token),
+            _Map(
+              day: _read,
+              base: base,
+              token: token,
+              // Centred on the answer when there is one, so the pin being asked
+              // about is the one on screen rather than one of five.
+              focus: _asked == null ? null : whereAt(_read, _asked!),
+            ),
             for (final l in lines)
               _LineRow(
                 line: l,
@@ -477,11 +540,19 @@ String _dayName(DateTime d, DateTime today) {
 
 /// The day's path, drawn from tiles this household fetched itself.
 class _Map extends StatelessWidget {
-  const _Map({required this.day, required this.base, required this.token});
+  const _Map({
+    required this.day,
+    required this.base,
+    required this.token,
+    this.focus,
+  });
 
   final Day day;
   final String base;
   final String token;
+
+  /// The one span being asked about, if any. Drawn larger and centred on.
+  final Span? focus;
 
   @override
   Widget build(BuildContext context) {
@@ -503,11 +574,19 @@ class _Map extends StatelessWidget {
       decoration: BoxDecoration(borderRadius: BorderRadius.circular(14)),
       child: FlutterMap(
         options: MapOptions(
-          initialCameraFit: CameraFit.coordinates(
-            coordinates: all,
-            padding: const EdgeInsets.all(34),
-            maxZoom: 16,
-          ),
+          initialCenter:
+              focus == null ? all.first : LatLng(focus!.lat, focus!.lon),
+          initialZoom: focus == null ? 13 : 16,
+          // When nothing is being asked about, fit the whole day. When
+          // something is, the answer is the point of the map and fitting the
+          // day would put it among four others at the wrong scale.
+          initialCameraFit: focus != null
+              ? null
+              : CameraFit.coordinates(
+                  coordinates: all,
+                  padding: const EdgeInsets.all(34),
+                  maxZoom: 16,
+                ),
           // No rotation: a timeline read sideways is a timeline nobody reads,
           // and a one-finger drag rotating the map is the commonest way that
           // happens by accident.
@@ -540,7 +619,7 @@ class _Map extends StatelessWidget {
                   strokeWidth: 4,
                   color: kTrackTint.withValues(alpha: 0.85)),
             ]),
-          if (stays.isNotEmpty)
+          if (stays.isNotEmpty || focus != null)
             MarkerLayer(markers: [
               for (final s in stays)
                 Marker(
@@ -552,6 +631,24 @@ class _Map extends StatelessWidget {
                       color: kTrackTint,
                       shape: BoxShape.circle,
                       border: Border.all(color: Colors.white, width: 2.5),
+                    ),
+                  ),
+                ),
+              if (focus != null)
+                Marker(
+                  point: LatLng(focus!.lat, focus!.lon),
+                  width: 34,
+                  height: 34,
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: kWarn,
+                      shape: BoxShape.circle,
+                      border: Border.all(color: Colors.white, width: 3),
+                      boxShadow: [
+                        BoxShadow(
+                            color: Colors.black.withValues(alpha: 0.3),
+                            blurRadius: 6),
+                      ],
                     ),
                   ),
                 ),
@@ -669,4 +766,65 @@ class _Footer extends StatelessWidget {
           ),
         ]),
       );
+}
+
+/// The answer to "where was I at…".
+class _Answer extends StatelessWidget {
+  const _Answer({
+    required this.said,
+    required this.at,
+    required this.onClear,
+  });
+
+  final String said;
+  final DateTime at;
+  final VoidCallback onClear;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    const months = [
+      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+    ];
+    final when = '${at.day} ${months[at.month - 1]} ${at.year}, '
+        '${at.hour.toString().padLeft(2, '0')}:'
+        '${at.minute.toString().padLeft(2, '0')}';
+
+    return Container(
+      margin: const EdgeInsets.fromLTRB(14, 6, 14, 2),
+      padding: const EdgeInsets.fromLTRB(14, 12, 10, 13),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surface,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: kTrackTint.withValues(alpha: 0.4)),
+      ),
+      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Expanded(
+          child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(when.toUpperCase(),
+                    style: TextStyle(
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 0.6,
+                        color: theme.colorScheme.onSurfaceVariant)),
+                const SizedBox(height: 6),
+                Text(said,
+                    style: const TextStyle(
+                        fontSize: 14.5,
+                        height: 1.5,
+                        fontWeight: FontWeight.w600)),
+              ]),
+        ),
+        IconButton(
+          tooltip: 'Back to the whole day',
+          visualDensity: VisualDensity.compact,
+          onPressed: onClear,
+          icon: const Icon(Icons.close, size: 18),
+        ),
+      ]),
+    );
+  }
 }
