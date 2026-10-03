@@ -1650,74 +1650,31 @@ class _GalleryScreenState extends State<GalleryScreen>
                 SliverMainAxisGroup(slivers: [
                   SliverPersistentHeader(
                     pinned: true,
-                    delegate: _StickyHeaderDelegate(
+                    delegate: GalleryStickyHeader(
                         day: g.day,
                         monthOnly: _byMonth,
                         allSelected: g.photos.isNotEmpty &&
                             g.photos.every((p) => _selected.contains(p.id)),
                         onToggle: () => _toggleGroup(g)),
                   ),
-                  // UNRESOLVED, 3 October 2026 — READ THIS BEFORE SHORTENING
-                  // ANYTHING ABOVE THE GRID.
+                  // SOLVED, 3 October 2026 — and worth keeping, because the
+                  // symptom pointed everywhere except at the cause.
                   //
-                  // On the x86_64 emulator here, this SliverGrid lays out and
-                  // then paints NOTHING. What was established, each by
-                  // measurement rather than reasoning:
+                  // This grid laid out and painted NOTHING: null geometry, a
+                  // maxScrollExtent of 0, no exception anywhere. The Gallery
+                  // showed its header and not one photograph. The cause was two
+                  // points of disagreement in the sticky header ABOVE it — see
+                  // GalleryStickyHeader.build — which stopped the viewport
+                  // laying out every sliver that follows. Nothing here was ever
+                  // wrong.
                   //
-                  //   * the data is right — groups=1, sizes=[24], childCount 24
-                  //   * the tile is innocent — replacing PhotoTile with a plain
-                  //     magenta Container painted nothing either
-                  //   * the viewport is innocent — a SliverToBoxAdapter holding
-                  //     a green box, inserted immediately before this grid,
-                  //     paints perfectly in the very region the grid occupies
-                  //   * it is not the renderer — identical under Impeller and
-                  //     Skia, and on a cold-booted emulator with software GPU
-                  //   * it is not SliverMainAxisGroup — removing it changed
-                  //     nothing but where the date header pinned
-                  //   * no exception is thrown, under any of the above
-                  //
-                  // THE SLIVER GEOMETRY, dumped from the live render tree at
-                  // maximum scroll (offset 430 of 430, viewport 609.2), which
-                  // is the measurement that makes this precise:
-                  //
-                  //   #0 hero      scroll=140.1 paint=0.0   layout=0.0
-                  //   #1 tiles     scroll=314.4 paint=24.5  layout=24.5
-                  //   #2 search    scroll=99.0  paint=99.0  layout=99.0
-                  //   #3 count     scroll=27.0  paint=27.0  layout=27.0
-                  //   #4 header    scroll=46.0  paint=44.0  layout=46.0
-                  //   #5 padding   scroll=388.7 paint=0.0   layout=0.0
-                  //   #6 THE GRID  scroll=388.7 paint=0.0   maxPaint=388.7
-                  //      first child size=76.1x76.1, layoutOffset=0, 20 built
-                  //   #7 trailer   scroll=24.0  paint=0.0
-                  //
-                  // So the tiles ARE built and correctly sized, the scroll DOES
-                  // reach its maximum, and the painted extents above the grid
-                  // total 196.5 of a 609.2 viewport — leaving some 412 points
-                  // of room that the grid is nevertheless given none of. Every
-                  // sliver's layoutExtent equals its paintExtent, so nothing
-                  // above is eating the paint budget by the usual mechanism.
-                  // That inconsistency is the bug, and it is below this file.
-                  //
-                  // Three causes were proposed and each KILLED by measurement,
-                  // which is recorded so nobody spends the afternoon again:
-                  // the tile widget, the shrink-wrapping GridView in the panel
-                  // above, and SliverMainAxisGroup. None of them.
-                  //
-                  // The second symptom is the dangerous one: when the content
-                  // ABOVE the grid is short enough that the grid would fill
-                  // most of the viewport, the WHOLE Gallery body stops
-                  // painting — header, search field and all — while still
-                  // hit-testing correctly. That is why the storage panel and
-                  // the backed-up tiles above are deliberately NOT tightened:
-                  // shortening them is what exposes it, and two separate
-                  // attempts to do so had to be reverted.
-                  //
-                  // So the generous header height is load-bearing by accident,
-                  // which is a bad thing to depend on and is written down here
-                  // rather than left as a mystery for whoever next tries to
-                  // reclaim that space. It has not been reproduced on real
-                  // hardware; check a physical phone before concluding either
-                  // way.
+                  // Four things were blamed first and each killed by
+                  // measurement, which is the part worth remembering: the tile
+                  // widget, the panel above, SliverMainAxisGroup, and the
+                  // renderer. The measurement that actually cracked it was
+                  // dumping SliverGeometry from the live render tree — paint,
+                  // layout and scroll extents per sliver — rather than reading
+                  // screenshots, which had twice sent me the wrong way.
                   SliverPadding(
                   padding: const EdgeInsets.symmetric(horizontal: 2),
                   sliver: _listView
@@ -1795,8 +1752,12 @@ class _GalleryScreenState extends State<GalleryScreen>
 /// Pins a date header to the top while its section is on screen, the way Google
 /// Photos does. Opaque, because the photos scroll underneath it and a see-through
 /// bar over them reads as a rendering glitch.
-class _StickyHeaderDelegate extends SliverPersistentHeaderDelegate {
-  _StickyHeaderDelegate({
+/// PUBLIC so a test can put it in a viewport. It was private, and the defect
+/// it carried — a child two points shorter than the extent it declared, which
+/// silently stopped the viewport laying out every sliver after it — could not
+/// be reached from a test while it stayed that way.
+class GalleryStickyHeader extends SliverPersistentHeaderDelegate {
+  GalleryStickyHeader({
     required this.day,
     required this.monthOnly,
     required this.allSelected,
@@ -1815,7 +1776,22 @@ class _StickyHeaderDelegate extends SliverPersistentHeaderDelegate {
   @override
   Widget build(BuildContext context, double shrinkOffset, bool overlaps) {
     final cs = Theme.of(context).colorScheme;
-    return ClipRect(
+    // THE CHILD MUST FILL THE EXTENT THIS DELEGATE DECLARES, and this SizedBox
+    // is what guarantees it rather than leaving the two to agree by arithmetic.
+    //
+    // Without it the row measured 44 against a declared maxExtent of 46 —
+    // titleMedium's 24, plus _DayHeader's 11 above and 9 below — and that
+    // two-point disagreement stopped the viewport laying out EVERY SLIVER
+    // AFTER THIS ONE. The photo grid and the trailing spacer came back with a
+    // null geometry, maxScrollExtent collapsed to 0, and NO EXCEPTION WAS
+    // THROWN ANYWHERE. The Gallery drew its header and not one photograph.
+    //
+    // A plain Container in place of this content behaves, because it expands to
+    // fill; that is the entire difference, and it is what made the defect look
+    // like a rendering fault rather than a sizing one.
+    return SizedBox(
+      height: maxExtent,
+      child: ClipRect(
       child: Material(
         color: cs.surface,
         child: Row(children: [
@@ -1841,11 +1817,12 @@ class _StickyHeaderDelegate extends SliverPersistentHeaderDelegate {
           Expanded(child: _DayHeader(day: day, monthOnly: monthOnly)),
         ]),
       ),
+      ),
     );
   }
 
   @override
-  bool shouldRebuild(covariant _StickyHeaderDelegate old) =>
+  bool shouldRebuild(covariant GalleryStickyHeader old) =>
       old.day != day ||
       old.monthOnly != monthOnly ||
       old.allSelected != allSelected;
