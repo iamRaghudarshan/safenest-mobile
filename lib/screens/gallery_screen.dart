@@ -1676,6 +1676,33 @@ class _GalleryScreenState extends State<GalleryScreen>
                   //     nothing but where the date header pinned
                   //   * no exception is thrown, under any of the above
                   //
+                  // THE SLIVER GEOMETRY, dumped from the live render tree at
+                  // maximum scroll (offset 430 of 430, viewport 609.2), which
+                  // is the measurement that makes this precise:
+                  //
+                  //   #0 hero      scroll=140.1 paint=0.0   layout=0.0
+                  //   #1 tiles     scroll=314.4 paint=24.5  layout=24.5
+                  //   #2 search    scroll=99.0  paint=99.0  layout=99.0
+                  //   #3 count     scroll=27.0  paint=27.0  layout=27.0
+                  //   #4 header    scroll=46.0  paint=44.0  layout=46.0
+                  //   #5 padding   scroll=388.7 paint=0.0   layout=0.0
+                  //   #6 THE GRID  scroll=388.7 paint=0.0   maxPaint=388.7
+                  //      first child size=76.1x76.1, layoutOffset=0, 20 built
+                  //   #7 trailer   scroll=24.0  paint=0.0
+                  //
+                  // So the tiles ARE built and correctly sized, the scroll DOES
+                  // reach its maximum, and the painted extents above the grid
+                  // total 196.5 of a 609.2 viewport — leaving some 412 points
+                  // of room that the grid is nevertheless given none of. Every
+                  // sliver's layoutExtent equals its paintExtent, so nothing
+                  // above is eating the paint budget by the usual mechanism.
+                  // That inconsistency is the bug, and it is below this file.
+                  //
+                  // Three causes were proposed and each KILLED by measurement,
+                  // which is recorded so nobody spends the afternoon again:
+                  // the tile widget, the shrink-wrapping GridView in the panel
+                  // above, and SliverMainAxisGroup. None of them.
+                  //
                   // The second symptom is the dangerous one: when the content
                   // ABOVE the grid is short enough that the grid would fill
                   // most of the viewport, the WHOLE Gallery body stops
