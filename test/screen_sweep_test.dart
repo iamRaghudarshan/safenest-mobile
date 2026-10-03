@@ -190,6 +190,41 @@ final _screens = <String, Widget Function()>{
       ),
   'Modules': () => ModulesScreen(onOpen: (_) {}),
   'Notes': () => const NotesScreen(),
+  // AND NOTES WITH CARDS IN IT. The entry above stands the screen up without a
+  // server, so it only ever drew the spinner — which is how a Material built
+  // with both `shape` and `borderRadius` sat in the card for the life of the
+  // screen without any test touching it. It asserts on the first frame in
+  // debug and is silently ignored in release, so it reached nobody and could
+  // not be found.
+  'Notes with cards': () => NotesScreen(debugNotes: [
+        {
+          'id': 1,
+          'title': 'Weekly shop',
+          'body': '',
+          'kind': 'checklist',
+          'color': 'teal',
+          'labels': ['Home', 'Food'],
+          'items': [
+            {'text': 'Rice', 'checked': false},
+            {'text': 'Dal', 'checked': true},
+          ],
+          'pinned': true,
+          'archived': false,
+          'reminder_at': null,
+        },
+        {
+          'id': 2,
+          'title': 'Call the plumber about the kitchen tap',
+          'body': 'He said any morning before ten, and to ring twice.',
+          'kind': 'note',
+          'color': 'default',
+          'labels': <String>[],
+          'items': <Map<String, dynamic>>[],
+          'pinned': false,
+          'archived': false,
+          'reminder_at': '2030-01-01T09:00:00.000',
+        },
+      ]),
   'Places': () => const PlacesScreen(),
   'Profile': () => const ProfileScreen(brand: Brand()),
   'Search': () => SearchScreen(onOpen: (_) {}),

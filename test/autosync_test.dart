@@ -54,8 +54,10 @@ class _Away implements Api {
 
 /// A SyncService that records that it was asked, and says how it went.
 class _FakeSync implements SyncService {
-  _FakeSync({this.works = true});
-  bool works;
+  _FakeSync();
+
+  /// Set by a test that wants the run to come back blocked.
+  bool works = true;
   int runs = 0;
 
   @override

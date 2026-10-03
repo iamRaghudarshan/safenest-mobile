@@ -116,6 +116,17 @@ List<MemoryReminder> remindersFor(
 int memoryAlarmId(int factId, int warning) =>
     kMemoryAlarmBase + (factId.abs() % 1000000) * 10 + warning;
 
+/// Where a NOTE's reminder lives.
+///
+/// A third band, for the same reason as the second. The reminders module uses
+/// server row ids starting at 1, Life Memory uses the band above, and a note
+/// scheduling alarm id 7 would silently cancel reminder 7 — `Alarms.schedule`
+/// clears the id before setting it, by design, so there is no error and no
+/// symptom until something does not go off.
+const kNoteAlarmBase = 20000000;
+
+int noteAlarmId(int noteId) => kNoteAlarmBase + (noteId.abs() % 1000000);
+
 // ========================================================= doing something
 
 /// The reminders Life Memory currently wants, read off the phone.
