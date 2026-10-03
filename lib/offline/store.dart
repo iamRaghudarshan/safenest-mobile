@@ -37,7 +37,8 @@
 library;
 
 import 'dart:convert';
-import 'dart:math';
+import 'dart:math' as math;
+import 'dart:math' show Random, min;
 
 import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
@@ -283,6 +284,58 @@ const _factsIndexDDL =
 const _factsAtIndexDDL =
     'CREATE INDEX idx_facts_at ON memory_facts(at)';
 
+/// TRACK ME: where this phone has been.
+///
+/// PHONE-FIRST like Life Memory, and for a stronger reason. A fix is taken with
+/// the screen off, often with no signal — in a basement, on a train, abroad —
+/// and if it is not written down the moment it is taken there is nothing to
+/// write down later. The server copy is a copy; `server_id` stays null until it
+/// has been pushed, and that is the only thing syncing changes.
+///
+/// ONE ROW PER FIX, deliberately, rather than storing the stays and journeys
+/// that `track/day.dart` works out from them. The rules for cutting a day up
+/// WILL change — the first version of any such rule is wrong about somebody's
+/// commute — and storing the conclusions would mean yesterday is stuck with
+/// yesterday's rules for ever. The fixes are the evidence; everything else is
+/// re-derived on read.
+///
+/// `at` is the phone's clock at the moment of the fix, in UTC, and the day
+/// boundary is applied on read against the LOCAL calendar. Storing a local
+/// timestamp instead would make a day abroad unreadable.
+const _trackDDL = '''
+  CREATE TABLE track_points (
+    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    server_id INTEGER,
+    at        TEXT    NOT NULL,
+    lat       REAL    NOT NULL,
+    lon       REAL    NOT NULL,
+    accuracy  REAL    NOT NULL DEFAULT 0,
+    speed     REAL,
+    battery   INTEGER,
+    created_at TEXT   NOT NULL
+  )''';
+
+const _trackIndexDDL = 'CREATE INDEX idx_track_at ON track_points(at)';
+
+/// A place somebody has NAMED — home, the office, a parent's house.
+///
+/// Named by the person, never looked up. A reverse-geocode would send the
+/// coordinates of your house to a stranger's server to be told what it is
+/// already obvious you know, which is the whole thing this module is trying not
+/// to do. A stay within `radius` of one of these takes its name, so naming
+/// "Home" once names every evening you have ever spent there and every one you
+/// will.
+const _trackPlacesDDL = '''
+  CREATE TABLE track_places (
+    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    server_id INTEGER,
+    name      TEXT    NOT NULL,
+    lat       REAL    NOT NULL,
+    lon       REAL    NOT NULL,
+    radius    REAL    NOT NULL DEFAULT 150,
+    created_at TEXT   NOT NULL
+  )''';
+
 /// A file's sha256, remembered so it is computed once and not once per run.
 ///
 /// THE COST THIS REMOVES IS THE REAL ONE. Asking the computer "do you already
@@ -363,7 +416,7 @@ class OfflineStore {
     final file = _pathOverride ?? p.join(await getDatabasesPath(), 'offline.db');
     return openDatabase(
       file,
-      version: 9,
+      version: 10,
       // v2 added `pending.action`. An upgrade rather than a recreate, because
       // by the time this shipped there were phones holding queued work in a v1
       // database — and that queue is the only copy of it anywhere.
@@ -412,6 +465,11 @@ class OfflineStore {
           // created whole has to go on this way.
           await _addColumnIfMissing(db, 'memories', 'client_uuid', 'TEXT');
         }
+        if (from < 10) {
+          await db.execute(_trackDDL);
+          await db.execute(_trackIndexDDL);
+          await db.execute(_trackPlacesDDL);
+        }
       },
       onCreate: (db, _) async {
         // What the server last said. Disposable by design.
@@ -456,6 +514,9 @@ class OfflineStore {
         await db.execute(_factsDDL);
         await db.execute(_factsIndexDDL);
         await db.execute(_factsAtIndexDDL);
+        await db.execute(_trackDDL);
+        await db.execute(_trackIndexDDL);
+        await db.execute(_trackPlacesDDL);
         await db.execute('''
           CREATE TABLE local_ids (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1031,6 +1092,187 @@ class OfflineStore {
       for (final r in rows)
         {...r, 'facts': byMemory[r['id'] as int] ?? const []}
     ];
+  }
+
+  // ------------------------------------------------------------ track me
+
+  /// Write down one fix.
+  ///
+  /// THINNED AT THE DOOR, not later. A phone that has not moved still reports a
+  /// position every couple of minutes, and a year of that is a quarter of a
+  /// million rows saying the same thing. A fix within [sameSpot] metres of the
+  /// last one AND less than [restingGap] after it is dropped — the stay it
+  /// belongs to is already established by the fixes around it, and nothing in
+  /// `track/day.dart` reads any better for the extra hundred.
+  ///
+  /// Returns the new row id, or null when the fix was thinned away.
+  Future<int?> addFix({
+    required DateTime at,
+    required double lat,
+    required double lon,
+    double accuracy = 0,
+    double? speed,
+    int? battery,
+    double sameSpot = 60,
+    Duration restingGap = const Duration(minutes: 8),
+  }) async {
+    final db = await _open;
+    final last = await db.query('track_points',
+        orderBy: 'at DESC', limit: 1);
+    if (last.isNotEmpty) {
+      final prevAt = DateTime.tryParse('${last.first['at']}');
+      final prevLat = (last.first['lat'] as num).toDouble();
+      final prevLon = (last.first['lon'] as num).toDouble();
+      if (prevAt != null) {
+        final moved = _metres(prevLat, prevLon, lat, lon);
+        final since = at.difference(prevAt);
+        if (moved < sameSpot && since < restingGap && !since.isNegative) {
+          return null;
+        }
+      }
+    }
+    return db.insert('track_points', {
+      // UTC. The day boundary is applied on read, against the LOCAL calendar —
+      // storing a local timestamp instead makes a day abroad unreadable.
+      'at': at.toUtc().toIso8601String(),
+      'lat': lat,
+      'lon': lon,
+      'accuracy': accuracy,
+      'speed': speed,
+      'battery': battery,
+      'created_at': DateTime.now().toIso8601String(),
+    });
+  }
+
+  /// Every fix for one LOCAL calendar day.
+  ///
+  /// The bounds are built from the local day and converted, so "the 3rd" means
+  /// the 3rd where the person was, not the 3rd in UTC — which in India is the
+  /// 2nd from half past five in the morning.
+  Future<List<Map<String, dynamic>>> fixesOn(DateTime day) async {
+    final db = await _open;
+    final from = DateTime(day.year, day.month, day.day).toUtc();
+    final to = DateTime(day.year, day.month, day.day + 1).toUtc();
+    return db.query('track_points',
+        where: 'at >= ? AND at < ?',
+        whereArgs: [from.toIso8601String(), to.toIso8601String()],
+        orderBy: 'at ASC');
+  }
+
+  /// Which local days have anything recorded, newest first.
+  ///
+  /// Grouped in Dart rather than SQL: the stored timestamps are UTC, and
+  /// `substr(at, 1, 10)` would put an evening in India on the wrong day.
+  Future<List<DateTime>> trackedDays({int limit = 400}) async {
+    final db = await _open;
+    final rows = await db.query('track_points',
+        columns: ['at'], orderBy: 'at DESC', limit: 50000);
+    final days = <String, DateTime>{};
+    for (final r in rows) {
+      final at = DateTime.tryParse('${r['at']}');
+      if (at == null) continue;
+      final local = at.toLocal();
+      final key = '${local.year}-${local.month}-${local.day}';
+      days.putIfAbsent(key, () => DateTime(local.year, local.month, local.day));
+      if (days.length >= limit) break;
+    }
+    return days.values.toList();
+  }
+
+  Future<int> fixCount() async {
+    final db = await _open;
+    final r = await db.rawQuery('SELECT COUNT(*) c FROM track_points');
+    return (r.first['c'] as int?) ?? 0;
+  }
+
+  /// Everything, gone. The screen offers this because a location history is the
+  /// one thing in this app somebody may want rid of in a hurry, and "delete the
+  /// app" should not be the only way.
+  Future<void> clearTrack() async {
+    final db = await _open;
+    await db.delete('track_points');
+  }
+
+  /// Forget one day.
+  Future<int> clearTrackDay(DateTime day) async {
+    final db = await _open;
+    final from = DateTime(day.year, day.month, day.day).toUtc();
+    final to = DateTime(day.year, day.month, day.day + 1).toUtc();
+    return db.delete('track_points',
+        where: 'at >= ? AND at < ?',
+        whereArgs: [from.toIso8601String(), to.toIso8601String()]);
+  }
+
+  /// Fixes the computer does not have yet, oldest first.
+  Future<List<Map<String, dynamic>>> unsyncedFixes({int limit = 500}) async {
+    final db = await _open;
+    return db.query('track_points',
+        where: 'server_id IS NULL', orderBy: 'at ASC, id ASC', limit: limit);
+  }
+
+  Future<int> unsyncedFixCount() async {
+    final db = await _open;
+    final r = await db.rawQuery(
+        'SELECT COUNT(*) c FROM track_points WHERE server_id IS NULL');
+    return (r.first['c'] as int?) ?? 0;
+  }
+
+  /// Mark a batch as sent, in one statement rather than one per row — a day is
+  /// several hundred fixes and a round of updates each is how a sync takes a
+  /// minute instead of a second.
+  Future<void> markFixesSynced(Map<int, int> localToServer) async {
+    if (localToServer.isEmpty) return;
+    final db = await _open;
+    await db.transaction((tx) async {
+      for (final e in localToServer.entries) {
+        await tx.update('track_points', {'server_id': e.value},
+            where: 'id = ?', whereArgs: [e.key]);
+      }
+    });
+  }
+
+  // --------------------------------------------------- places you have named
+
+  Future<int> nameTrackPlace({
+    required String name,
+    required double lat,
+    required double lon,
+    double radius = 150,
+  }) async {
+    final db = await _open;
+    return db.insert('track_places', {
+      'name': name,
+      'lat': lat,
+      'lon': lon,
+      'radius': radius,
+      'created_at': DateTime.now().toIso8601String(),
+    });
+  }
+
+  Future<List<Map<String, dynamic>>> trackPlaces() async {
+    final db = await _open;
+    return db.query('track_places', orderBy: 'name ASC');
+  }
+
+  Future<void> forgetTrackPlace(int id) async {
+    final db = await _open;
+    await db.delete('track_places', where: 'id = ?', whereArgs: [id]);
+  }
+
+  /// Haversine, in metres. A copy of `track/day.dart`'s, because this file must
+  /// not import a screen-layer library — and the thinning above needs it before
+  /// anything has been read.
+  static double _metres(double lat1, double lon1, double lat2, double lon2) {
+    const r = 6371000.0;
+    double rad(double d) => d * 3.1415926535897932 / 180.0;
+    final dLat = rad(lat2 - lat1);
+    final dLon = rad(lon2 - lon1);
+    final a = math.sin(dLat / 2) * math.sin(dLat / 2) +
+        math.cos(rad(lat1)) *
+            math.cos(rad(lat2)) *
+            math.sin(dLon / 2) *
+            math.sin(dLon / 2);
+    return r * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a));
   }
 
   // ------------------------------------------------- what to stop trying

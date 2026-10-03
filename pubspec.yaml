@@ -140,6 +140,18 @@ dependencies:
   cunning_document_scanner: ^2.8.0
   share_plus: ^12.0.2
 
+  # TRACK ME. geolocator for the fixes; flutter_map draws them.
+  #
+  # flutter_map is pointed at THIS HOUSEHOLD'S OWN SERVER for tiles, never at a
+  # public tile host — see lib/screens/track_screen.dart and the tile endpoint in
+  # backend/app/routers/track.py. places_screen.dart explains the rule it is
+  # obeying: the request for a tile IS the coordinate, so a map drawn from
+  # somebody else's tiles posts a record of everywhere you have been to them.
+  # A location timeline makes that very much worse than it was for photos.
+  geolocator: ^13.0.2
+  flutter_map: ^7.0.2
+  latlong2: ^0.9.1
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
