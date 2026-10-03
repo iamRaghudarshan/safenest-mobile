@@ -27,6 +27,7 @@ import 'suggestions_strip.dart';
 import '../theme.dart';
 import 'documents_screen.dart';
 import 'library_tabs.dart';
+import 'people_photos_screen.dart';
 import 'labels_screen.dart';
 import 'places_screen.dart';
 import 'trash_screen.dart';
@@ -269,13 +270,19 @@ class CollectionsHomeState extends State<CollectionsHome> {
             return SizedBox(
               width: 72,
               child: GestureDetector(
+                // A DEAD END BEFORE THIS. Tapping a face opened
+                // /api/people/{id}/photos, which takes ONE id: no way to add a
+                // second face, and nothing to suggest adding one was possible.
+                // "Photos of Amma AND Appa" is the question people actually
+                // ask, the server has always answered it, and nothing led
+                // there. See people_photos_screen.dart.
                 onTap: () => isUnnamed
                     ? _open(Scaffold(
                         appBar: AppBar(title: const Text('People')),
                         body: const PeopleTab()))
-                    : _open(CollectionScreen(
-                        title: '${p['name']}',
-                        path: '/api/people/${p['id']}/photos')),
+                    : _open(PeoplePhotosScreen(
+                        people: _people,
+                        startWith: (p['id'] as num).toInt())),
                 child: Column(children: [
                   Stack(children: [
                     Container(

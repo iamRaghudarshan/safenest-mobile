@@ -43,6 +43,7 @@ import 'package:safenest/screens/labels_screen.dart';
 import 'package:safenest/screens/life_memory_screen.dart';
 import 'package:safenest/screens/memory_ask_screen.dart';
 import 'package:safenest/screens/memory_search_screen.dart';
+import 'package:safenest/screens/people_photos_screen.dart';
 import 'package:safenest/screens/modules_screen.dart';
 import 'package:safenest/screens/notes_screen.dart';
 import 'package:safenest/screens/gallery_screen.dart' show Photo;
@@ -96,7 +97,7 @@ const _accountedFor = {
   // Drawn by the sweep.
   'background_screen.dart', 'documents_screen.dart', 'habits_screen.dart',
   'labels_screen.dart', 'life_memory_screen.dart', 'memory_ask_screen.dart',
-  'memory_search_screen.dart',
+  'memory_search_screen.dart', 'people_photos_screen.dart',
   'modules_screen.dart', 'notes_screen.dart', 'places_screen.dart',
   'profile_screen.dart', 'search_screen.dart', 'sign_in_screen.dart',
   'vault_screen.dart', 'doc_preview.dart', 'doc_versions.dart',
@@ -178,6 +179,14 @@ final _screens = <String, Widget Function()>{
             ],
           }
         ],
+      ),
+  'People together': () => PeoplePhotosScreen(
+        startWith: 1,
+        people: const [
+          {'id': 1, 'name': 'Amma', 'cover_url': null, 'box': null},
+          {'id': 2, 'name': 'Appa', 'cover_url': null, 'box': null},
+        ],
+        debugPhotos: const [],
       ),
   'Modules': () => ModulesScreen(onOpen: (_) {}),
   'Notes': () => const NotesScreen(),

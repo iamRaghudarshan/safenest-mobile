@@ -28,6 +28,7 @@ import '../theme.dart';
 import '../widgets/brand_button.dart';
 import '../widgets/photo_tile.dart';
 import 'gallery_screen.dart';
+import 'people_photos_screen.dart';
 import 'person_faces.dart';
 import 'photo_viewer.dart';
 
@@ -967,14 +968,18 @@ class _PeopleTabState extends State<PeopleTab> {
             // An unnamed face asks who it is; a named one opens their photos.
             // Tapping "Add a name" and being shown a grid instead would be the
             // one thing on this screen that ignores what it says.
+            // The SAME destination as the People row in Collections, and
+            // deliberately so: two ways in that answer differently is how one
+            // of them stops being used. It opens on this person and can take
+            // another face — see people_photos_screen.dart.
             onTap: () => unnamedOne
                 ? _name(p)
                 : Navigator.of(ctx)
                       .push(
                         MaterialPageRoute(
-                          builder: (_) => CollectionScreen(
-                            title: '${p['name'] ?? 'Someone'}',
-                            path: '/api/people/${p['id']}/photos',
+                          builder: (_) => PeoplePhotosScreen(
+                            people: _people,
+                            startWith: (p['id'] as num).toInt(),
                           ),
                         ),
                       )
