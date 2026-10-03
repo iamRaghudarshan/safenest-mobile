@@ -32,6 +32,7 @@ import '../memory/reminders.dart';
 import '../offline/store.dart';
 import '../theme.dart';
 import 'memory_ask_screen.dart';
+import 'memory_search_screen.dart';
 
 const kMemoryTint = Color(0xFF6B3C8C);
 
@@ -400,12 +401,27 @@ class _LifeMemoryScreenState extends State<LifeMemoryScreen> {
   }
 
   Future<void> _search() async {
-    await showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      showDragHandle: true,
-      builder: (ctx) => _SearchSheet(store: _store),
-    );
+    // A SCREEN, NOT A SHEET any more. A sheet is right for something you glance
+    // at and dismiss; searching is something you narrow, refine and scroll, and
+    // half the height went to the keyboard. It also needs an app bar for the
+    // field and a row for the filters, neither of which fits above a list in a
+    // sheet.
+    final store = _store;
+    await Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => MemorySearchScreen(
+        look: (terms) => store.memoriesMatchingAny(terms),
+        // Typing a question into a search box is common and the answer is one
+        // tap away rather than somewhere else in the app.
+        onAsk: (question) => Navigator.of(context).pushReplacement(
+          MaterialPageRoute(
+            builder: (_) => MemoryAskScreen(
+              look: (terms) => store.memoriesMatchingAny(terms),
+              debugQuestion: question,
+            ),
+          ),
+        ),
+      ),
+    ));
   }
 }
 
@@ -1112,87 +1128,4 @@ class _Offered extends StatelessWidget {
         FactKind.amount => Icons.currency_rupee,
         _ => Icons.sell_outlined,
       };
-}
-
-// ========================================================= search sheet
-
-class _SearchSheet extends StatefulWidget {
-  const _SearchSheet({required this.store});
-  final OfflineStore store;
-
-  @override
-  State<_SearchSheet> createState() => _SearchSheetState();
-}
-
-class _SearchSheetState extends State<_SearchSheet> {
-  final _q = TextEditingController();
-  List<Map<String, dynamic>> _hits = const [];
-  bool _searched = false;
-
-  @override
-  void dispose() {
-    _q.dispose();
-    super.dispose();
-  }
-
-  Future<void> _run(String term) async {
-    final hits = await widget.store.searchMemories(term);
-    if (mounted) {
-      setState(() {
-        _hits = hits;
-        _searched = term.trim().isNotEmpty;
-      });
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return SafeArea(
-      child: Padding(
-        padding: EdgeInsets.fromLTRB(
-            18, 0, 18, MediaQuery.of(context).viewInsets.bottom + 18),
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          TextField(
-            controller: _q,
-            autofocus: true,
-            decoration: InputDecoration(
-              hintText: 'Anything you have told it',
-              prefixIcon: const Icon(Icons.search),
-              border:
-                  OutlineInputBorder(borderRadius: BorderRadius.circular(22)),
-            ),
-            onChanged: _run,
-          ),
-          const SizedBox(height: 12),
-          if (_searched && _hits.isEmpty)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 22),
-              child: Text('Nothing matches that.',
-                  style: TextStyle(color: theme.colorScheme.onSurfaceVariant)),
-            )
-          else if (_hits.isNotEmpty)
-            Flexible(
-              child: ListView.builder(
-                shrinkWrap: true,
-                itemCount: _hits.length,
-                itemBuilder: (_, i) => _MemoryCard(row: _hits[i]),
-              ),
-            )
-          else
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 18),
-              child: Text(
-                  'It looks in your own words as well as the tags, so a '
-                  'phrase you remember saying will find it.',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                      fontSize: 12.5,
-                      height: 1.5,
-                      color: theme.colorScheme.onSurfaceVariant)),
-            ),
-        ]),
-      ),
-    );
-  }
 }

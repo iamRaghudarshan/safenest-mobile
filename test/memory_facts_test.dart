@@ -86,6 +86,19 @@ void main() {
           '₹12,000');
     });
 
+    test('the currency word is not then offered as a person', () {
+      // Found by typing a real sentence into the app on an emulator. "Bought it
+      // for Rs 32,400" offered the price AND a name called "Rs", because Rs is a
+      // capitalised word that is not the first in its sentence. Every rule that
+      // consumes words has to claim them, or the next rule offers them again.
+      final found = readFacts(
+          'Bought the washing machine from Vijay Sales for Rs 32,400.',
+          DateTime(2026, 10, 3));
+      expect([for (final f in found) f.value], isNot(contains('Rs')));
+      expect([for (final f in found) f.value], contains('₹32,400'));
+      expect([for (final f in found) f.value], contains('Vijay Sales'));
+    });
+
     test('a lakh is grouped the way it is written here', () {
       // 12,50,000 — not 1,250,000. Western grouping is the tell that nobody
       // local read the output.
@@ -133,6 +146,20 @@ void main() {
       // suggestion that makes somebody stop reading the suggestions.
       expect(of('Bought the machine today.').map((f) => f.value),
           isNot(contains('Bought')));
+    });
+
+    test('a full stop ends a place, it does not continue it', () {
+      // "took this in Jayanagar. Two year warranty" offered a place called
+      // "Jayanagar. Two". It looked right in the source and absurd on screen,
+      // and it hid behind the names rule offering a clean "Jayanagar" beside it.
+      final found = kind('Took this in Jayanagar. Two year warranty.',
+          FactKind.place);
+      expect([for (final f in found) f.value], contains('Jayanagar'));
+    });
+
+    test('a dot inside a name survives', () {
+      expect([for (final f in kind('Met him at St.Marks Road', FactKind.place))
+        f.value], contains('St.Marks Road'));
     });
 
     test('a month is not a person', () {

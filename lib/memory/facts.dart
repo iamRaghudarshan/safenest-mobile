@@ -99,14 +99,28 @@ List<Fact> readFacts(String text, DateTime now) {
   for (final f in _amounts(text)) {
     add(f);
   }
-  // Places and shops first, and what they claim is remembered: a capitalised
-  // word already offered as "Croma, where it came from" must not be offered a
-  // second time as a bare name. Two suggestions for one word reads as the app
-  // being unsure, and the person has to decide which of two identical chips to
-  // tap.
+  // WHAT EACH RULE CLAIMS IS REMEMBERED, and every later rule respects it. A
+  // capitalised word already offered as "Croma, where it came from" must not
+  // come back as a bare name: two suggestions for one word reads as the app
+  // being unsure, and the person has to choose between two identical chips.
+  //
+  // The amounts claim their words too, and that one was found by running it:
+  // "for Rs 32,400" offered the price AND a name called "Rs", because Rs is a
+  // capitalised word that is not the first in its sentence. Every rule that
+  // consumes words has to say so, or the next rule offers them again.
   final claimed = <String>{};
+  void claim(Fact f) {
+    for (final word in f.because.split(RegExp(r'[^A-Za-z0-9₹]+'))) {
+      if (word.isNotEmpty) claimed.add(word.toLowerCase());
+    }
+  }
+
+  for (final f in out) {
+    claim(f);
+  }
   for (final f in _placesAndShops(text)) {
     add(f);
+    claim(f);
     for (final word in f.value.split(RegExp(r'\s+'))) {
       claimed.add(word.toLowerCase());
     }
@@ -194,7 +208,13 @@ Iterable<Fact> _amounts(String text) sync* {
 /// a different kind, because "bought it from Jayanagar" and "took this in
 /// Jayanagar" are not the same claim and only one of them is a shop.
 Iterable<Fact> _placesAndShops(String text) sync* {
-  final re = RegExp(r'\b(from|at|in|near)\s+((?:[A-Z][\w&.-]*)(?:\s+[A-Z][\w&.-]*){0,3})');
+  // A FULL STOP ENDS THE NAME. The dot is allowed inside a word — "St.Marks",
+  // "A.M.Road" — only when a letter follows it, so a sentence boundary cannot
+  // be swallowed. Without that, "took this in Jayanagar. Two year warranty"
+  // offered a place called "Jayanagar. Two", which looked right in the source
+  // and absurd on screen.
+  const word = r'[A-Z][\w&-]*(?:\.(?=\w)[\w&-]*)*';
+  final re = RegExp('\\b(from|at|in|near)\\s+((?:$word)(?:\\s+$word){0,3})');
   for (final m in re.allMatches(text)) {
     final prep = m.group(1)!.toLowerCase();
     final name = m.group(2)!.trim();

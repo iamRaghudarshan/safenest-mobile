@@ -42,6 +42,7 @@ import 'package:safenest/screens/habits_screen.dart';
 import 'package:safenest/screens/labels_screen.dart';
 import 'package:safenest/screens/life_memory_screen.dart';
 import 'package:safenest/screens/memory_ask_screen.dart';
+import 'package:safenest/screens/memory_search_screen.dart';
 import 'package:safenest/screens/modules_screen.dart';
 import 'package:safenest/screens/notes_screen.dart';
 import 'package:safenest/screens/gallery_screen.dart' show Photo;
@@ -95,6 +96,7 @@ const _accountedFor = {
   // Drawn by the sweep.
   'background_screen.dart', 'documents_screen.dart', 'habits_screen.dart',
   'labels_screen.dart', 'life_memory_screen.dart', 'memory_ask_screen.dart',
+  'memory_search_screen.dart',
   'modules_screen.dart', 'notes_screen.dart', 'places_screen.dart',
   'profile_screen.dart', 'search_screen.dart', 'sign_in_screen.dart',
   'vault_screen.dart', 'doc_preview.dart', 'doc_versions.dart',
@@ -152,6 +154,25 @@ final _screens = <String, Widget Function()>{
                 'value': 'Warranty ends 26 Sep 2028',
                 'at': DateTime(2028, 9, 26).toIso8601String(),
               },
+              {'kind': 'amount', 'value': '₹32,400', 'at': null},
+              {'kind': 'shop', 'value': 'Vijay Sales', 'at': null},
+            ],
+          }
+        ],
+      ),
+  'Find memories': () => MemorySearchScreen(
+        debugNow: DateTime(2026, 10, 3),
+        debugRecent: const ['croma', 'warranty'],
+        look: (_) async => [
+          {
+            'id': 1,
+            'body': 'Bought the washing machine from Vijay Sales for '
+                '₹32,400 with a two year warranty on the motor.',
+            'said_at': DateTime(2026, 9, 26).toIso8601String(),
+            'spoken': 1,
+            'server_id': null,
+            'photo_path': null,
+            'facts': [
               {'kind': 'amount', 'value': '₹32,400', 'at': null},
               {'kind': 'shop', 'value': 'Vijay Sales', 'at': null},
             ],
