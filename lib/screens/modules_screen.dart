@@ -17,6 +17,7 @@ import '../customize.dart';
 import '../modules.dart';
 import '../session.dart';
 import '../theme.dart';
+import '../widgets/module_tile.dart' show gradientFor;
 
 typedef _Mod = ({String key, String label, IconData icon, Color colour, String blurb});
 
@@ -294,8 +295,7 @@ class _ModTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final dark = theme.brightness == Brightness.dark;
-    final light = Color.lerp(colour, Colors.white, 0.26)!;
+    final (light, deep) = gradientFor(colour);
     final card = theme.colorScheme.surface;
 
     return Material(
@@ -303,11 +303,15 @@ class _ModTile extends StatelessWidget {
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(20),
+        // NO TINTED CARD BEHIND EACH TILE, and that is the whole difference
+        // between the grid as it was and the reference the owner sent. Fifteen
+        // pastel panels, each with its own border, is fifteen competing
+        // rectangles; the icons are already strongly coloured and a panel in
+        // the same hue only dilutes them. On a white card the tiles read as
+        // objects on a surface, which is what gives that layout its calm.
         child: Ink(
           decoration: BoxDecoration(
-            color: colour.withValues(alpha: dark ? 0.16 : 0.08),
             borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: colour.withValues(alpha: 0.16)),
           ),
           child: Padding(
             padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 6),
@@ -320,12 +324,16 @@ class _ModTile extends StatelessWidget {
                     gradient: LinearGradient(
                       begin: Alignment.topLeft,
                       end: Alignment.bottomRight,
-                      colors: [light, colour],
+                      colors: [light, deep],
                     ),
                     borderRadius: BorderRadius.circular(18),
                     boxShadow: [
+                      // IN THE TILE'S OWN HUE, never grey. A grey shadow under
+                      // a blue square reads as a sticker on paper; a blue one
+                      // reads as a lit object, and that is most of what makes
+                      // the reference look the way it does.
                       BoxShadow(
-                          color: colour.withValues(alpha: 0.38),
+                          color: deep.withValues(alpha: 0.34),
                           blurRadius: 12,
                           offset: const Offset(0, 5)),
                     ],
@@ -391,8 +399,7 @@ class _ModTile extends StatelessWidget {
                     style: TextStyle(
                         fontSize: 11,
                         fontWeight: FontWeight.w600,
-                        color: Color.lerp(
-                            colour, theme.colorScheme.onSurface, 0.25))),
+                        color: theme.colorScheme.onSurfaceVariant)),
               ],
             ]),
           ),

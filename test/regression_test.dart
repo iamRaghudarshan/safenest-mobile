@@ -17,6 +17,7 @@ import 'package:safenest/screens/photos_home.dart';
 import 'package:safenest/offline/store.dart';
 import 'package:safenest/session.dart';
 import 'package:safenest/theme.dart';
+import 'package:safenest/widgets/brand_button.dart';
 
 void main() {
   videoTests();
@@ -92,9 +93,51 @@ void main() {
       // which the next test asserts: losing a tab is exactly how a working
       // screen becomes unreachable here, and that is the bug this file exists
       // for.
+      // SCOPED TO THE SWITCHER, which is a tightening rather than a
+      // loosening. A plain `find.text('Photos')` now matches twice — the tab
+      // and the backed-up grid's Photos tile — and the lazy fix is
+      // `findsWidgets`, which would also pass if the TAB disappeared and only
+      // the tile remained. Losing a tab is the exact bug this file exists for.
       for (final label in ['Photos', 'Collections']) {
-        expect(find.text(label), findsOneWidget);
+        expect(
+            find.descendant(
+                of: find.byType(Segmented), matching: find.text(label)),
+            findsOneWidget);
       }
+    });
+
+    testWidgets('the empty and failed states still fit under the new headers',
+        (tester) async {
+      // The storage panel and the backed-up grid now sit above these states,
+      // and `SliverFillRemaining` pins its child to whatever is LEFT of the
+      // viewport — about 25 points once the headers are there. "No photos here
+      // yet" overflowed by 61 on an iPhone SE, and the loading spinner hid it:
+      // the first pump shows a spinner, which fits in any gap, so the screen
+      // looked correct until the fetch actually finished.
+      tester.view.physicalSize = const Size(320, 568);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      await tester.pumpWidget(MultiProvider(
+        providers: [
+          ChangeNotifierProvider<Session>(create: (_) => Session()),
+          Provider<OfflineStore>(create: (_) => OfflineStore()),
+        ],
+        child: MaterialApp(
+          theme: buildTheme(const Brand(), Brightness.light),
+          home: const PhotosHome(),
+        ),
+      ));
+      await tester.pump();
+      // There is no server in a test, so the fetch fails and the screen lands
+      // on the message state — which is the one that overflowed.
+      for (var i = 0; i < 4; i++) {
+        await tester.pump(const Duration(seconds: 1));
+      }
+
+      expect(find.text('Try again'), findsOneWidget,
+          reason: 'this test is worthless unless it reached the message state');
+      expect(tester.takeException(), isNull);
     });
 
     testWidgets('Albums, People and Memories still lay out on their own',

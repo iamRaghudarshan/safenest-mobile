@@ -40,7 +40,13 @@ import '../sharing.dart';
 import '../widgets/date_scrubber.dart';
 import '../widgets/selection_bar.dart';
 import '../widgets/photo_tile.dart';
+import '../widgets/backed_up_grid.dart';
+import '../widgets/storage_hero.dart';
+import 'documents_screen.dart';
+import 'library_tabs.dart' show PeopleTab, AlbumsTab;
 import 'photo_viewer.dart';
+import 'places_screen.dart';
+import 'storage_screen.dart';
 
 class Photo {
   Photo(this.id, this.url, this.thumbUrl, this.takenAt, this.isFavourite,
@@ -1023,6 +1029,12 @@ class _GalleryScreenState extends State<GalleryScreen>
     });
     _load(reset: true);
     _loadPeople();
+    // AFTER THE FIRST FRAME, not during it. The panel is a header on a screen
+    // whose job is photographs, and two more requests on the launch path is
+    // exactly the kind of thing that was just taken off it.
+    if (widget.embedded) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _loadStorage());
+    }
   }
 
   @override
@@ -1065,6 +1077,149 @@ class _GalleryScreenState extends State<GalleryScreen>
           '${_plural(_videoTotal, 'video')}';
     }
     return _plural(_total, _plainView ? 'photo' : 'item');
+  }
+
+  // ------------------------------------------------- the storage panel
+
+  int _usedBytes = 0;
+  int _freeBytes = 0;
+  bool _storageLoading = true;
+
+  /// True when the figures on screen are the last ones we were told rather than
+  /// current. Said out loud in the panel: a storage number that is quietly
+  /// three days old is worse than one that admits it.
+  bool _storageStale = false;
+
+  Map<String, dynamic> _counts = const {};
+
+  String get _heroCaption {
+    if (_counts.isEmpty) return '';
+    final bits = <String>[];
+    for (final (key, one, many) in const [
+      ('photos', 'photo', 'photos'),
+      ('videos', 'video', 'videos'),
+      ('documents', 'document', 'documents'),
+    ]) {
+      final n = (_counts[key] as num?)?.toInt() ?? 0;
+      if (n > 0) bits.add('$n ${n == 1 ? one : many}');
+    }
+    return bits.join(' · ');
+  }
+
+  /// Everything SafeNest is holding, as tiles.
+  ///
+  /// Every one of them goes somewhere. A tile that is decoration on a screen
+  /// full of tappable things is a tile people tap twice and then stop trusting.
+  List<BackedUp> _backedUp(BuildContext context) {
+    int? n(String key) =>
+        _storageLoading ? null : ((_counts[key] as num?)?.toInt() ?? 0);
+    void open(Widget page) => Navigator.of(context)
+        .push(MaterialPageRoute(builder: (_) => page));
+
+    return [
+      BackedUp(
+        key: 'photos',
+        label: 'Photos',
+        icon: Icons.photo_library_outlined,
+        colour: kModuleColours['gallery']!,
+        count: n('photos'),
+        onTap: () => setState(() {
+          _mediaKind = 'photos';
+          _load(reset: true);
+        }),
+      ),
+      BackedUp(
+        key: 'videos',
+        label: 'Videos',
+        icon: Icons.videocam_outlined,
+        colour: const Color(0xFFEF4444),
+        count: n('videos'),
+        onTap: () => setState(() {
+          _mediaKind = 'videos';
+          _load(reset: true);
+        }),
+      ),
+      BackedUp(
+        key: 'documents',
+        label: 'Documents',
+        icon: Icons.folder_outlined,
+        colour: kModuleColours['documents']!,
+        count: n('documents'),
+        onTap: () => open(const DocumentsScreen()),
+      ),
+      BackedUp(
+        key: 'people',
+        label: 'People',
+        icon: Icons.people_alt_outlined,
+        colour: const Color(0xFFD97706),
+        count: n('people'),
+        onTap: () => open(Scaffold(
+          appBar: AppBar(title: const Text('People')),
+          body: const PeopleTab(),
+        )),
+      ),
+      BackedUp(
+        key: 'places',
+        label: 'Places',
+        icon: Icons.place_outlined,
+        colour: const Color(0xFF0D9488),
+        count: n('places'),
+        onTap: () => open(const PlacesScreen()),
+      ),
+      BackedUp(
+        key: 'albums',
+        label: 'Albums',
+        icon: Icons.photo_album_outlined,
+        colour: const Color(0xFF7C3AED),
+        count: n('albums'),
+        onTap: () => open(Scaffold(
+          appBar: AppBar(title: const Text('Albums')),
+          body: const AlbumsTab(),
+        )),
+      ),
+    ];
+  }
+
+  /// Read the figures behind the panel.
+  ///
+  /// Best effort, always. This is a header on a screen whose job is showing
+  /// photographs: an unreachable computer must leave the photographs working
+  /// and the panel honest, never take the screen down with it.
+  bool _storageAsked = false;
+
+  Future<void> _loadStorage() async {
+    if (_storageAsked) return;
+    _storageAsked = true;
+    try {
+      final api = context.read<Session>().api;
+      final r = await Future.wait([
+        api.get('/api/system/storage'),
+        api.get('/api/gallery/summary').catchError((_) => <String, dynamic>{}),
+      ]);
+      if (!mounted) return;
+      final storage = (r[0] as Map).cast<String, dynamic>();
+      final mine = (storage['mine'] as Map?)?.cast<String, dynamic>() ?? const {};
+      setState(() {
+        _usedBytes = ((mine['bytes'] ?? storage['bytes'] ?? 0) as num).toInt();
+        // Only an admin is told what is left on the drive — see the comment on
+        // /api/system/storage. Everybody else gets the used figure alone, and
+        // the panel then shows no bar rather than a bar against a total it has
+        // invented.
+        final disk = (storage['disk'] as Map?)?.cast<String, dynamic>();
+        _freeBytes = ((disk?['free'] ?? 0) as num).toInt();
+        _counts = (r[1] as Map?)?.cast<String, dynamic>() ?? const {};
+        _storageLoading = false;
+        _storageStale = false;
+      });
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _storageLoading = false;
+          // Whatever was last read stays on screen, marked as last seen.
+          _storageStale = _usedBytes > 0;
+        });
+      }
+    }
   }
 
   Future<void> _load({bool reset = false}) async {
@@ -1292,6 +1447,35 @@ class _GalleryScreenState extends State<GalleryScreen>
               SliverAppBar.large(
                 title: const Text('Photos'),
               ),
+
+            // THE STORAGE PANEL AND WHAT IS BACKED UP, at the head of the grid.
+            //
+            // The owner asked for a storage-led gallery and approved a mock
+            // where the number leads and the photographs are below it. Putting
+            // them in the SCROLL rather than above it is what makes that
+            // affordable: at rest the screen is the panel, the tiles and the
+            // backup card — the approved layout — and one flick is already in
+            // the photographs, instead of a tap and a second screen.
+            //
+            // Hidden the moment anything is being searched or filtered. A
+            // storage figure above a set of search results is answering a
+            // question nobody asked, and it costs the results the top third of
+            // the screen.
+            if (widget.embedded && _plainView) ...[
+              SliverToBoxAdapter(
+                child: StorageHero(
+                  usedBytes: _usedBytes,
+                  freeBytes: _freeBytes,
+                  caption: _heroCaption,
+                  loading: _storageLoading,
+                  unreachable: _storageStale,
+                  onTap: () => Navigator.of(context).push(MaterialPageRoute(
+                      builder: (_) => const StorageScreen())),
+                ),
+              ),
+              SliverToBoxAdapter(child: BackedUpGrid(items: _backedUp(context))),
+            ],
+
             SliverToBoxAdapter(
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(14, 0, 14, 4),
@@ -1390,13 +1574,28 @@ class _GalleryScreenState extends State<GalleryScreen>
                 ),
               ),
             ),
+            // ALL THREE ARE `hasScrollBody: false`, AND THAT IS NOT A STYLE
+            // CHOICE. The default pins the child to exactly the space left in
+            // the viewport, which was the whole viewport while these were the
+            // only slivers — so an empty state had a screen to render in and
+            // the default looked correct. The storage panel and the backed-up
+            // grid now sit above them, leaving about 25 points, and
+            // "No photos here yet" overflowed by 61 on an iPhone SE. With
+            // `false` the child takes its own height and the sliver scrolls
+            // when the message is taller than the gap, instead of being
+            // clipped to it.
             if (_loading)
               const SliverFillRemaining(
+                  hasScrollBody: false,
                   child: Center(child: CircularProgressIndicator()))
             else if (_error != null)
-              SliverFillRemaining(child: _Message(text: _error!, onRetry: () => _load(reset: true)))
+              SliverFillRemaining(
+                  hasScrollBody: false,
+                  child: _Message(
+                      text: _error!, onRetry: () => _load(reset: true)))
             else if (_photos.isEmpty)
               const SliverFillRemaining(
+                hasScrollBody: false,
                 child: _Message(
                     text: 'No photos here yet.\n\n'
                         'Tap the cloud button to back up this phone — '

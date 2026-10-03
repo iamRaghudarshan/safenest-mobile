@@ -90,4 +90,24 @@ void main() {
             'gets no local reminders whatsoever');
     expect(src, contains('canScheduleExact'));
   });
+
+  test('asking for notifications does not throw you into system settings', () {
+    // requestExactAlarmsPermission launches a full Settings ACTIVITY — it takes
+    // the person out of SafeNest and drops them on a page about alarms they did
+    // not ask to see. It was being called as the Reminders list loaded, so
+    // simply having that tab in the nav bar sent people to Android Settings
+    // about forty-five seconds after launch, with nothing to explain why. It
+    // happened three times while demonstrating the app.
+    //
+    // Read as source: the plugin cannot be driven from a unit test, and what
+    // matters is that the call is behind the flag rather than beside it.
+    final src = File('lib/alarms.dart').readAsStringSync();
+    final body = src.substring(src.indexOf('Future<bool> requestPermission('));
+    final call = body.indexOf('requestExactAlarmsPermission');
+    expect(call, greaterThan(0));
+    expect(body.substring(0, call), contains('if (openSettingsForExactAlarms)'),
+        reason: 'the Settings activity must only open when asked for');
+    expect(body, contains('bool openSettingsForExactAlarms = false'),
+        reason: 'and it must be off by default');
+  });
 }

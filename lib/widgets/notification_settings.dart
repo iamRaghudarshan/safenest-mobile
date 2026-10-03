@@ -282,7 +282,11 @@ class _NotificationSettingsSectionState
               onTap: _busy
                   ? null
                   : () async {
-                      await Alarms.instance.requestPermission();
+                      // HERE it opens Settings, because this row exists to say
+                      // so — the person tapped a line that reads "Tap to
+                      // allow".
+                      await Alarms.instance
+                          .requestPermission(openSettingsForExactAlarms: true);
                       await _loadRings();
                     },
             ),

@@ -143,7 +143,23 @@ class Alarms {
     return _canBeExact!;
   }
 
-  Future<bool> requestPermission() async {
+  /// Ask for what notifications need.
+  ///
+  /// [openSettingsForExactAlarms] is false by default, and that default is the
+  /// whole point. The notification permission is a DIALOG — it appears over the
+  /// app, it is answered in place, and asking at a sensible moment is good
+  /// manners. The exact-alarm permission is not a dialog at all: on Android 13+
+  /// `requestExactAlarmsPermission` launches a full system Settings ACTIVITY,
+  /// which takes the person out of SafeNest entirely and drops them on a page
+  /// about alarms they did not ask to see.
+  ///
+  /// It was being called from the Reminders list as it loaded, so simply having
+  /// the Reminders tab in the nav bar threw people into Android Settings about
+  /// forty-five seconds after launch, with nothing on screen to explain why. It
+  /// is only asked for now where somebody has asked for it: the "Tap to allow"
+  /// row in Settings, next to the switch that needs it.
+  Future<bool> requestPermission(
+      {bool openSettingsForExactAlarms = false}) async {
     await init();
     final ios = _plugin.resolvePlatformSpecificImplementation<
         IOSFlutterLocalNotificationsPlugin>();
@@ -158,9 +174,12 @@ class Alarms {
       final granted = await android.requestNotificationsPermission() ?? false;
       _canBeExact = null; // the answer may have just changed
       // Exact alarms are their own permission on Android 13+. Without it a
-      // reminder set for 18:30 is delivered "around" 18:30, which for a
-      // medication reminder is not the same thing.
-      await android.requestExactAlarmsPermission();
+      // reminder set for 18:30 is delivered "around" 18:30 — late rather than
+      // never, since schedule() falls back to an inexact alarm — so it is worth
+      // asking for, but only when somebody has asked to be asked.
+      if (openSettingsForExactAlarms) {
+        await android.requestExactAlarmsPermission();
+      }
       return granted;
     }
     return false;
