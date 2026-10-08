@@ -42,15 +42,41 @@ bool isNewer(String candidate, String current) {
 /// Check once and, if a newer Android build is on offer, prompt to install it.
 /// Safe to call after sign-in from a context below MaterialApp; does nothing on
 /// iOS, when signed out, or on any error.
-Future<void> checkForUpdate(BuildContext context, Session session) async {
-  if (!Platform.isAndroid) return;        // iOS updates via the App Store only
+/// [announce] makes the outcome visible: "you are up to date", and the reason
+/// when the check itself fails.
+///
+/// IT DEFAULTS TO FALSE BECAUSE THE AUTOMATIC CHECK MUST STAY SILENT — a
+/// toast on every launch saying nothing has changed is noise people learn to
+/// swipe away. But silence is wrong for a check somebody asked for by tapping
+/// a button: a button that might have done nothing is indistinguishable from
+/// a broken one, and that is exactly how a published build sat uninstalled for
+/// four days with no way to find out why from the handset.
+Future<void> checkForUpdate(BuildContext context, Session session,
+    {bool announce = false}) async {
+  final messenger = announce ? ScaffoldMessenger.of(context) : null;
+  if (!Platform.isAndroid) {
+    // iOS updates via the App Store only.
+    messenger?.showSnackBar(const SnackBar(
+        content: Text('On iPhone and iPad, updates arrive through the App '
+            'Store or TestFlight.')));
+    return;
+  }
   if (!session.signedIn) return;
   try {
     final info = await PackageInfo.fromPlatform();
     final res = await session.api.get('/api/mobile/latest', {'platform': 'android'});
-    if (res is! Map || res['available'] != true) return;
+    if (res is! Map || res['available'] != true) {
+      messenger?.showSnackBar(const SnackBar(
+          content: Text('No newer build has been published yet.')));
+      return;
+    }
     final latest = '${res['version'] ?? ''}';
-    if (latest.isEmpty || !isNewer(latest, info.version)) return;
+    if (latest.isEmpty || !isNewer(latest, info.version)) {
+      messenger?.showSnackBar(SnackBar(
+          content: Text('You are on the newest build '
+              '(${info.version}).')));
+      return;
+    }
     if (!context.mounted) return;
 
     final notes = '${res['notes'] ?? ''}'.trim();
@@ -71,9 +97,13 @@ Future<void> checkForUpdate(BuildContext context, Session session) async {
     );
     if (go != true || !context.mounted) return;
     await _downloadAndInstall(context, session, '${res['url']}');
-  } catch (_) {
+  } catch (e) {
     // An update check must never break the app. Offline, no build, an old
-    // server — all simply mean "not now".
+    // server — all simply mean "not now", so the AUTOMATIC check stays silent.
+    // A check somebody asked for says what went wrong, because "I tapped it
+    // and nothing happened" is the report that cannot be acted on.
+    messenger?.showSnackBar(SnackBar(
+        content: Text('Could not check for updates: $e')));
   }
 }
 

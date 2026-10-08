@@ -30,6 +30,8 @@
 /// does not.
 library;
 
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:provider/provider.dart';
@@ -40,6 +42,7 @@ import 'background_screen.dart';
 import '../widgets/home_shortcuts_sheet.dart';
 import '../dates.dart';
 import '../session.dart';
+import '../update.dart';
 import '../theme.dart';
 import '../widgets/notification_settings.dart';
 import '../widgets/skin_picker.dart';
@@ -530,6 +533,26 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 label: 'Version',
                 value: _version.isEmpty ? '…' : _version,
               ),
+              // ASKABLE, not only automatic. The check ran in exactly one
+              // place — a post-frame callback in HomeScreen.initState — so it
+              // fired once per cold start and never again. Backgrounding the
+              // app and coming back does not rebuild Home, which means a build
+              // published while the app was open could not be discovered at
+              // all without force-stopping it, and nothing on screen said so.
+              // That is how 1.88.0 sat published and uninstalled for four days.
+              //
+              // It announces its outcome here, unlike the silent automatic
+              // check: a button that might have done nothing is
+              // indistinguishable from a broken one.
+              if (Platform.isAndroid)
+                SettingsRow(
+                  icon: Icons.system_update_outlined,
+                  tint: const Color(0xFF2E7D32),
+                  label: 'Check for updates',
+                  value: '',
+                  onTap: () => checkForUpdate(
+                      context, context.read<Session>(), announce: true),
+                ),
             ],
           ),
 
