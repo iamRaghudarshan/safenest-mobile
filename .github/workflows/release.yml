@@ -187,6 +187,13 @@ jobs:
       - run: flutter analyze
       - run: flutter test
 
+      # BEFORE the archive, where a macOS minute bills as ten — and before
+      # Apple, which accepts an upload missing a purpose string and only fails
+      # it later in processing. 1.88.0 went that way: "UPLOAD SUCCEEDED with no
+      # errors", nothing red anywhere, and the testers stayed on 1.86.0 for
+      # four days because the build never finished processing.
+      - run: dart run tool/check_purpose_strings.dart
+
       # Skipped rather than failed when the Apple secrets are absent, so the
       # Android half still ships for someone who has not bought the account yet.
       # A workflow that goes red for a thing you have decided not to do teaches

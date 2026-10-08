@@ -38,6 +38,20 @@
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Only if you record a video while adding a document. SafeNest never listens otherwise.</string>
 
+	<!-- APPLE SCANS THE LINKED BINARY, NOT THE CODE PATH. `speech_to_text`
+	     links the Speech framework, so this key is demanded whether or not
+	     anybody ever dictates anything — and WITHOUT IT THE UPLOAD SUCCEEDS
+	     AND THE BUILD THEN FAILS PROCESSING, so TestFlight simply never shows
+	     it. That is what happened to 1.88.0: "UPLOAD SUCCEEDED with no errors",
+	     delivery accepted, and four days later the testers were still on
+	     1.86.0 with nothing on screen to say why. 1.86.0 predates the
+	     dependency, which is why this is the first build it bit.
+
+	     Dictation is how a memory gets spoken rather than typed, so the
+	     recognition happens on request and the string says so. -->
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Only when you tap the microphone to speak a memory instead of typing it. SafeNest does not listen at any other time.</string>
+
 	<!-- Reaching your own computer on your own Wi-Fi. iOS 14 and later refuse to
 	     touch a local address until this is granted, and the refusal looks
 	     exactly like the computer being switched off — which is the wrong thing
