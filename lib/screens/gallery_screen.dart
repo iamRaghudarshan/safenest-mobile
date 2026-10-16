@@ -25,6 +25,7 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';   // HapticFeedback on selection
 // BoxHitTestResult and RenderMetaData, for finding which tile a drag is over.
@@ -120,7 +121,11 @@ class DayGroup {
 class GallerySelection extends ChangeNotifier {
   int _count = 0;
   int get count => _count;
-  bool get active => _count > 0;
+
+  /// -1 means the grid is selecting with nothing picked yet, which is still a
+  /// selection — the bar must appear, or the Select button would do nothing
+  /// visible at all.
+  bool get active => _count != 0;
 
   /// Filled in by the grid once it is mounted.
   VoidCallback? clear;
@@ -736,7 +741,35 @@ class _GalleryScreenState extends State<GalleryScreen>
   final Set<int> _selected = {};
   bool _busy = false;
 
-  bool get _selecting => _selected.isNotEmpty;
+  /// How long a finger must rest on a photo before it starts a selection.
+  ///
+  /// FOUR TIMES THE PLATFORM DEFAULT, at the owner's request: Flutter and
+  /// Android both use 500ms, and Google Photos takes that default. Two seconds
+  /// is deliberate here — the complaint was that a selection began before it
+  /// was meant to, and a grid people scroll fast is exactly where an eager
+  /// long-press turns a flick into an accidental pick.
+  ///
+  /// The cost, worth knowing before it is tuned again: the hold must be STILL
+  /// for the whole two seconds. Any real movement hands the gesture to the
+  /// scroll instead, so a longer wait is also a longer chance to fail. The
+  /// Select button beside the count exists partly so that is never the only
+  /// way in.
+  static const _holdToSelect = Duration(seconds: 2);
+
+  /// True once SELECT has been tapped, even before anything is picked.
+  ///
+  /// Selection used to be derived from the set alone, which meant it could
+  /// only ever begin by picking something — and the only way to pick a first
+  /// photo was a long-press nothing on screen mentioned. A mode that can be
+  /// empty is what lets a button start it.
+  bool _selectMode = false;
+
+  bool get _selecting => _selectMode || _selected.isNotEmpty;
+
+  void _startSelecting() {
+    HapticFeedback.selectionClick();
+    setState(() => _selectMode = true);
+  }
 
   void _toggle(Photo p) => setState(() {
         if (!_selected.remove(p.id)) _selected.add(p.id);
@@ -757,7 +790,13 @@ class _GalleryScreenState extends State<GalleryScreen>
         }
       });
 
-  void _clearSelection() => setState(_selected.clear);
+  void _clearSelection() => setState(() {
+        _selected.clear();
+        // AND LEAVE THE MODE. Without this, ✕ empties the grid of ticks and
+        // leaves the selection bar sitting there over nothing, with no way
+        // back to the ordinary screen.
+        _selectMode = false;
+      });
 
   /// Whether this drag is selecting or clearing.
   ///
@@ -1504,7 +1543,12 @@ class _GalleryScreenState extends State<GalleryScreen>
     // A post-frame callback sees the result of all of them, and report() is a
     // no-op when the number has not moved.
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) widget.selection?.report(_selected.length);
+      if (mounted) {
+        // -1 means "selecting, nothing picked yet", which the bar renders as
+        // "Select photos" rather than "0 selected".
+        widget.selection
+            ?.report(_selecting && _selected.isEmpty ? -1 : _selected.length);
+      }
     });
 
     final groups = _grouped;
@@ -1551,27 +1595,51 @@ class _GalleryScreenState extends State<GalleryScreen>
       // scroll through — a rail next to forty photos is clutter over a problem
       // nobody has.
       body: Stack(children: [
-        GestureDetector(
-        onLongPressStart: (d) => _dragSelectStart(d.globalPosition),
-        onLongPressMoveUpdate: (d) => _dragSelectMove(d.globalPosition),
-        onLongPressEnd: (_) {
-          _dragMode = null;
-          _stopAutoScroll();
+        // RawGestureDetector, NOT GestureDetector, for one reason: the hold
+        // that starts a selection is two seconds here and GestureDetector
+        // gives no way to say so — it hands you Flutter's 500ms and nothing
+        // else. Spelling the recognisers out is the only way to set it.
+        RawGestureDetector(
+        gestures: <Type, GestureRecognizerFactory>{
+          LongPressGestureRecognizer:
+              GestureRecognizerFactoryWithHandlers<LongPressGestureRecognizer>(
+            () => LongPressGestureRecognizer(duration: _holdToSelect),
+            // A BLOCK BODY, not a cascade off an arrow. `(r) => r ..a = (d) =>
+            // f(d) ..b = …` parses the second `..` as a cascade on f's result,
+            // which is void — the analyser catches it, but only after it has
+            // looked like a formatting choice.
+            (r) {
+              r.onLongPressStart = (d) => _dragSelectStart(d.globalPosition);
+              r.onLongPressMoveUpdate =
+                  (d) => _dragSelectMove(d.globalPosition);
+              r.onLongPressEnd = (_) {
+                _dragMode = null;
+                _stopAutoScroll();
+              };
+              r.onLongPressCancel = () {
+                _dragMode = null;
+                _stopAutoScroll();
+              };
+            },
+          ),
+          // PINCH TO CHANGE HOW MANY FIT ACROSS, the way every phone gallery
+          // does. Spreading two fingers makes the photos bigger, pinching them
+          // together fits more on screen — which is how you find one picture
+          // in four thousand without scrolling past all of them.
+          //
+          // Guarded on pointerCount >= 2: a single-finger drag is the scroll,
+          // and a scale recogniser that accepts one pointer eats it.
+          ScaleGestureRecognizer:
+              GestureRecognizerFactoryWithHandlers<ScaleGestureRecognizer>(
+            ScaleGestureRecognizer.new,
+            (r) {
+              r.onStart =
+                  (d) => _pinchFrom = d.pointerCount >= 2 ? _cols : null;
+              r.onUpdate = _pinch;
+              r.onEnd = (_) => _pinchFrom = null;
+            },
+          ),
         },
-        onLongPressCancel: () {
-          _dragMode = null;
-          _stopAutoScroll();
-        },
-        // PINCH TO CHANGE HOW MANY FIT ACROSS, the way every phone gallery
-        // does. Spreading two fingers makes the photos bigger, pinching them
-        // together fits more on screen — which is how you find one picture in
-        // four thousand without scrolling past all of them.
-        //
-        // Guarded on pointerCount >= 2: a single-finger drag is the scroll, and
-        // a scale recogniser that accepts one pointer eats it.
-        onScaleStart: (d) => _pinchFrom = d.pointerCount >= 2 ? _cols : null,
-        onScaleUpdate: _pinch,
-        onScaleEnd: (_) => _pinchFrom = null,
         child: RefreshIndicator(
         onRefresh: () => _load(reset: true),
         child: CustomScrollView(
@@ -1770,9 +1838,33 @@ class _GalleryScreenState extends State<GalleryScreen>
                 ),
               SliverToBoxAdapter(
                 child: Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-                  child: Text(_countLabel(),
-                      style: Theme.of(context).textTheme.bodySmall),
+                  padding: const EdgeInsets.fromLTRB(16, 0, 8, 8),
+                  child: Row(children: [
+                    Expanded(
+                      child: Text(_countLabel(),
+                          style: Theme.of(context).textTheme.bodySmall),
+                    ),
+                    // A WAY IN THAT IS NOT A GESTURE. Press-and-hold still
+                    // works and is still how most selections will start, but
+                    // nothing on screen said so — and a gesture nobody is told
+                    // about is a feature half the people never find.
+                    //
+                    // Here rather than in the app bar because that bar already
+                    // carries four icons, and on a 320-point phone a fifth
+                    // starts eating the title. This sits directly above the
+                    // photographs, beside the number it applies to.
+                    if (!_selecting && _photos.isNotEmpty)
+                      TextButton.icon(
+                        onPressed: _startSelecting,
+                        icon: const Icon(Icons.check_circle_outline, size: 18),
+                        label: const Text('Select'),
+                        style: TextButton.styleFrom(
+                          visualDensity: VisualDensity.compact,
+                          padding:
+                              const EdgeInsets.symmetric(horizontal: 12),
+                        ),
+                      ),
+                  ]),
                 ),
               ),
               // Each date section is its own SliverMainAxisGroup so its header

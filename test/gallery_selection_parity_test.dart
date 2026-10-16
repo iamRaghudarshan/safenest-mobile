@@ -53,6 +53,38 @@ void main() {
     });
   });
 
+  group('selecting with nothing picked yet', () {
+    test('-1 means "selecting, none chosen" and still counts as active', () {
+      // The Select button puts the grid into selection before anything is
+      // picked. If `active` were `count > 0` the bar would not appear, and
+      // tapping Select would do nothing visible at all.
+      final s = GallerySelection();
+      addTearDown(s.dispose);
+
+      s.report(-1);
+      expect(s.active, isTrue,
+          reason: 'the bar must show, or Select looks broken');
+      expect(s.count, -1);
+
+      s.report(2);
+      expect(s.active, isTrue);
+
+      s.report(0);
+      expect(s.active, isFalse, reason: 'zero is the way back out');
+    });
+
+    test('leaving and re-entering the mode notifies both times', () {
+      final s = GallerySelection();
+      addTearDown(s.dispose);
+      var n = 0;
+      s.addListener(() => n++);
+      s.report(-1);
+      s.report(0);
+      s.report(-1);
+      expect(n, 3);
+    });
+  });
+
   group('the bar that appears once photos are picked', () {
     Widget bar({bool busy = false, void Function(String)? tapped}) =>
         _wrap(Scaffold(

@@ -148,7 +148,12 @@ class _PhotosHomeState extends State<PhotosHome> {
               icon: const Icon(Icons.close),
               onPressed: _selection.clear,
             ),
-            title: Text('${_selection.count} selected'),
+            // -1 is "selecting, nothing picked yet". "0 selected" reads as a
+            // failure — as though a tap had missed — where naming the mode
+            // says what to do next.
+            title: Text(_selection.count < 0
+                ? 'Select photos'
+                : '${_selection.count} selected'),
             actions: [
               TextButton(
                 onPressed: _selection.selectAll,
