@@ -25,6 +25,7 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';   // HapticFeedback on selection
 // BoxHitTestResult and RenderMetaData, for finding which tile a drag is over.
 import 'package:flutter/rendering.dart';
@@ -107,18 +108,46 @@ class DayGroup {
   final List<Photo> photos;
 }
 
+/// What the grid is selecting, for whoever draws the app bar above it.
+///
+/// EMBEDDED, THE GRID DOES NOT OWN ITS APP BAR — PhotosHome does, and the
+/// selection lives down here. Without something to carry the count upwards the
+/// bar cannot become "3 selected ✕", which is most of what makes a selection
+/// feel like Google Photos: the ordinary title just sits there while you pick.
+///
+/// Deliberately a notifier rather than a callback per action: the parent needs
+/// to REBUILD when the count changes, not merely be told.
+class GallerySelection extends ChangeNotifier {
+  int _count = 0;
+  int get count => _count;
+  bool get active => _count > 0;
+
+  /// Filled in by the grid once it is mounted.
+  VoidCallback? clear;
+  VoidCallback? selectAll;
+
+  void report(int n) {
+    if (n == _count) return;
+    _count = n;
+    notifyListeners();
+  }
+}
+
 class GalleryScreen extends StatefulWidget {
-  const GalleryScreen({super.key, this.embedded = false});
+  const GalleryScreen({super.key, this.embedded = false, this.selection});
 
   /// Inside PhotosHome's tab view the section already has an AppBar and tabs, so
   /// the grid must not draw a second one on top of them.
   final bool embedded;
+
+  /// Set by PhotosHome so its app bar can show the count and clear it.
+  final GallerySelection? selection;
   @override
   State<GalleryScreen> createState() => _GalleryScreenState();
 }
 
 class _GalleryScreenState extends State<GalleryScreen>
-    with AutomaticKeepAliveClientMixin {
+    with AutomaticKeepAliveClientMixin, TickerProviderStateMixin {
   @override
   bool get wantKeepAlive => true;
 
@@ -779,8 +808,75 @@ class _GalleryScreenState extends State<GalleryScreen>
     });
   }
 
+  /// How close to an edge the finger must come before the grid starts moving,
+  /// and how fast it then goes.
+  ///
+  /// A BAND, NOT A LINE, and the speed ramps across it: a single threshold
+  /// gives one speed, which is either too slow to cross a month or too fast to
+  /// stop on the photo you wanted. Nearer the edge is faster, so the same
+  /// gesture does both.
+  static const _edgeBand = 90.0;
+  static const _fastest = 26.0; // logical px per 16ms tick, at the very edge
+
+  Ticker? _autoScroll;
+  double _autoScrollBy = 0;
+
+  /// Scroll while a selection drag rests near the top or bottom.
+  ///
+  /// Without this you can only ever select what is already on screen — to take
+  /// a fortnight you select a screenful, let go, scroll, and start again,
+  /// which loses the selection's run. The drag keeps extending as the grid
+  /// moves under it, which is the behaviour people have from Google Photos.
+  void _autoScrollFor(Offset at) {
+    final box = context.findRenderObject();
+    if (box is! RenderBox) return;
+    final h = box.size.height;
+    final top = at.dy - box.localToGlobal(Offset.zero).dy;
+
+    var by = 0.0;
+    if (top < _edgeBand) {
+      by = -_fastest * ((_edgeBand - top) / _edgeBand).clamp(0.0, 1.0);
+    } else if (top > h - _edgeBand) {
+      by = _fastest * ((top - (h - _edgeBand)) / _edgeBand).clamp(0.0, 1.0);
+    }
+    _autoScrollBy = by;
+
+    if (by == 0) {
+      _autoScroll?.dispose();
+      _autoScroll = null;
+      return;
+    }
+    if (_autoScroll != null) return;
+    _autoScroll = createTicker((_) {
+      if (!_scroll.hasClients || _dragMode == null) return;
+      final to = (_scroll.offset + _autoScrollBy)
+          .clamp(0.0, _scroll.position.maxScrollExtent);
+      if (to == _scroll.offset) return;
+      _scroll.jumpTo(to);
+      // The finger has not moved, but the grid under it has, so the tile now
+      // beneath it is a different one. Re-reading here is what makes the
+      // selection keep extending while the view slides.
+      final id = _photoIdAt(_lastDragAt);
+      if (id != null && _dragMode! != _selected.contains(id)) {
+        setState(() =>
+            _dragMode! ? _selected.add(id) : _selected.remove(id));
+      }
+    })
+      ..start();
+  }
+
+  void _stopAutoScroll() {
+    _autoScroll?.dispose();
+    _autoScroll = null;
+    _autoScrollBy = 0;
+  }
+
+  Offset _lastDragAt = Offset.zero;
+
   void _dragSelectMove(Offset at) {
     if (_dragMode == null) return;
+    _lastDragAt = at;
+    _autoScrollFor(at);
     final id = _photoIdAt(at);
     if (id == null) return;
     // Nothing to do if this tile is already in the state the drag is applying.
@@ -1035,11 +1131,23 @@ class _GalleryScreenState extends State<GalleryScreen>
     if (widget.embedded) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _loadStorage());
     }
+    // The bar that shows the count is PhotosHome's, so the buttons on it have
+    // to reach back down here.
+    widget.selection
+      ?..clear = _clearSelection
+      ..selectAll = _selectAllLoaded;
   }
 
   @override
   void dispose() {
+    widget.selection
+      ?..clear = null
+      ..selectAll = null;
     _debounce?.cancel();
+    // A Ticker outlives its State unless it is disposed, and this one holds a
+    // closure over the scroll controller — so leaving it running turns a
+    // leave-mid-drag into a crash on a disposed object.
+    _autoScroll?.dispose();
     _search.dispose();
     _scroll.dispose();
     super.dispose();
@@ -1388,8 +1496,28 @@ class _GalleryScreenState extends State<GalleryScreen>
   @override
   Widget build(BuildContext context) {
     super.build(context);   // required by AutomaticKeepAliveClientMixin
+
+    // REPORTED FROM HERE, not from each place that changes the set. There are
+    // eight of those — tap, day header, drag start, drag move, the auto-scroll
+    // tick, select-all, clear, and the clear after an action completes — and a
+    // count that is right in seven of them is a bar that lies in the eighth.
+    // A post-frame callback sees the result of all of them, and report() is a
+    // no-op when the number has not moved.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) widget.selection?.report(_selected.length);
+    });
+
     final groups = _grouped;
-    return Scaffold(
+    return PopScope(
+      // BACK CLEARS THE SELECTION FIRST. Without this, picking three photos
+      // and pressing back shuts the whole Gallery — selection and all — which
+      // is not what back means anywhere else, and is the easiest way to lose a
+      // careful selection by reflex.
+      canPop: !_selecting,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop && _selecting) _clearSelection();
+      },
+      child: Scaffold(
       // The action bar only exists while something is selected, and it sits at
       // the BOTTOM — on a phone the top of the screen is out of thumb reach,
       // and these are the actions you take repeatedly.
@@ -1426,8 +1554,14 @@ class _GalleryScreenState extends State<GalleryScreen>
         GestureDetector(
         onLongPressStart: (d) => _dragSelectStart(d.globalPosition),
         onLongPressMoveUpdate: (d) => _dragSelectMove(d.globalPosition),
-        onLongPressEnd: (_) => _dragMode = null,
-        onLongPressCancel: () => _dragMode = null,
+        onLongPressEnd: (_) {
+          _dragMode = null;
+          _stopAutoScroll();
+        },
+        onLongPressCancel: () {
+          _dragMode = null;
+          _stopAutoScroll();
+        },
         // PINCH TO CHANGE HOW MANY FIT ACROSS, the way every phone gallery
         // does. Spreading two fingers makes the photos bigger, pinching them
         // together fits more on screen — which is how you find one picture in
@@ -1745,6 +1879,7 @@ class _GalleryScreenState extends State<GalleryScreen>
       ),
         DateScrubber(controller: _scroll, labelAt: _dateAtFraction),
       ]),
+    ),
     );
   }
 }

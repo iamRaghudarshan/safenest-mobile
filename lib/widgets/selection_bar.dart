@@ -56,24 +56,10 @@ class SelectionBar extends StatelessWidget {
         ),
         padding: const EdgeInsets.fromLTRB(6, 4, 6, 4),
         child: Column(mainAxisSize: MainAxisSize.min, children: [
-          Row(children: [
-            IconButton(
-              tooltip: 'Cancel',
-              onPressed: busy ? null : onClear,
-              icon: const Icon(Icons.close),
-            ),
-            Expanded(
-              child: Text('$count selected',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                      fontSize: 15, fontWeight: FontWeight.w700)),
-            ),
-            TextButton(
-              onPressed: busy ? null : onSelectAll,
-              child: const Text('Select all'),
-            ),
-          ]),
+          // THE COUNT AND CANCEL LIVE IN THE APP BAR NOW, not here. Two places
+          // claiming the same thing is how they drift apart, and the top is
+          // where a selection announces itself everywhere else.
+          //
           // Indeterminate because the phone cannot know how long the server
           // takes over a selection — it is one request now, not one per
           // photo, but the answer still arrives when it arrives.
@@ -85,21 +71,26 @@ class SelectionBar extends StatelessWidget {
                 onTap: busy ? null : onShare),
             _Action(
                 icon: Icons.photo_album_outlined,
-                label: 'Album',
+                label: 'Add to album',
                 onTap: busy ? null : onAlbum),
-            _Action(
-                icon: Icons.star_outline,
-                label: 'Star',
-                onTap: busy ? null : onFavourite),
-            _Action(
-                icon: Icons.archive_outlined,
-                label: 'Archive',
-                onTap: busy ? null : onArchive),
             _Action(
                 icon: Icons.delete_outline,
                 label: 'Delete',
                 tint: kDanger,
                 onTap: busy ? null : onDelete),
+            // STAR AND ARCHIVE MOVED BEHIND THIS, which is the one real cost
+            // of matching Google Photos: both are a tap further away. Archive
+            // in particular is worth keeping findable — it sits directly above
+            // Delete in the menu, because that is the choice actually being
+            // made. Archive is "stop showing me this"; delete is "get rid of
+            // it", and offering only delete is what makes people delete things
+            // they wanted to keep.
+            _Overflow(
+              busy: busy,
+              onFavourite: onFavourite,
+              onArchive: onArchive,
+              onSelectAll: onSelectAll,
+            ),
           ]),
         ]),
       ),
@@ -247,6 +238,71 @@ class _AlbumPickerState extends State<AlbumPicker> {
           ],
         ],
       ]),
+    );
+  }
+}
+
+
+/// Star, Archive and Select all, one tap in.
+class _Overflow extends StatelessWidget {
+  const _Overflow({
+    required this.busy,
+    required this.onFavourite,
+    required this.onArchive,
+    required this.onSelectAll,
+  });
+
+  final bool busy;
+  final VoidCallback onFavourite;
+  final VoidCallback onArchive;
+  final VoidCallback onSelectAll;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = Theme.of(context).colorScheme.onSurface
+        .withValues(alpha: busy ? 0.4 : 1);
+    return Expanded(
+      child: PopupMenuButton<String>(
+        enabled: !busy,
+        tooltip: 'More',
+        position: PopupMenuPosition.over,
+        onSelected: (v) {
+          if (v == 'star') onFavourite();
+          if (v == 'archive') onArchive();
+          if (v == 'all') onSelectAll();
+        },
+        itemBuilder: (_) => const [
+          PopupMenuItem(
+              value: 'star',
+              child: ListTile(
+                  dense: true,
+                  leading: Icon(Icons.star_outline),
+                  title: Text('Star'))),
+          PopupMenuItem(
+              value: 'archive',
+              child: ListTile(
+                  dense: true,
+                  leading: Icon(Icons.archive_outlined),
+                  title: Text('Archive'))),
+          PopupMenuDivider(),
+          PopupMenuItem(
+              value: 'all',
+              child: ListTile(
+                  dense: true,
+                  leading: Icon(Icons.select_all),
+                  title: Text('Select all'))),
+        ],
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Icon(Icons.more_horiz, size: 21, color: c),
+            const SizedBox(height: 3),
+            Text('More',
+                style: TextStyle(
+                    fontSize: 11, fontWeight: FontWeight.w600, color: c)),
+          ]),
+        ),
+      ),
     );
   }
 }

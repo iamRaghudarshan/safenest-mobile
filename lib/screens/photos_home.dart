@@ -53,6 +53,12 @@ class _PhotosHomeState extends State<PhotosHome> {
   /// just backed up new photos.
   final _collections = GlobalKey<CollectionsHomeState>();
 
+  /// What the photo grid has selected. The grid owns the selection; this bar
+  /// owns the title — so the count has to travel up for the bar to become
+  /// "3 selected", which is the half of Google Photos' selection that was
+  /// missing.
+  final _selection = GallerySelection();
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
@@ -63,6 +69,7 @@ class _PhotosHomeState extends State<PhotosHome> {
 
   @override
   void dispose() {
+    _selection.dispose();
     _backup?.stop();
     _backup?.dispose();
     super.dispose();
@@ -75,10 +82,12 @@ class _PhotosHomeState extends State<PhotosHome> {
         MaterialPageRoute(builder: (_) => BackupScreen(service: s)));
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
+
+  /// The Gallery's usual bar, shown whenever nothing is selected.
+  ///
+  /// Built once and passed to ListenableBuilder as its `child`, so picking a
+  /// fourth photo rebuilds the count and not these four buttons.
+  AppBar _ordinaryBar(BuildContext context) => AppBar(
         title: const Text('Gallery'),
         actions: [
           // Search by people, up front — a person is the thing people most often
@@ -115,6 +124,41 @@ class _PhotosHomeState extends State<PhotosHome> {
                 MaterialPageRoute(builder: (_) => const TrashScreen())),
           ),
         ],
+      );
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      // PreferredSize, because an AppBar slot needs a height before its child
+      // is built and ListenableBuilder cannot promise one. Both bars are
+      // toolbars, so the standard height is the honest answer.
+      appBar: PreferredSize(
+        preferredSize: const Size.fromHeight(kToolbarHeight),
+        child: ListenableBuilder(
+        listenable: _selection,
+        builder: (context, ordinary) {
+          // ONLY ON THE PHOTOS TAB. The selection belongs to the grid, and the
+          // grid is kept alive in the IndexedStack — so without this check,
+          // switching to Collections mid-selection leaves a "3 selected" bar
+          // over a screen with nothing selected on it.
+          if (!_selection.active || _tab != 0) return ordinary!;
+          return AppBar(
+            leading: IconButton(
+              tooltip: 'Leave selection',
+              icon: const Icon(Icons.close),
+              onPressed: _selection.clear,
+            ),
+            title: Text('${_selection.count} selected'),
+            actions: [
+              TextButton(
+                onPressed: _selection.selectAll,
+                child: const Text('All'),
+              ),
+            ],
+          );
+        },
+        child: _ordinaryBar(context),
+      ),
       ),
       body: Column(children: [
         // Where the photos are, which is where somebody notices that new
@@ -163,7 +207,7 @@ class _PhotosHomeState extends State<PhotosHome> {
           child: IndexedStack(
             index: _tab,
             children: [
-              const GalleryScreen(embedded: true),
+              GalleryScreen(embedded: true, selection: _selection),
               CollectionsHome(key: _collections),
             ],
           ),

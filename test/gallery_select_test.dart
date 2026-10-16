@@ -122,16 +122,28 @@ void main() {
       await tester.pump();
 
       expect(tester.takeException(), isNull);
-      // Counting ticks across a grid of thumbnails is not checkable at a
-      // glance; a number is.
-      expect(find.text('12 selected'), findsOneWidget);
-      expect(find.text('Album'), findsOneWidget);
-      expect(find.text('Star'), findsOneWidget);
-      // Archive sits beside Delete because that is the choice actually being
-      // made. Without it on screen the only way out of a crowded timeline is
-      // deleting photographs somebody wanted to keep.
-      expect(find.text('Archive'), findsOneWidget);
+      // THE COUNT LEFT THIS BAR. It is the app bar's now — see
+      // photos_home.dart — because a selection announces itself at the top
+      // everywhere else, and two places claiming the same number drift apart.
+      expect(find.text('12 selected'), findsNothing);
+
+      // The three Google Photos keeps on the bar.
+      expect(find.text('Share'), findsOneWidget);
+      expect(find.text('Add to album'), findsOneWidget);
       expect(find.text('Delete'), findsOneWidget);
+
+      // Star, Archive and Select all moved behind More — present, one tap in.
+      expect(find.text('Star'), findsNothing);
+      expect(find.text('Archive'), findsNothing);
+      expect(find.text('More'), findsOneWidget);
+
+      await tester.tap(find.text('More'));
+      await tester.pumpAndSettle();
+      expect(find.text('Star'), findsOneWidget);
+      // Archive sits directly above Delete's place in the menu because that is
+      // the choice actually being made. Losing it entirely would leave
+      // deleting photographs as the only way out of a crowded timeline.
+      expect(find.text('Archive'), findsOneWidget);
       expect(find.text('Select all'), findsOneWidget);
     });
 
@@ -156,12 +168,18 @@ void main() {
       )));
       await tester.pump();
 
-      await tester.tap(find.text('Album'));
+      await tester.tap(find.text('Add to album'));
       await tester.tap(find.text('Delete'));
       await tester.pump();
       // Deleting the same twelve photos twice because the first tap looked
       // like it did nothing is exactly the mistake to design out.
       expect(taps, 0);
+      // And the overflow cannot be opened to reach the actions the other way.
+      // pump, not pumpAndSettle: the busy progress bar animates forever, so
+      // settling never returns.
+      await tester.tap(find.text('More'));
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(find.text('Archive'), findsNothing);
       expect(find.byType(LinearProgressIndicator), findsOneWidget);
     });
 
@@ -185,8 +203,11 @@ void main() {
         ),
       )));
       await tester.pump();
+      // Four labels across 375 points is the tightest this bar ever gets; the
+      // count that used to crowd it is in the app bar now.
       expect(tester.takeException(), isNull);
-      expect(find.text('20431 selected'), findsOneWidget);
+      expect(find.text('Add to album'), findsOneWidget);
+      expect(find.text('More'), findsOneWidget);
     });
   });
 
