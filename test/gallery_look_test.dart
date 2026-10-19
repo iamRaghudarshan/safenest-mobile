@@ -300,21 +300,22 @@ void main() {
         theme: buildTheme(const Brand(), Brightness.light),
         home: ModulesScreen(
           onOpen: (_) {},
-          // Documents and Vault have a number; Notes does not.
-          debugTotals: const {'documents': 8, 'vault': 0},
+          // The first row, which is now Photos & videos, Drive and Expenses:
+          // the first two carry a number and Expenses does not.
+          debugTotals: const {'gallery': 24, 'documents': 8},
         ),
       ));
       await tester.pump();
 
       final tops = <String, double>{};
-      for (final label in ['Documents', 'Vault', 'Notes']) {
+      for (final label in ['Photos & videos', 'Drive', 'Expenses']) {
         final f = find.text(label);
         expect(f, findsOneWidget, reason: '$label should be on the grid');
         tops[label] = tester.getTopLeft(f).dy;
       }
-      expect(tops['Notes'], closeTo(tops['Documents']!, 0.5),
+      expect(tops['Expenses'], closeTo(tops['Drive']!, 0.5),
           reason: 'a tile with no count must not sit lower than its row');
-      expect(tops['Vault'], closeTo(tops['Documents']!, 0.5));
+      expect(tops['Photos & videos'], closeTo(tops['Drive']!, 0.5));
     });
 
     testWidgets('the rows are packed, not spread', (tester) async {

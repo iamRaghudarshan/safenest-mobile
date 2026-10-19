@@ -108,7 +108,7 @@ class _ActivityScreenState extends State<ActivityScreen> {
     'gallery': 'Photos',
     'album': 'Photos',
     'person': 'Photos',
-    'document': 'Documents',
+    'document': 'Drive',
     'vault': 'Vault',
     'card': 'Cards',
     'loan': 'Loans',

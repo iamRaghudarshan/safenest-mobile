@@ -283,6 +283,52 @@ ModuleSpec? moduleByKey(String key) {
   return null;
 }
 
+/// What a module is CALLED, which is not what it is keyed by.
+///
+/// The key is in `user_modules` on the server, in the storage path under
+/// PRIVATE_ROOT, and in the API route that `guard()` protects — 'documents'
+/// appears over forty times in this app alone. So the key never changes and
+/// the name is free, which is the only reason renaming two modules is a
+/// morning's work rather than a migration.
+///
+/// ONE PLACE, because the names were in eight: the Modules grid, the
+/// navigation bar, Collections, the Documents screen's three titles, the
+/// gallery's album picker and vivid Home. Eight copies of a word is eight
+/// chances for a rename to be seven-eighths done.
+String moduleName(String key) => switch (key) {
+      // Drive, not Documents. It holds folders, versions and a trash, which is
+      // what people already understand by the word.
+      'documents' => 'Drive',
+      // The full name where there is room to say it.
+      'gallery' => 'Photos & videos',
+      _ => _specName(key),
+    };
+
+/// The same module in a space too tight for the full name — a navigation tab
+/// beside five one-word labels, or a chip.
+///
+/// Only differs where the full name is long. "Photos" rather than "Photos &
+/// videos": one word, it fits, and it is what Google Photos calls itself while
+/// holding both.
+String moduleShortName(String key) => switch (key) {
+      'gallery' => 'Photos',
+      _ => moduleName(key),
+    };
+
+String _specName(String key) {
+  for (final m in kModules) {
+    if (m.key == key) return m.label;
+  }
+  return prettyChoice(key);
+}
+
+/// The two the app is really for, in the order they should lead.
+///
+/// Photographs and files are what somebody opens SafeNest to find; the rest is
+/// the bonus. They sort first in the Modules grid and are the first shortcuts
+/// on Home.
+const kMainModules = ['gallery', 'documents'];
+
 /// EVERY module key the app can show — not just the record ones.
 ///
 /// `kModules` is the seven modules that share the generic list-and-sheet.

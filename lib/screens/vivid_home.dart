@@ -20,6 +20,7 @@ import 'package:provider/provider.dart';
 
 import '../backup.dart';
 import '../session.dart';
+import '../modules.dart';
 import '../theme.dart';
 import '../widgets/library_growth.dart';
 import '../widgets/memory_hero.dart';
@@ -870,8 +871,8 @@ class _FilesCard extends StatelessWidget {
                 child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text('Documents',
-                          style: TextStyle(
+                      Text(moduleName('documents'),
+                          style: const TextStyle(
                               fontSize: 14,
                               fontWeight: FontWeight.w700,
                               color: Colors.white)),

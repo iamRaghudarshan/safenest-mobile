@@ -29,13 +29,13 @@ List<({String key, String label, IconData icon, Color colour})> shortcutChoices(
   final out = <({String key, String label, IconData icon, Color colour})>[
     (
       key: 'gallery',
-      label: 'Photo',
+      label: moduleShortName('gallery'),
       icon: Icons.photo_camera,
       colour: kModuleColours['gallery'] ?? Colors.blueGrey
     ),
     (
       key: 'documents',
-      label: 'Files',
+      label: moduleName('documents'),
       icon: Icons.folder,
       colour: kModuleColours['documents'] ?? Colors.teal
     ),
@@ -88,7 +88,10 @@ List<({String key, String label, IconData icon, Color colour})> shortcutChoices(
 String _short(String label) => switch (label) {
       'Expenses' => 'Expense',
       'Reminders' => 'Reminder',
-      'Documents' => 'Files',
+      // 'Drive' needs no shortening — it was 'Documents' => 'Files' before
+      // the rename, and a second name for the same thing is how a product
+      // ends up called three things on three screens.
+
       'To-dos' => 'To-do',
       _ => label,
     };

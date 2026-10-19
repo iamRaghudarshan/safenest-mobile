@@ -20,6 +20,7 @@ import 'package:provider/provider.dart';
 
 import '../backup.dart';
 import '../offline/store.dart';
+import '../modules.dart';
 import '../session.dart';
 import '../theme.dart';
 import '../widgets/backup_blocked_banner.dart';
@@ -88,7 +89,7 @@ class _PhotosHomeState extends State<PhotosHome> {
   /// Built once and passed to ListenableBuilder as its `child`, so picking a
   /// fourth photo rebuilds the count and not these four buttons.
   AppBar _ordinaryBar(BuildContext context) => AppBar(
-        title: const Text('Gallery'),
+        title: Text(moduleName('gallery')),
         actions: [
           // Search by people, up front — a person is the thing people most often
           // look for in a gallery, and it used to be buried under Collections.

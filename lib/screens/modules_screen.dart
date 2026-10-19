@@ -115,17 +115,17 @@ class _ModulesScreenState extends State<ModulesScreen> {
         ),
         (
           key: 'gallery',
-          label: 'Gallery',
+          label: moduleName('gallery'),
           icon: Icons.photo_library_outlined,
           colour: kModuleColours['gallery']!,
-          blurb: 'Your photos, backed up here'
+          blurb: 'Every photo and video, backed up here'
         ),
         (
           key: 'documents',
-          label: 'Documents',
+          label: moduleName('documents'),
           icon: Icons.folder_outlined,
           colour: kModuleColours['documents']!,
-          blurb: 'Bills, IDs and paperwork'
+          blurb: 'Your files — bills, IDs and paperwork'
         ),
         (
           key: 'vault',
@@ -161,7 +161,15 @@ class _ModulesScreenState extends State<ModulesScreen> {
   List<_Mod> _tiles() {
     final allowed = widget.allowed;
     final byKey = {for (final m in _all) m.key: m};
-    final natural = _all.map((m) => m.key).toList();
+    // THE TWO MAIN ONES LEAD, unless the person has arranged the grid
+    // themselves — then their order wins, every time. This only changes where
+    // the tiles START: photographs and files are what SafeNest is for, and
+    // they were sitting eighth and ninth behind seven record modules.
+    final rest = _all.map((m) => m.key).where((k) => !kMainModules.contains(k));
+    final natural = [
+      for (final k in kMainModules) if (byKey.containsKey(k)) k,
+      ...rest,
+    ];
     final ordered = Customize.apply(Customize.moduleOrder, natural);
     return [
       for (final k in ordered)

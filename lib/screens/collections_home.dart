@@ -21,6 +21,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../api.dart';
+import '../modules.dart';
 import '../session.dart';
 import '../widgets/face_circle.dart';
 import 'suggestions_strip.dart';
@@ -542,7 +543,7 @@ class CollectionsHomeState extends State<CollectionsHome> {
       _Tile(
         icon: Icons.description_outlined,
         colour: const Color(0xFF0EA5E9),
-        title: 'Documents',
+        title: moduleName('documents'),
         count: _documents,
         unit: _documents == 1 ? 'document' : 'documents',
         emptyNote: 'Scan or upload one',

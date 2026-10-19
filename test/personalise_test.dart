@@ -109,8 +109,10 @@ void main() {
       // expense — and one word is all the width there is.
       final byKey = {for (final c in shortcutChoices()) c.key: c.label};
       expect(byKey['expenses'], 'Expense');
-      expect(byKey['gallery'], 'Photo');
-      expect(byKey['documents'], 'Files');
+      // Renamed: Gallery -> Photos, Documents -> Drive. Both still one word,
+      // which is the rule this test actually guards.
+      expect(byKey['gallery'], 'Photos');
+      expect(byKey['documents'], 'Drive');
       for (final label in byKey.values) {
         expect(label.contains(' '), isFalse, reason: '"$label" is two words');
       }

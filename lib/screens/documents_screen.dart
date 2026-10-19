@@ -37,6 +37,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../api.dart';
 import '../dates.dart';
+import '../modules.dart';
 import '../session.dart';
 import '../widgets/file_kinds.dart';
 import '../sharing.dart';
@@ -1025,7 +1026,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Documents'),
+        title: Text(moduleName('documents')),
         actions: [
           IconButton(
             tooltip: 'Recent',
@@ -1210,7 +1211,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
   static const _fileTypes = <(String, String)>[
     ('pdf', 'PDFs'),
     ('image', 'Images'),
-    ('doc', 'Documents'),
+    ('doc', 'Drive'),
     ('sheet', 'Spreadsheets'),
     ('slides', 'Slides'),
     ('archive', 'Archives'),
@@ -1376,7 +1377,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
         children: [
           TextButton(
             onPressed: _folder == 0 ? null : () => _openFolder(0),
-            child: const Text('Documents'),
+            child: Text(moduleName('documents')),
           ),
           for (final c in _path) ...[
             const Icon(Icons.chevron_right, size: 16),

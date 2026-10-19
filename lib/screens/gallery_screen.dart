@@ -34,6 +34,7 @@ import 'package:provider/provider.dart';
 
 import '../api.dart';
 import '../dates.dart';
+import '../modules.dart';
 import '../session.dart';
 import '../theme.dart';
 import '../widgets/face_circle.dart';
@@ -1288,7 +1289,7 @@ class _GalleryScreenState extends State<GalleryScreen>
       ),
       BackedUp(
         key: 'documents',
-        label: 'Documents',
+        label: moduleName('documents'),
         icon: Icons.folder_outlined,
         colour: kModuleColours['documents']!,
         count: n('documents'),

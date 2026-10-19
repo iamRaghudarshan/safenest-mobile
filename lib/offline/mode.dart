@@ -85,7 +85,7 @@ const offlineModules = <OfflineNote>[
   // the next sync. OPENING a document you saved earlier still needs the
   // computer, because those files are fetched when you tap them; holding the
   // whole library here is a different and much larger thing.
-  OfflineNote('documents', 'Documents',
+  OfflineNote('documents', 'Drive',
       'You can scan without your computer — the pages wait here and go on the '
           'next sync. Opening documents you saved earlier still needs it.'),
 ];

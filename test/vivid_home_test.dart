@@ -84,7 +84,7 @@ void main() {
     // screen; a change that puts a count back on top has changed what the app
     // says it is.
     final memoryY = tester.getTopLeft(find.text('142 photos').first).dy;
-    for (final later in ['Photos', 'People', 'Places & days', 'Documents']) {
+    for (final later in ['Photos', 'People', 'Places & days', 'Drive']) {
       expect(tester.getTopLeft(find.text(later).first).dy,
           greaterThan(memoryY),
           reason: '"$later" must come after the photograph');

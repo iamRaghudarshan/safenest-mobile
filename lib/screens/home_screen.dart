@@ -78,7 +78,10 @@ const _allTabs = <_Tab>[
       Icons.account_balance_wallet, Color(0xFFF59E0B), 'expenses'),
   _Tab('reminders', 'Reminders', Icons.notifications_outlined,
       Icons.notifications, Color(0xFF8B5CF6), 'reminders'),
-  _Tab('gallery', 'Gallery', Icons.photo_library_outlined, Icons.photo_library,
+  // The tab labels are the SHORT names: five one-word neighbours, and
+  // "Photos & videos" would wrap or ellipsise on a narrow phone. The full name
+  // is on the tile and the screen, where there is room for it.
+  _Tab('gallery', 'Photos', Icons.photo_library_outlined, Icons.photo_library,
       Color(0xFFF43F5E), 'gallery'),
   _Tab('profile', 'Profile', Icons.person_outline, Icons.person,
       Color(0xFF10B981)),
@@ -89,7 +92,7 @@ const _allTabs = <_Tab>[
       Color(0xFF6B3C8C), 'memory'),
   _Tab('track', 'Track', Icons.timeline_outlined, Icons.timeline,
       Color(0xFF1B6B50), 'track'),
-  _Tab('documents', 'Documents', Icons.folder_outlined, Icons.folder,
+  _Tab('documents', 'Drive', Icons.folder_outlined, Icons.folder,
       Color(0xFF0D9488), 'documents'),
   _Tab('habits', 'Habits', Icons.local_fire_department_outlined,
       Icons.local_fire_department, Color(0xFFF97316), 'habits'),

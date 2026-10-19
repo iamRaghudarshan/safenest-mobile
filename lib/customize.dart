@@ -72,8 +72,26 @@ class Customize {
   static const shortcutsMin = 3;
   static const shortcutsMax = 6;
 
-  /// What Home has always shown, and what it falls back to.
-  static const defaultShortcuts = ['expenses', 'reminders', 'gallery', 'documents'];
+  /// What Home shows before anybody customises it.
+  ///
+  /// PHOTOS AND DRIVE LEAD, because they are what SafeNest is for: somebody
+  /// opens it to find a photograph or a file, and the rest is the bonus. They
+  /// used to sit third and fourth behind Expenses and Reminders, which put the
+  /// two headline features below the fold of attention on the first screen
+  /// anybody sees.
+  ///
+  /// Six, not four — the most the row holds (see shortcutsMax; above six a
+  /// 390pt screen has no width left for the labels). "All of them" is fourteen
+  /// and will not fit, so this is as near to it as the row allows, and every
+  /// one of the fourteen is still offered in Customize.
+  static const defaultShortcuts = [
+    'gallery',
+    'documents',
+    'expenses',
+    'reminders',
+    'notes',
+    'vault',
+  ];
 
   /// THE TWO LOOKS.
   ///

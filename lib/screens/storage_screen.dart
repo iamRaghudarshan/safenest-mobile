@@ -35,7 +35,7 @@ String formatBytes(num b) {
 
 const _moduleLabels = <String, String>{
   'gallery': 'Photos',
-  'documents': 'Documents',
+  'documents': 'Drive',
   'avatars': 'Profile pictures',
 };
 
