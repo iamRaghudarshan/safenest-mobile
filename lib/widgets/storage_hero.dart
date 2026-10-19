@@ -117,15 +117,25 @@ class StorageHero extends StatelessWidget {
                       const Icon(Icons.cloud_done_outlined,
                           size: 15, color: Colors.white70),
                       const SizedBox(width: 7),
-                      Text(
+                      // FLEXIBLE: this caption is letter-spaced upper case,
+                      // and "LAST SEEN ON YOUR COMPUTER" at a 2x text scale is
+                      // wider than the panel. It overflowed by 29 points and
+                      // striped the panel yellow — invisible until this screen
+                      // became the one the app opens on, which is what finally
+                      // put it in front of the shell test's large-text pass.
+                      Flexible(
+                        child: Text(
                         unreachable
                             ? 'LAST SEEN ON YOUR COMPUTER'
                             : 'ON YOUR COMPUTER',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
                             fontSize: 10,
                             fontWeight: FontWeight.w800,
                             letterSpacing: 0.8,
                             color: Colors.white70),
+                      ),
                       ),
                     ]),
                     const SizedBox(height: 7),

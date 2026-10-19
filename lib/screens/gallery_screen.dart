@@ -1854,15 +1854,25 @@ class _GalleryScreenState extends State<GalleryScreen>
                     // carries four icons, and on a 320-point phone a fifth
                     // starts eating the title. This sits directly above the
                     // photographs, beside the number it applies to.
+                    //
+                    // FLEXIBLE, AND THE LABEL ELLIPSISES. At a 2x text scale
+                    // the icon and the word together outgrew what was left of
+                    // the row and striped it yellow — found by the shell test
+                    // that pumps the whole app at that scale, only once this
+                    // screen became the one the app opens on and the test
+                    // started rendering it at all.
                     if (!_selecting && _photos.isNotEmpty)
-                      TextButton.icon(
-                        onPressed: _startSelecting,
-                        icon: const Icon(Icons.check_circle_outline, size: 18),
-                        label: const Text('Select'),
-                        style: TextButton.styleFrom(
-                          visualDensity: VisualDensity.compact,
-                          padding:
-                              const EdgeInsets.symmetric(horizontal: 12),
+                      Flexible(
+                        child: TextButton.icon(
+                          onPressed: _startSelecting,
+                          icon: const Icon(Icons.check_circle_outline, size: 18),
+                          label: const Text('Select',
+                              maxLines: 1, overflow: TextOverflow.ellipsis),
+                          style: TextButton.styleFrom(
+                            visualDensity: VisualDensity.compact,
+                            padding:
+                                const EdgeInsets.symmetric(horizontal: 12),
+                          ),
                         ),
                       ),
                   ]),

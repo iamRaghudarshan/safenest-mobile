@@ -143,6 +143,19 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   int _index = 0;
+
+  /// Whether the opening tab has been chosen yet.
+  ///
+  /// THE APP OPENS ON PHOTOS, not on Home. Photographs and files are what
+  /// somebody opens SafeNest to find, and landing on a dashboard means the
+  /// first thing they do every time is tap past it.
+  ///
+  /// Decided on the first build that has tabs rather than in initState,
+  /// because the bar depends on `_allowed`, which is a round trip away — at
+  /// initState there is no list to find Photos in. Once only: after that the
+  /// index is the person's, and re-applying it would drag them back to Photos
+  /// every time permissions reloaded.
+  bool _landed = false;
   // Bumped when a pushed module returns, so the Home and Modules count tiles
   // re-read the dashboard instead of showing a number that is now stale.
   int _refreshTick = 0;
@@ -359,6 +372,13 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     final tabs = _visible;
+    if (!_landed && tabs.isNotEmpty) {
+      _landed = true;
+      final photos = tabs.indexWhere((t) => t.key == 'gallery');
+      // Falls back to whatever is first when Photos is not on this person's
+      // bar — removed from it, or not permitted.
+      if (photos >= 0) _index = photos;
+    }
     final index = _index.clamp(0, tabs.length - 1);
 
     return Scaffold(

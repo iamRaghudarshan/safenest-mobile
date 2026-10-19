@@ -53,6 +53,13 @@ void main() {
   });
 
   group('which modules lead', () {
+    test('Photos is on the default bar, so the app can open on it', () {
+      // HomeScreen lands on the gallery tab when it finds one. If it is not on
+      // the default bar there is nothing to land on, and the app quietly opens
+      // on Home again — which is the whole thing this was meant to stop.
+      expect(kMainModules.first, 'gallery');
+    });
+
     test('photographs and files are the two', () {
       expect(kMainModules, ['gallery', 'documents']);
     });
