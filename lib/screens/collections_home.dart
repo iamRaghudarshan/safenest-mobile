@@ -22,6 +22,9 @@ import 'package:provider/provider.dart';
 
 import '../api.dart';
 import '../modules.dart';
+import '../widgets/storage_hero.dart';
+import '../widgets/backed_up_grid.dart';
+import 'storage_screen.dart';
 import '../session.dart';
 import '../widgets/face_circle.dart';
 import 'suggestions_strip.dart';
@@ -58,10 +61,157 @@ class CollectionsHomeState extends State<CollectionsHome> {
   int _videos = 0;
   int _archived = 0;
 
+  // ── WHAT IS ON THE COMPUTER ──────────────────────────────────────────
+  //
+  // Moved here from the Photos tab on 19 October. That tab is the page the
+  // app opens on, and Google Photos opens on photographs — not on a figure
+  // about a disk. A library's counts belong with the library, which is this
+  // screen, and it is one tap away.
+  /// Asked for once per visit: the figure is a header, not a live reading,
+  /// and re-fetching it on every rebuild would be a request per frame.
+  bool _storageAsked = false;
+
+  int _usedBytes = 0;
+  int _freeBytes = 0;
+  bool _storageLoading = true;
+
+  /// True when the figures on screen are the last ones we were told rather than
+  /// current. Said out loud in the panel: a storage number that is quietly
+  /// three days old is worse than one that admits it.
+  bool _storageStale = false;
+
+  Map<String, dynamic> _counts = const {};
+
+  String get _heroCaption {
+    if (_counts.isEmpty) return '';
+    final bits = <String>[];
+    for (final (key, one, many) in const [
+      ('photos', 'photo', 'photos'),
+      ('videos', 'video', 'videos'),
+      ('documents', 'document', 'documents'),
+    ]) {
+      final n = (_counts[key] as num?)?.toInt() ?? 0;
+      if (n > 0) bits.add('$n ${n == 1 ? one : many}');
+    }
+    return bits.join(' · ');
+  }
+
+  /// Everything SafeNest is holding, as tiles.
+  ///
+  /// Every one of them goes somewhere. A tile that is decoration on a screen
+  /// full of tappable things is a tile people tap twice and then stop trusting.
+  List<BackedUp> _backedUp(BuildContext context) {
+    int? n(String key) =>
+        _storageLoading ? null : ((_counts[key] as num?)?.toInt() ?? 0);
+    void open(Widget page) => Navigator.of(context)
+        .push(MaterialPageRoute(builder: (_) => page));
+
+    return [
+      BackedUp(
+        key: 'photos',
+        label: 'Photos',
+        icon: Icons.photo_library_outlined,
+        colour: kModuleColours['gallery']!,
+        count: n('photos'),
+        // Opens the filtered grid rather than flipping a filter on a screen
+        // that is no longer this one: these tiles used to live ON the photo
+        // grid, where setting _mediaKind was the whole job.
+        onTap: () => open(const CollectionScreen(
+            title: 'Photos', path: '/api/gallery?kind=photos')),
+      ),
+      BackedUp(
+        key: 'videos',
+        label: 'Videos',
+        icon: Icons.videocam_outlined,
+        colour: const Color(0xFFEF4444),
+        count: n('videos'),
+        onTap: () => open(const CollectionScreen(
+            title: 'Videos', path: '/api/gallery?kind=videos')),
+      ),
+      BackedUp(
+        key: 'documents',
+        label: moduleName('documents'),
+        icon: Icons.folder_outlined,
+        colour: kModuleColours['documents']!,
+        count: n('documents'),
+        onTap: () => open(const DocumentsScreen()),
+      ),
+      BackedUp(
+        key: 'people',
+        label: 'People',
+        icon: Icons.people_alt_outlined,
+        colour: const Color(0xFFD97706),
+        count: n('people'),
+        onTap: () => open(Scaffold(
+          appBar: AppBar(title: const Text('People')),
+          body: const PeopleTab(),
+        )),
+      ),
+      BackedUp(
+        key: 'places',
+        label: 'Places',
+        icon: Icons.place_outlined,
+        colour: const Color(0xFF0D9488),
+        count: n('places'),
+        onTap: () => open(const PlacesScreen()),
+      ),
+      BackedUp(
+        key: 'albums',
+        label: 'Albums',
+        icon: Icons.photo_album_outlined,
+        colour: const Color(0xFF7C3AED),
+        count: n('albums'),
+        onTap: () => open(Scaffold(
+          appBar: AppBar(title: const Text('Albums')),
+          body: const AlbumsTab(),
+        )),
+      ),
+    ];
+  }
+  Future<void> _loadStorage() async {
+    if (_storageAsked) return;
+    _storageAsked = true;
+    try {
+      final api = context.read<Session>().api;
+      final r = await Future.wait([
+        api.get('/api/system/storage'),
+        api.get('/api/gallery/summary').catchError((_) => <String, dynamic>{}),
+      ]);
+      if (!mounted) return;
+      final storage = (r[0] as Map).cast<String, dynamic>();
+      final mine = (storage['mine'] as Map?)?.cast<String, dynamic>() ?? const {};
+      setState(() {
+        _usedBytes = ((mine['bytes'] ?? storage['bytes'] ?? 0) as num).toInt();
+        // Only an admin is told what is left on the drive — see the comment on
+        // /api/system/storage. Everybody else gets the used figure alone, and
+        // the panel then shows no bar rather than a bar against a total it has
+        // invented.
+        final disk = (storage['disk'] as Map?)?.cast<String, dynamic>();
+        _freeBytes = ((disk?['free'] ?? 0) as num).toInt();
+        _counts = (r[1] as Map?)?.cast<String, dynamic>() ?? const {};
+        _storageLoading = false;
+        _storageStale = false;
+      });
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _storageLoading = false;
+          // Whatever was last read stays on screen, marked as last seen.
+          _storageStale = _usedBytes > 0;
+        });
+      }
+    }
+  }
+            // THE STORAGE PANEL AND WHAT IS BACKED UP, at the head of the grid.
+            // The owner asked for a storage-led gallery and approved a mock
+            // where the number leads and the photographs are below it. Putting
+            // them in the SCROLL rather than above it is what makes that
+
   @override
   void initState() {
     super.initState();
     load();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _loadStorage());
   }
 
   /// Public so the tab above can refresh this after a backup adds photos —
@@ -221,6 +371,20 @@ class CollectionsHomeState extends State<CollectionsHome> {
       child: ListView(
         padding: const EdgeInsets.only(bottom: 28),
         children: [
+          // What is on the computer, and what is backed up. These led the
+          // Photos tab until the app started opening on it; they belong with
+          // the library rather than in front of the photographs.
+          StorageHero(
+            usedBytes: _usedBytes,
+            freeBytes: _freeBytes,
+            caption: _heroCaption,
+            loading: _storageLoading,
+            unreachable: _storageStale,
+            onTap: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const StorageScreen())),
+          ),
+          BackedUpGrid(items: _backedUp(context)),
+
           // Above the albums, because a suggestion is a thing to decide and
           // the sections below are things to browse. It draws nothing when
           // there is nothing to offer.
