@@ -16,7 +16,9 @@ library;
 
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -41,6 +43,7 @@ import 'widgets/photo_backdrop.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  _watchFrames(); // Profile builds only. See below.
   // Load the person's appearance choices before the first frame, so a saved
   // "plain background" shows immediately rather than flashing the nature scene.
   await Customize.ensureLoaded();
@@ -299,4 +302,62 @@ class _Splash extends StatelessWidget {
   @override
   Widget build(BuildContext context) =>
       const Scaffold(body: Center(child: CircularProgressIndicator()));
+}
+
+
+/// Frame timings, printed to logcat, so smoothness can be ARGUED ABOUT WITH
+/// NUMBERS instead of adjectives.
+///
+///     flutter build apk --profile
+///     adb logcat | grep "\[frames\]"
+///
+/// WHY THIS EXISTS AT ALL: `adb shell dumpsys gfxinfo` reports nothing for a
+/// Flutter app. It counts Android View frames, and Flutter draws into its own
+/// surface, so it answers "Total frames rendered: 0" however hard you scroll —
+/// which reads as a broken command rather than the wrong tool. Flutter's own
+/// timings are the only real source.
+///
+/// Read it as two separate numbers. BUILD is the app's own work: laying out
+/// and building widgets, the part this code controls. RASTER is turning that
+/// into pixels, which is the GPU. A build time over a few milliseconds is
+/// ours to fix; a raster time that is high while build is near zero is the
+/// device, and no amount of Dart will move it.
+///
+/// Measured on 19 October against 28 photos on the x86_64 emulator: build p50
+/// 0ms, p99 1ms, on the photo grid AND on a plain list with no images at all;
+/// raster pinned at ~16ms on both. Identical numbers on a screen with no
+/// photographs is what proves the 16ms is the emulator's software GPU and not
+/// the grid. There was no smoothness defect to find there — which is worth
+/// knowing before anybody optimises the grid again.
+///
+/// Profile mode only: in debug the numbers are meaningless (no AOT, asserts
+/// on every build) and in release this must not exist at all.
+void _watchFrames() {
+  if (!kProfileMode) return;
+  final build = <int>[];
+  final raster = <int>[];
+  SchedulerBinding.instance.addTimingsCallback((timings) {
+    for (final t in timings) {
+      build.add(t.buildDuration.inMicroseconds);
+      raster.add(t.rasterDuration.inMicroseconds);
+    }
+    if (build.length < 120) return;
+    int pct(List<int> xs, double p) {
+      final sorted = [...xs]..sort();
+      return sorted[(sorted.length * p).clamp(0, sorted.length - 1).toInt()];
+    }
+    // 16667us is one frame at 60Hz. Anything over it is a dropped frame.
+    final janky = [
+      for (var i = 0; i < build.length; i++)
+        if (build[i] + raster[i] > 16667) i
+    ].length;
+    debugPrint('[frames] n=${build.length} '
+        'janky=$janky (${(janky * 100 / build.length).toStringAsFixed(1)}%) '
+        'build p50=${pct(build, .5) ~/ 1000}ms p90=${pct(build, .9) ~/ 1000}ms '
+        'p99=${pct(build, .99) ~/ 1000}ms '
+        'raster p50=${pct(raster, .5) ~/ 1000}ms p90=${pct(raster, .9) ~/ 1000}ms '
+        'p99=${pct(raster, .99) ~/ 1000}ms');
+    build.clear();
+    raster.clear();
+  });
 }

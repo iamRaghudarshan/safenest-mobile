@@ -52,8 +52,21 @@ class PhotoTile extends StatelessWidget {
   final bool selecting;
   final bool selected;
 
+  /// How many times a tile has been built, for the scroll-smoothness tests.
+  ///
+  /// A counter rather than a profiler because the number is the thing worth
+  /// defending: this is the hottest widget in the app — a few hundred of them
+  /// on screen while a finger drags across a selection — and "it feels fine on
+  /// my machine" is not a measurement anybody can re-run.
+  @visibleForTesting
+  static int debugBuilds = 0;
+
   @override
   Widget build(BuildContext context) {
+    assert(() {
+      debugBuilds++;
+      return true;
+    }());
     final session = context.read<Session>();
     final url = absoluteMedia(photo.thumbUrl, session.baseUrl ?? '');
 
