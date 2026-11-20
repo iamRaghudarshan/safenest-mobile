@@ -280,6 +280,16 @@ The tag is what builds. `.github/workflows/release.yml`:
   with a known error is worse than one that never ships.
 - The version comes from `$(cat VERSION)`, the build number from
   `github.run_number`.
+- **The Flutter version is PINNED in both jobs** (`flutter-version: "3.47.4"`,
+  matching the local SDK), and it must stay that way. `channel: stable` floats
+  to whatever Flutter has shipped by the time a run starts, which failed build
+  197 of a tree that had analyzed clean here minutes earlier: stable had moved
+  to 3.50.1, which deprecates `package:flutter/material.dart` in favour of
+  `package:material_ui`, so every file emitted a `deprecated_member_use` info
+  and `flutter analyze` exits non-zero on infos. Bump it deliberately,
+  together with the local SDK, and treat the `material_ui` migration as its
+  own piece of work rather than something to discover mid-release. AI BIT hit
+  the identical failure two days earlier and carries the same pin.
 
 `GITHUB_TOKEN` in the server's `backend/.env` is deliberately **Actions
 read-only** — it cannot dispatch workflows, and must not be widened. Releases
@@ -287,9 +297,17 @@ happen by pushing a tag.
 
 ### Known release facts
 
-- **Latest shipped: 1.52.1** (25 Aug 2026) — iOS on TestFlight, Android APK on
-  the website. It fixes the faces strip and album uploads from the phone; both
-  are written up in §10. 1.52.0 shipped with both defects and is superseded.
+- **Latest Android: 1.90.1, build 198** (20 November 2026) — published to
+  `releases/SafeNest-android.apk` and verified through `safenesthub.in`
+  (45,979,151 bytes). It makes the back button on a full photo visible: the
+  viewer's AppBar sets its own `iconTheme` and `titleTextStyle`, because a
+  non-null `AppBarTheme.iconTheme` beats a widget's `foregroundColor`, and a
+  gradient scrim under the chrome keeps white controls legible over a pale
+  photograph. **iOS is one version behind at 1.90.0** — the fix is pure
+  Flutter and applies there identically, so `v1.90.1` is worth tagging when
+  the macOS runner is worth spending.
+- 1.52.1 (25 Aug 2026) fixed the faces strip and album uploads from the phone;
+  both are written up in §10. 1.52.0 shipped with both defects.
 - Apple error **1064 "holiday"** on upload means Apple maintenance, not a
   revoked password. Check their status feed before touching credentials.
 - **Minimum iOS is 13.0.** From Spring 2027 Apple requires 15.0. A warning
