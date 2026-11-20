@@ -16,6 +16,7 @@
 library;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart'; // SystemUiOverlayStyle for the viewer
 import 'package:photo_view/photo_view.dart';
 import 'package:photo_view/photo_view_gallery.dart';
 import 'package:provider/provider.dart';
@@ -251,13 +252,54 @@ class _PhotoViewerState extends State<PhotoViewer> {
       extendBodyBehindAppBar: true,
       appBar: _chrome
           ? AppBar(
-              backgroundColor: Colors.black38,
-              foregroundColor: Colors.white,
+              // TRANSPARENT, with the scrim painted in the body below, so the
+              // gradient can fade out BELOW the toolbar instead of stopping
+              // dead at its edge. A flat bar ends in a visible horizontal line
+              // across the photograph.
+              backgroundColor: Colors.transparent,
               elevation: 0,
-              title: Text(
-                fmtDate(p.takenAt),
-                style: const TextStyle(fontSize: 15),
+              scrolledUnderElevation: 0,
+
+              // EVERY COLOUR HERE IS SET EXPLICITLY, AND THAT IS THE BUG FIX.
+              //
+              // Reported as "the back button is not visible properly", and it
+              // was invisible rather than faint. This bar used to say
+              // `foregroundColor: Colors.white` and nothing else, which looks
+              // like it should colour the back arrow and does not:
+              // AppBarTheme.iconTheme BEATS a widget's foregroundColor in
+              // Flutter's resolution order, and theme.dart sets iconTheme
+              // unconditionally for both skins. So on Classic the arrow came
+              // out `ink` — near-black — drawn over a photograph, and the date
+              // beside it the same, because AppBarTheme.titleTextStyle wins
+              // over foregroundColor in exactly the same way.
+              //
+              // The bottom action row never had this problem, which is the
+              // clearest evidence for the diagnosis: it hardcodes
+              // Colors.white on each Icon and Text, so it was legible the
+              // whole time while the one control that leaned on the theme was
+              // not. Do not "tidy" these back into foregroundColor.
+              iconTheme: const IconThemeData(color: Colors.white),
+              actionsIconTheme: const IconThemeData(color: Colors.white),
+              titleTextStyle: const TextStyle(
+                color: Colors.white,
+                fontSize: 15,
+                fontWeight: FontWeight.w600,
               ),
+
+              // The viewer is black whatever the app's theme is, so the clock
+              // and battery must be light. Classic leaves this null in
+              // theme.dart, which lets Flutter derive it from the bar's
+              // background — and a transparent background is not something it
+              // can derive anything useful from.
+              systemOverlayStyle: SystemUiOverlayStyle.light,
+
+              // Vivid gives app bars a rounded bottom in theme.dart. Over a
+              // photograph that would clip two notches out of the scrim, so
+              // this bar opts out rather than inheriting it.
+              shape: const RoundedRectangleBorder(
+                  borderRadius: BorderRadius.zero),
+
+              title: Text(fmtDate(p.takenAt)),
             )
           : null,
       body: Stack(
@@ -300,6 +342,40 @@ class _PhotoViewerState extends State<PhotoViewer> {
               );
             },
           ),
+          // THE TOP SCRIM — what makes white chrome readable on a WHITE photo.
+          //
+          // White icons alone are not enough: a scanned document, a snow or sky
+          // shot, or a bright selfie leaves a white arrow on near-white pixels.
+          // The old flat `Colors.black38` bar was too weak to help, being only
+          // a light tint. A gradient is what Google Photos uses and it is the
+          // right shape for the job — strongest behind the arrow and the date,
+          // gone by the time it clears the toolbar, so it darkens the chrome
+          // without putting a grey band across the picture.
+          //
+          // It lives in the body rather than the bar's flexibleSpace so it can
+          // extend PAST the bar and fade out; in flexibleSpace it would be
+          // clipped to the bar and end in a hard line.
+          if (_chrome)
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              height: MediaQuery.of(context).padding.top + kToolbarHeight + 28,
+              child: const IgnorePointer(
+                // Taps belong to the photo underneath — this is paint, not a
+                // surface. Without this, the top of every photograph stops
+                // responding to the tap that hides the chrome.
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [Color(0x8C000000), Color(0x00000000)],
+                    ),
+                  ),
+                ),
+              ),
+            ),
           if (_chrome)
             Positioned(
               left: 0,
