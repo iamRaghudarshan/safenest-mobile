@@ -303,9 +303,16 @@ happen by pushing a tag.
   viewer's AppBar sets its own `iconTheme` and `titleTextStyle`, because a
   non-null `AppBarTheme.iconTheme` beats a widget's `foregroundColor`, and a
   gradient scrim under the chrome keeps white controls legible over a pale
-  photograph. **iOS is one version behind at 1.90.0** — the fix is pure
-  Flutter and applies there identically, so `v1.90.1` is worth tagging when
-  the macOS runner is worth spending.
+  photograph.
+- **Latest iOS: 1.90.1, build 199** (21 November 2026) — same code, on
+  TestFlight, `UPLOAD SUCCEEDED with no errors`.
+- **A deadline to plan for, not to react to:** every upload now warns that the
+  app is built with the iOS 26.5 SDK and that from **April 2027** Apple
+  requires the iOS 27 SDK or later. That is an Xcode bump in CI, and it will
+  almost certainly arrive bundled with the `material_ui` migration the pinned
+  Flutter version defers — treat the two as one piece of work rather than
+  discovering either mid-release. Distinct from the minimum-iOS line below,
+  which is about the deployment target rather than the build SDK.
 - 1.52.1 (25 Aug 2026) fixed the faces strip and album uploads from the phone;
   both are written up in §10. 1.52.0 shipped with both defects.
 - Apple error **1064 "holiday"** on upload means Apple maintenance, not a
